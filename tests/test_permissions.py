@@ -1,4 +1,9 @@
-"""Tests for the five-layer permission system."""
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
+
+"""五层权限系统的测试。"""
 from __future__ import annotations
 
 import asyncio
@@ -39,7 +44,7 @@ from mewcode.tools import create_default_registry
 from mewcode.tools.base import StreamEnd, StreamEvent, TextDelta, ToolCallComplete
 
 # ===========================================================================
-# Layer 1: DangerousCommandDetector
+# 第一层：DangerousCommandDetector（危险命令检测器）
 # ===========================================================================
 
 class TestDangerousCommandDetector:
@@ -100,7 +105,7 @@ class TestDangerousCommandDetector:
         assert not hit
 
 # ===========================================================================
-# Layer 2: PathSandbox
+# 第二层：PathSandbox（路径沙箱）
 # ===========================================================================
 
 class TestPathSandbox:
@@ -153,8 +158,13 @@ class TestPathSandbox:
         ok, _ = self.sandbox.check(str(sub / ".." / "file.txt"))
         assert ok
 
+    def test_deeply_nested_new_dirs(self) -> None:
+        deep = self.tmpdir / "a" / "b" / "c" / "file.txt"
+        ok, _ = self.sandbox.check(str(deep))
+        assert ok
+
 # ===========================================================================
-# Layer 3: RuleEngine
+# 第三层：RuleEngine（规则引擎）
 # ===========================================================================
 
 class TestRuleEngine:
@@ -240,7 +250,7 @@ class TestRuleEngine:
         assert engine.evaluate("Bash", "git commit -m test") == "allow"
 
 # ===========================================================================
-# Layer 4: PermissionMode
+# 第四层：PermissionMode（权限模式）
 # ===========================================================================
 
 class TestPermissionMode:
@@ -270,7 +280,7 @@ class TestPermissionMode:
         assert mode_decide(PermissionMode.CUSTOM, "command") == "ask"
 
 # ===========================================================================
-# Layer 5 (integrated): PermissionChecker — five layers combined
+# 第五层（综合）：PermissionChecker —— 五层协同
 # ===========================================================================
 
 class TestPermissionChecker:
@@ -356,7 +366,7 @@ class TestPermissionChecker:
         assert d.effect == "allow"
 
 # ===========================================================================
-# Integration: Agent + Permission system (end-to-end)
+# 集成测试：Agent + 权限系统（端到端）
 # ===========================================================================
 
 class MockLLMClient(LLMClient):
@@ -406,16 +416,16 @@ def _collect(events: list) -> dict[str, list]:
 
 @pytest.mark.asyncio
 async def test_e2e_dangerous_command_blocked_loop_continues():
-    """Dangerous command is blocked, error returned to model, loop continues."""
+    """危险命令被拦截，错误返回给模型，循环继续。"""
     tmpdir = Path(tempfile.mkdtemp())
     client = MockLLMClient([
-        # Turn 1: model tries rm -rf /
+        # 第 1 轮：模型尝试执行 rm -rf /
         [
             TextDelta("Let me clean up."),
             ToolCallComplete("t1", "Bash", {"command": "rm -rf /"}),
             StreamEnd("end_turn", input_tokens=10, output_tokens=20),
         ],
-        # Turn 2: model adapts
+        # 第 2 轮：模型调整策略
         [
             TextDelta("That was blocked, let me try something else."),
             StreamEnd("end_turn", input_tokens=30, output_tokens=15),
@@ -445,7 +455,7 @@ async def test_e2e_dangerous_command_blocked_loop_continues():
 
 @pytest.mark.asyncio
 async def test_e2e_sandbox_blocks_outside_path():
-    """File read outside sandbox is blocked."""
+    """读取沙箱外的文件会被拦截。"""
     tmpdir = Path(tempfile.mkdtemp())
     client = MockLLMClient([
         [
@@ -479,7 +489,7 @@ async def test_e2e_sandbox_blocks_outside_path():
 
 @pytest.mark.asyncio
 async def test_e2e_rule_allows_git():
-    """A rule allowing git commands lets them pass without HITL."""
+    """放行 git 命令的规则可以让其无需人工介入（HITL）直接通过。"""
     tmpdir = Path(tempfile.mkdtemp())
     rules_file = tmpdir / ".mewcode" / "permissions.yaml"
     rules_file.parent.mkdir(parents=True)
@@ -517,7 +527,7 @@ async def test_e2e_rule_allows_git():
 
 @pytest.mark.asyncio
 async def test_e2e_default_mode_write_triggers_ask():
-    """In default mode, write tools produce ASK → PermissionRequest event."""
+    """在默认模式下，写类工具会产生 ASK 决策 → 触发 PermissionRequest 事件。"""
     tmpdir = Path(tempfile.mkdtemp())
     client = MockLLMClient([
         [
@@ -559,7 +569,7 @@ async def test_e2e_default_mode_write_triggers_ask():
 
 @pytest.mark.asyncio
 async def test_e2e_bypass_mode_allows_all():
-    """Bypass mode allows everything without asking."""
+    """Bypass 模式无需询问，放行一切操作。"""
     tmpdir = Path(tempfile.mkdtemp())
     test_file = tmpdir / "existing.txt"
     test_file.write_text("original")
@@ -600,7 +610,7 @@ async def test_e2e_bypass_mode_allows_all():
 
 @pytest.mark.asyncio
 async def test_e2e_user_denies_operation():
-    """User denies via HITL, model receives error and adapts."""
+    """用户通过人工介入（HITL）拒绝操作，模型收到错误并调整策略。"""
     tmpdir = Path(tempfile.mkdtemp())
     client = MockLLMClient([
         [

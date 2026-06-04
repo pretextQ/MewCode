@@ -1,4 +1,9 @@
-"""Tests for SubAgent system (Chapter 12)."""
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
+
+"""SubAgent 系统的测试（第 12 章）。"""
 
 from __future__ import annotations
 
@@ -30,7 +35,7 @@ from mewcode.tools import ToolRegistry
 from mewcode.tools.base import Tool, ToolResult
 
 # =====================================================================
-# Helpers
+# 辅助函数
 # =====================================================================
 
 class DummyTool(Tool):
@@ -68,7 +73,7 @@ def make_agent_md(
     return f"---\n{frontmatter}\n---\n\n{body}"
 
 # =====================================================================
-# 1. Agent Definition Parsing
+# 1. Agent 定义解析
 # =====================================================================
 
 class TestAgentParser:
@@ -180,7 +185,7 @@ class TestAgentParser:
             assert agent_def.model == model
 
 # =====================================================================
-# 2. Agent Loader
+# 2. Agent 加载器
 # =====================================================================
 
 class TestAgentLoader:
@@ -266,7 +271,7 @@ class TestAgentLoader:
         assert "bad" not in agents
 
 # =====================================================================
-# 3. Tool Filtering
+# 3. 工具过滤
 # =====================================================================
 
 class TestToolFilter:
@@ -344,10 +349,10 @@ class TestToolFilter:
         assert "ReadFile" in names
 
     def test_builtin_no_custom_restrictions(self):
-        # EnterPlanMode is now in ALL_AGENT_DISALLOWED (matches Go),
-        # so use a tool that's only in CUSTOM but not ALL to verify
-        # builtins skip the custom layer. Since Go clones ALL into
-        # CUSTOM, we just verify builtins still get normal tools.
+        # EnterPlanMode 现在已归入 ALL_AGENT_DISALLOWED（与 Go 版本保持一致），
+        # 所以应当用一个只在 CUSTOM 而不在 ALL 中的工具，来验证内置 agent
+        # 会跳过 custom 这一层。由于 Go 版本会把 ALL 克隆进 CUSTOM，
+        # 这里只验证内置 agent 仍然能拿到正常的工具。
         reg = make_registry("ReadFile", "Bash", "Grep")
         definition = AgentDef(
             agent_type="test", when_to_use="test", source="builtin"
@@ -358,7 +363,7 @@ class TestToolFilter:
         assert "Bash" in names
 
 # =====================================================================
-# 4. Fork Mode
+# 4. Fork 模式
 # =====================================================================
 
 class TestForkMode:
@@ -370,7 +375,7 @@ class TestForkMode:
 
         forked = build_forked_messages(conv, "Write tests")
         messages = forked.history
-        assert len(messages) == 4  # 3 original + 1 fork task
+        assert len(messages) == 4  # 3 条原始消息 + 1 条 fork 任务
         assert FORK_BOILERPLATE_TAG in messages[-1].content
         assert "Write tests" in messages[-1].content
 
@@ -396,7 +401,7 @@ class TestForkMode:
         )
 
         forked = build_forked_messages(conv, "task")
-        # Should have: user, assistant+tool_use, placeholder tool_result, fork task
+        # 应当包含：user、assistant+tool_use、占位的 tool_result、fork 任务
         assert len(forked.history) == 4
         placeholder = forked.history[2]
         assert placeholder.role == "user"
@@ -417,10 +422,10 @@ class TestForkMode:
         forked = build_forked_messages(conv, "task")
         forked.add_user_message("extra")
         assert len(conv.history) == 1
-        assert len(forked.history) == 3  # original + fork task + extra
+        assert len(forked.history) == 3  # 原始消息 + fork 任务 + 额外消息
 
 # =====================================================================
-# 5. Trace Manager
+# 5. Trace 管理器
 # =====================================================================
 
 class TestTraceManager:
@@ -490,7 +495,7 @@ class TestTraceManager:
         tm.complete("nope", "failed")
 
 # =====================================================================
-# 6. Task Manager
+# 6. 任务管理器
 # =====================================================================
 
 class TestTaskManager:
@@ -500,6 +505,11 @@ class TestTaskManager:
         agent.total_input_tokens = 100
         agent.total_output_tokens = 50
         agent.run_to_completion = AsyncMock(return_value="task done")
+        # 普通（非团队）subagent：team_name 为空，否则 _run_background 会进入
+        # 团队空闲循环（每秒一轮、最多 60 次），后台任务永远走不到 finally 的
+        # notify_queue.put，poll_completed 便收不到完成通知。
+        agent.team_name = ""
+        agent._team_manager = None
         return agent
 
     @pytest.mark.asyncio
@@ -513,7 +523,7 @@ class TestTaskManager:
         assert bg.name == "test-task"
         assert bg.status == "running"
 
-        # Wait for completion
+        # 等待任务完成
         await asyncio.sleep(0.1)
         bg = tm.get(task_id)
         assert bg.status == "completed"
@@ -529,7 +539,7 @@ class TestTaskManager:
         assert len(completed) == 1
         assert completed[0].id == task_id
 
-        # Second poll returns empty
+        # 第二次轮询返回空
         assert tm.poll_completed() == []
 
     @pytest.mark.asyncio
@@ -573,14 +583,14 @@ class TestTaskManager:
         assert len(tasks) == 2
         names = {t.name for t in tasks}
         assert names == {"t1", "t2"}
-        await asyncio.sleep(0.1)  # let background tasks complete
+        await asyncio.sleep(0.1)  # 让后台任务跑完
 
     def test_cancel_nonexistent(self):
         tm = TaskManager()
         assert tm.cancel("nope") is False
 
 # =====================================================================
-# 7. Notification
+# 7. 通知
 # =====================================================================
 
 class TestNotification:
@@ -637,7 +647,7 @@ class TestNotification:
         assert "t2" in conv.history[1].content
 
 # =====================================================================
-# 8. Config
+# 8. 配置
 # =====================================================================
 
 class TestConfig:
@@ -672,7 +682,7 @@ class TestConfig:
         assert config.enable_verification_agent is True
 
 # =====================================================================
-# 9. Permission Mode
+# 9. 权限模式
 # =====================================================================
 
 class TestPermissionMode:
@@ -684,7 +694,7 @@ class TestPermissionMode:
         assert mode_decide(PermissionMode.DONT_ASK, "command") == "allow"
 
 # =====================================================================
-# 10. AgentTool Parameters
+# 10. AgentTool 参数
 # =====================================================================
 
 class TestAgentToolParams:
@@ -713,7 +723,7 @@ class TestAgentToolParams:
         assert params.isolation == "worktree"
 
 # =====================================================================
-# 11. Agent (run_to_completion basics, agent_id, trace_id)
+# 11. Agent（run_to_completion 基础功能、agent_id、trace_id）
 # =====================================================================
 
 class TestAgentExtensions:

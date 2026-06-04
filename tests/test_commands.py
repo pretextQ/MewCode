@@ -1,4 +1,9 @@
-"""Tests for Slash Command framework — registry, parser, completion, handlers."""
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
+
+"""Slash Command 框架测试——registry、parser、补全、handler。"""
 from __future__ import annotations
 
 import asyncio
@@ -17,7 +22,7 @@ from mewcode.commands.registry import (
 )
 
 # ---------------------------------------------------------------------------
-# Fixtures
+# 测试夹具（Fixtures）
 # ---------------------------------------------------------------------------
 
 def _make_command(
@@ -198,30 +203,35 @@ class TestComplete:
         registry.register_sync(_make_command("secret", hidden=True))
         return registry
 
+    @staticmethod
+    def _values(matches: list[tuple[str, str]]) -> list[str]:
+        return [v for _, v in matches]
+
     def test_empty_prefix(self) -> None:
         registry = self._build_registry()
         matches = complete(registry, "/")
-        assert "/help" in matches
-        assert "/compact" in matches
-        assert "/secret" not in matches
+        values = self._values(matches)
+        assert "/help" in values
+        assert "/compact" in values
+        assert "/secret" not in values
 
     def test_prefix_match(self) -> None:
         registry = self._build_registry()
         matches = complete(registry, "/com")
-        assert matches == ["/compact"]
+        assert self._values(matches) == ["/compact"]
 
     def test_multiple_matches(self) -> None:
         registry = self._build_registry()
         matches = complete(registry, "/s")
-        assert "/session" in matches
-        assert "/status" in matches
-        assert "/s" in matches
+        values = self._values(matches)
+        assert "/session" in values
+        assert "/status" in values
 
     def test_alias_match(self) -> None:
         registry = self._build_registry()
         matches = complete(registry, "/h")
-        assert "/h" in matches
-        assert "/help" in matches
+        values = self._values(matches)
+        assert "/help" in values
 
     def test_no_match(self) -> None:
         registry = self._build_registry()
@@ -234,7 +244,7 @@ class TestComplete:
         assert matches == []
 
 # ---------------------------------------------------------------------------
-# Handler tests
+# Handler 测试
 # ---------------------------------------------------------------------------
 
 class TestHelpHandler:
@@ -442,11 +452,11 @@ class TestMemoryHandler:
         assert "未初始化" in ui.messages[0]
 
 # ---------------------------------------------------------------------------
-# Integration: register_all_commands
+# 集成测试：register_all_commands
 # ---------------------------------------------------------------------------
 
 class TestRegisterAllCommands:
-    def test_all_10_commands_registered(self) -> None:
+    def test_all_commands_registered(self) -> None:
         from mewcode.commands.handlers import register_all_commands
 
         registry = CommandRegistry()
@@ -455,7 +465,8 @@ class TestRegisterAllCommands:
         names = {c.name for c in cmds}
         expected = {
             "help", "compact", "clear", "plan", "do",
-            "session", "memory", "permission", "status", "skill",
+            "session", "mcp", "memory", "permission",
+            "rewind", "status", "skill",
         }
         assert names == expected
 

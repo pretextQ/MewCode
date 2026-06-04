@@ -1,4 +1,9 @@
-"""Tests for the Deferred Loading / ToolSearch mechanism."""
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
+
+"""针对延迟加载（Deferred Loading）/ ToolSearch 机制的测试。"""
 
 from __future__ import annotations
 
@@ -12,7 +17,7 @@ from mewcode.tools.base import Tool, ToolResult
 from mewcode.tools.impl.tool_search import ToolSearchTool
 
 # ---------------------------------------------------------------------------
-# Helpers
+# 辅助工具
 # ---------------------------------------------------------------------------
 
 class _DummyParams(BaseModel):
@@ -56,18 +61,18 @@ def _make_registry() -> ToolRegistry:
     return reg
 
 # ---------------------------------------------------------------------------
-# Tests
+# 测试用例
 # ---------------------------------------------------------------------------
 
 def test_should_defer_default_false():
-    """Tool base class defaults should_defer to False."""
+    """Tool 基类的 should_defer 默认值应为 False。"""
     tool = _NormalTool()
     assert tool.should_defer is False
 
 def test_mcp_tool_deferred():
-    """MCPToolWrapper sets should_defer = True on construction."""
-    # We avoid importing mcp types here; instead check the attribute
-    # on a mock-like object that mimics what MCPToolWrapper.__init__ does.
+    """MCPToolWrapper 在构造时会把 should_defer 设为 True。"""
+    # 这里避免导入 mcp 相关类型；改为在一个模拟对象上检查该属性，
+    # 该对象模仿了 MCPToolWrapper.__init__ 的行为。
     from unittest.mock import MagicMock
 
     mock_tool_def = MagicMock()
@@ -87,7 +92,7 @@ def test_mcp_tool_deferred():
     assert wrapper.should_defer is True
 
 def test_deferred_not_in_schemas():
-    """Deferred tools that haven't been discovered should NOT appear in get_all_schemas."""
+    """尚未被发现的延迟工具不应出现在 get_all_schemas 的结果中。"""
     reg = _make_registry()
     schemas = reg.get_all_schemas()
     names = {s["name"] for s in schemas}
@@ -97,7 +102,7 @@ def test_deferred_not_in_schemas():
 
 @pytest.mark.asyncio
 async def test_tool_search_marks_discovered():
-    """ToolSearchTool.execute should mark tools as discovered."""
+    """ToolSearchTool.execute 应将工具标记为已发现。"""
     reg = _make_registry()
     search = ToolSearchTool(reg, protocol="anthropic")
     reg.register(search)
@@ -113,31 +118,31 @@ async def test_tool_search_marks_discovered():
     assert not reg.is_discovered("DeferredBeta")
 
 def test_discovered_in_schemas():
-    """Once a deferred tool is discovered, it should appear in get_all_schemas."""
+    """延迟工具一旦被发现，就应出现在 get_all_schemas 的结果中。"""
     reg = _make_registry()
-    # Initially not in schemas
+    # 初始时不在 schemas 中
     schemas_before = reg.get_all_schemas()
     names_before = {s["name"] for s in schemas_before}
     assert "DeferredAlpha" not in names_before
 
-    # Mark as discovered
+    # 标记为已发现
     reg.mark_discovered("DeferredAlpha")
 
     schemas_after = reg.get_all_schemas()
     names_after = {s["name"] for s in schemas_after}
     assert "DeferredAlpha" in names_after
-    # DeferredBeta still not discovered
+    # DeferredBeta 仍未被发现
     assert "DeferredBeta" not in names_after
 
 def test_get_deferred_tool_names():
-    """get_deferred_tool_names returns only non-discovered deferred tools."""
+    """get_deferred_tool_names 只返回尚未被发现的延迟工具。"""
     reg = _make_registry()
     deferred = reg.get_deferred_tool_names()
     assert "DeferredAlpha" in deferred
     assert "DeferredBeta" in deferred
     assert "NormalTool" not in deferred
 
-    # After discovering one
+    # 发现其中一个之后
     reg.mark_discovered("DeferredAlpha")
     deferred2 = reg.get_deferred_tool_names()
     assert "DeferredAlpha" not in deferred2
@@ -145,7 +150,7 @@ def test_get_deferred_tool_names():
 
 @pytest.mark.asyncio
 async def test_tool_search_keyword():
-    """ToolSearchTool keyword search returns matching deferred tools."""
+    """ToolSearchTool 的关键词搜索会返回匹配的延迟工具。"""
     reg = _make_registry()
     search = ToolSearchTool(reg, protocol="anthropic")
     reg.register(search)
@@ -161,7 +166,7 @@ async def test_tool_search_keyword():
 
 @pytest.mark.asyncio
 async def test_tool_search_no_match():
-    """ToolSearchTool returns available names when no match is found."""
+    """当没有匹配项时，ToolSearchTool 会返回可用的工具名称列表。"""
     reg = _make_registry()
     search = ToolSearchTool(reg, protocol="anthropic")
     reg.register(search)
@@ -177,7 +182,7 @@ async def test_tool_search_no_match():
 
 @pytest.mark.asyncio
 async def test_tool_search_select_multiple():
-    """select: syntax can load multiple tools at once."""
+    """select: 语法可以一次性加载多个工具。"""
     reg = _make_registry()
     search = ToolSearchTool(reg, protocol="anthropic")
     reg.register(search)
@@ -193,11 +198,11 @@ async def test_tool_search_select_multiple():
     assert reg.is_discovered("DeferredBeta")
 
 # ---------------------------------------------------------------------------
-# Deferred loading: token savings & end-to-end discovery
+# 延迟加载：token 节省量与端到端发现流程
 # ---------------------------------------------------------------------------
 
 class _HeavyParams(BaseModel):
-    """A params model with many properties to simulate a realistic schema."""
+    """一个包含大量属性的参数模型，用于模拟真实场景下的 schema。"""
 
     alpha: str = ""
     bravo: str = ""
@@ -211,7 +216,7 @@ class _HeavyParams(BaseModel):
     juliet: bool = True
 
 def _make_deferred_tool(index: int) -> Tool:
-    """Dynamically create a deferred tool class with a unique name."""
+    """动态创建一个具有唯一名称的延迟工具类。"""
 
     class _T(Tool):
         name = f"DeferredHeavy_{index:03d}"
@@ -230,12 +235,12 @@ def _make_deferred_tool(index: int) -> Tool:
     return _T()
 
 def test_deferred_token_savings():
-    """Deferred loading should save >= 90% of schema tokens for 50 heavy tools."""
+    """对于 50 个重型工具，延迟加载应能节省至少 90% 的 schema token。"""
     import json
 
     reg = ToolRegistry()
 
-    # 2 normal tools
+    # 2 个普通工具
     reg.register(_NormalTool())
 
     class _Normal2(Tool):
@@ -250,22 +255,22 @@ def test_deferred_token_savings():
 
     reg.register(_Normal2())
 
-    # 50 deferred tools with realistic schemas
+    # 50 个带有真实 schema 的延迟工具
     deferred_names: list[str] = []
     for i in range(50):
         tool = _make_deferred_tool(i)
         reg.register(tool)
         deferred_names.append(tool.name)
 
-    # Measure size with deferred tools hidden
+    # 测量延迟工具被隐藏时的大小
     schemas_deferred = reg.get_all_schemas("anthropic")
     size_deferred = len(json.dumps(schemas_deferred))
 
-    # Discover all deferred tools
+    # 发现全部延迟工具
     for name in deferred_names:
         reg.mark_discovered(name)
 
-    # Measure size with all tools visible
+    # 测量所有工具都可见时的大小
     schemas_all = reg.get_all_schemas("anthropic")
     size_all = len(json.dumps(schemas_all))
 
@@ -280,29 +285,29 @@ def test_deferred_token_savings():
     )
 
 def test_deferred_end_to_end_discovery():
-    """End-to-end: deferred tools start hidden, appear after discovery."""
+    """端到端测试：延迟工具初始处于隐藏状态，被发现后才出现。"""
     reg = ToolRegistry()
 
-    # 1 normal tool
+    # 1 个普通工具
     reg.register(_NormalTool())
 
-    # 2 deferred tools
+    # 2 个延迟工具
     reg.register(_DeferredTool())   # DeferredAlpha
     reg.register(_DeferredBeta())   # DeferredBeta
 
-    # --- Initially: deferred tools hidden from schemas ---
+    # --- 初始时：延迟工具不出现在 schemas 中 ---
     schemas = reg.get_all_schemas("anthropic")
     schema_names = {s["name"] for s in schemas}
     assert "NormalTool" in schema_names
     assert "DeferredAlpha" not in schema_names
     assert "DeferredBeta" not in schema_names
 
-    # --- get_deferred_tool_names lists both ---
+    # --- get_deferred_tool_names 同时列出两者 ---
     deferred = reg.get_deferred_tool_names()
     assert "DeferredAlpha" in deferred
     assert "DeferredBeta" in deferred
 
-    # --- Discover one ---
+    # --- 发现其中一个 ---
     reg.mark_discovered("DeferredAlpha")
 
     schemas2 = reg.get_all_schemas("anthropic")
@@ -310,7 +315,7 @@ def test_deferred_end_to_end_discovery():
     assert "DeferredAlpha" in schema_names2
     assert "DeferredBeta" not in schema_names2
 
-    # --- get_deferred_tool_names now returns only the other ---
+    # --- 此时 get_deferred_tool_names 只返回另一个 ---
     deferred2 = reg.get_deferred_tool_names()
     assert "DeferredAlpha" not in deferred2
     assert "DeferredBeta" in deferred2

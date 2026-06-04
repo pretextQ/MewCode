@@ -1,3 +1,8 @@
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -9,6 +14,7 @@ from mewcode.tools.base import Tool, ToolResult
 
 if TYPE_CHECKING:
     from mewcode.cache import FileCache
+    from mewcode.tools.file_state_cache import FileStateCache
 
 
 class Params(BaseModel):
@@ -25,8 +31,9 @@ class ReadFile(Tool):
     is_concurrency_safe = True
 
 
-    def __init__(self, file_cache: FileCache | None = None) -> None:
+    def __init__(self, file_cache: FileCache | None = None, file_state_cache: FileStateCache | None = None) -> None:
         self._cache = file_cache
+        self._state_cache = file_state_cache
 
 
     async def execute(self, params: Params) -> ToolResult:
@@ -46,6 +53,13 @@ class ReadFile(Tool):
                     self._cache.put(resolved, text)
         except Exception as e:
             return ToolResult(output=f"Error reading file: {e}", is_error=True)
+
+        if self._state_cache:
+            try:
+                mtime_ns = path.stat().st_mtime_ns
+                self._state_cache.record(resolved, text, mtime_ns)
+            except OSError:
+                pass
 
         lines = text.splitlines()
         selected = lines[params.offset : params.offset + params.limit]

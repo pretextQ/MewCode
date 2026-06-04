@@ -1,3 +1,7 @@
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
 from __future__ import annotations
 
 import os
@@ -13,6 +17,7 @@ from .validator import (
     VALID_PERMISSION_MODES,
     VALID_PROTOCOLS,
     VALID_TEAMMATE_MODES,
+    lookup_model_context_window,
     validate_config_structure,
 )
 
@@ -34,8 +39,14 @@ class ProviderConfig:
     model: str
     api_key: str = ""
     thinking: bool = False
-    context_window: int = DEFAULT_CONTEXT_WINDOW
+    # 0 表示"未设置" — get_context_window() 通过四层 fallback 解析真实窗口大小。
+    # 正数表示配置文件里显式指定的覆盖值。
+    context_window: int = 0
     max_output_tokens: int = 0
+    # 运行时 cache，存放从 provider 的 /v1/models 端点自动拉取的 context window
+    # （get_context_window 的第 2 层）。通过 set_fetched_context_window() 写入一次；
+    # 0 表示"尚未拉取"。不会持久化。
+    _fetched_context_window: int = field(default=0, repr=False)
 
     def resolve_api_key(self) -> str:
         if self.api_key:
@@ -43,6 +54,35 @@ class ProviderConfig:
         env_var = _ENV_KEY_MAP.get(self.protocol, "")
         return os.environ.get(env_var, "")
 
+    def set_fetched_context_window(self, window: int) -> None:
+        """记录从 provider 自动拉取到的 context window（第 2 层）。
+
+        非正数会被忽略，这样一次失败的拉取就不会污染 cache。在解析
+        context window 时，每个 provider 只会调用一次。
+        """
+        if window > 0:
+            self._fetched_context_window = window
+
+    def get_context_window(self) -> int:
+        """通过四层 fallback 解析模型的 context window，按优先级从高到低：
+
+          1. 配置文件提供的 context_window（> 0）——显式覆盖，永远优先。
+          2. 从 provider 的 /v1/models 端点自动拉取并通过 set_fetched_context_window
+             缓存的值（只有 anthropic 协议的 provider 才会设置它；拉取失败或缺失时
+             保持为 0 并跳过）。
+          3. 内置的「模型名 -> window」映射表（按子串匹配）。
+          4. 保守的默认值（claude -> 200000，其他 -> 128000）。
+        """
+        if self.context_window > 0:
+            return self.context_window
+        if self._fetched_context_window > 0:
+            return self._fetched_context_window
+        window = lookup_model_context_window(self.model)
+        if window > 0:
+            return window
+        if "claude" in self.model.lower():
+            return DEFAULT_CONTEXT_WINDOW
+        return 128_000
 
     def get_max_output_tokens(self) -> int:
         if self.max_output_tokens > 0:

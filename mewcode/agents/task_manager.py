@@ -1,3 +1,7 @@
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
 from __future__ import annotations
 
 import asyncio
@@ -83,6 +87,37 @@ class TaskManager:
                 result = await bg.agent.run_to_completion(bg.task)
             bg.result = result
             bg.status = "completed"
+
+            if bg.agent.team_name and bg.agent._team_manager:
+                mailbox = bg.agent._team_manager.get_mailbox(bg.agent.team_name)
+                if mailbox:
+                    from mewcode.teams.mailbox import create_message
+                    msg = create_message(
+                        from_agent=bg.name,
+                        to_agent="lead",
+                        content=f"[idle] {bg.name}: completed initial task",
+                        summary=f"{bg.name} idle",
+                    )
+                    mailbox.write("lead", msg)
+
+                    for _ in range(60):
+                        await asyncio.sleep(1)
+                        msgs = mailbox.consume(bg.agent.agent_id)
+                        if not msgs:
+                            continue
+                        prompt = "\n\n".join(
+                            f"[Message from {m.from_agent}] {m.content}" for m in msgs
+                        )
+                        result = await bg.agent.run_to_completion(prompt)
+                        bg.result = result
+                        msg = create_message(
+                            from_agent=bg.name,
+                            to_agent="lead",
+                            content=f"[idle] {bg.name}: completed follow-up",
+                            summary=f"{bg.name} idle",
+                        )
+                        mailbox.write("lead", msg)
+
         except asyncio.CancelledError:
             bg.status = "cancelled"
             bg.result = "Task was cancelled"

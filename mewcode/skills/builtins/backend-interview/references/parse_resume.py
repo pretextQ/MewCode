@@ -1,4 +1,9 @@
-"""Parse a resume file and extract structured information."""
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
+
+"""解析简历文件并提取结构化信息。"""
 from __future__ import annotations
 
 import re

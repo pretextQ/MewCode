@@ -1,9 +1,13 @@
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
 from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from mewcode.tools.base import Tool, ToolResult
 
@@ -25,7 +29,16 @@ class AgentToolParams(BaseModel):
     run_in_background: bool = False
     name: str | None = None
     isolation: str | None = None
-    team_name: str | None = None
+    team_name: str | None = Field(
+        default=None,
+        description=(
+            "REQUIRED when creating team members. Spawns the agent as a long-running "
+            "teammate under this team (created via TeamCreate). Unlike regular sub-agents, "
+            "team members run in their own terminal, persist after the lead returns, and "
+            "communicate with each other via SendMessage. Without team_name the agent "
+            "runs as a one-shot sub-agent that blocks and returns inline."
+        ),
+    )
 
 
 PERMISSION_MODE_MAP = {
@@ -151,21 +164,21 @@ class AgentTool(Tool):
                 source="builtin",
             )
 
-        # Select LLM client
+        # 选择 LLM 客户端
         client = self._select_llm(p, definition)
 
-        # Determine background mode
+        # 判断是否后台运行
         is_background = p.run_in_background or definition.background
         if self._enable_fork:
             is_background = True
 
-        # Filter tools (use full registry if coordinator mode narrowed it)
+        # 过滤工具（coordinator 模式可能缩减了注册表，这里用完整注册表）
         _base_registry = getattr(self._parent_agent, '_full_registry', None) or self._parent_agent.registry
         filtered_registry = resolve_agent_tools(
             _base_registry, definition, is_background
         )
 
-        # Create permission checker for sub-agent
+        # 为子 agent 创建权限检查器
         pm_str = definition.permission_mode
         pm_enum = getattr(
             PermissionMode,
@@ -179,7 +192,7 @@ class AgentTool(Tool):
             mode=pm_enum,
         )
 
-        # Create sub-agent
+        # 创建子 agent
         sub_agent = AgentClass(
             client=client,
             registry=filtered_registry,
@@ -194,16 +207,15 @@ class AgentTool(Tool):
         sub_agent.parent_id = self._parent_agent.agent_id
         sub_agent.trace_id = self._parent_agent.trace_id or self._parent_agent.agent_id
 
-        # Fork inherits parent's replacement state so the child makes the same
-        # decisions on tool_use_ids it shares with the parent — necessary to keep
-        # the shared prompt-cache prefix byte-identical across parent/child.
+        # fork 子 agent 继承父 agent 的替换状态，确保共享的 tool_use_id 做出一致的
+        # 决策——这样父子共享的 prompt cache 前缀才能保持字节级一致
         if p.subagent_type is None:
             from mewcode.context import clone_replacement_state
             sub_agent.replacement_state = clone_replacement_state(
                 self._parent_agent.replacement_state
             )
 
-        # Register trace
+        # 注册追踪节点
         trace_node = self._trace_manager.create(
             agent_type=definition.agent_type,
             parent_id=self._parent_agent.agent_id,
@@ -232,7 +244,7 @@ class AgentTool(Tool):
                 f"Do NOT wait, sleep, or poll. Report the task ID to the user and move on.",
             )
 
-        # Foreground execution
+        # 前台同步执行
         try:
             if is_fork:
                 result_text = await sub_agent.run_to_completion("", conversation)
@@ -287,7 +299,7 @@ class AgentTool(Tool):
                 counter += 1
             teammate_name = f"{base_name}-{counter}"
 
-        # 1. Load agent definition
+        # 1. 加载 agent 定义
         definition: AgentDef
         conversation: ConversationManager | None = None
         is_fork = False
@@ -323,20 +335,20 @@ class AgentTool(Tool):
                 source="builtin",
             )
 
-        # 2. Create Worktree
+        # 2. 创建 worktree
         wt_name = f"team-{p.team_name}/{teammate_name}"
         try:
             wt = await self._worktree_manager.create(wt_name, "HEAD")
         except Exception as e:
             return ToolResult(output=f"Failed to create worktree for teammate: {e}", is_error=True)
 
-        # 3. Select LLM
+        # 3. 选择 LLM
         client = self._select_llm(p, definition)
 
-        # 4. Determine backend
+        # 4. 检测后端类型
         backend = self._team_manager.detect_backend()
 
-        # 5. Build teammate tools
+        # 5. 构建队友的工具集
         trace_node = self._trace_manager.create(
             agent_type=definition.agent_type,
             parent_id=self._parent_agent.agent_id,
@@ -366,7 +378,7 @@ class AgentTool(Tool):
         _tm_tools = [t.name for t in teammate_registry.list_tools()]
         log.info("[teammate] result_tools=%d names=%s", len(_tm_tools), _tm_tools)
 
-        # 6. Create sub-agent with teammate addendum
+        # 6. 创建子 agent 并附加队友专属指令
         instructions = (definition.system_prompt or "") + TEAMMATE_ADDENDUM
 
         checker = PermissionChecker(
@@ -390,8 +402,10 @@ class AgentTool(Tool):
         sub_agent.parent_id = self._parent_agent.agent_id
         sub_agent.trace_id = self._parent_agent.trace_id or self._parent_agent.agent_id
         sub_agent.agent_id = agent_id
+        sub_agent.team_name = p.team_name
+        sub_agent._team_manager = self._team_manager
 
-        # 7. Register name and member
+        # 7. 注册名称和成员信息
         AgentNameRegistry.instance().register(teammate_name, agent_id)
 
         member = TeammateInfo(
@@ -405,13 +419,13 @@ class AgentTool(Tool):
         )
         self._team_manager.register_member(p.team_name, member)
 
-        # 8. Spawn by backend
+        # 8. 按后端类型启动队友
         if backend in (BackendType.TMUX, BackendType.ITERM2):
             return self._spawn_pane_teammate(
                 p, team, member, backend, wt, agent_id, teammate_name
             )
 
-        # In-process: use task_manager only (it handles execution + notification)
+        # 进程内模式：直接用 task_manager 执行并通知结果
         task_id = self._task_manager.launch(
             agent=sub_agent,
             task="" if is_fork else p.prompt,

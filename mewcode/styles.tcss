@@ -106,10 +106,15 @@ Screen { }
 
 /* --- Input Area --- */
 
+#spinner-live {
+    height: 1;
+    padding: 0 2;
+}
+
 #input-area {
     dock: bottom;
     height: auto;
-    max-height: 8;
+    max-height: 20;
     padding: 0 1;
     border-top: solid #303030;
 }
@@ -136,11 +141,24 @@ Screen { }
     padding: 0 1;
 }
 
+#teammates-label {
+    width: auto;
+    height: 1;
+    padding: 0 1;
+}
+
 #model-label {
     width: 1fr;
     height: 1;
     text-align: right;
     color: $text-muted;
+}
+
+/* --- Teammate Tree --- */
+
+#teammate-tree {
+    height: auto;
+    padding: 0 2;
 }
 
 /* --- Plan Approval Dialog --- */

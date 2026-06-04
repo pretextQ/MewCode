@@ -1,3 +1,8 @@
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
+
 from __future__ import annotations
 
 import json
@@ -26,13 +31,15 @@ from mewcode.memory.session import (
     SessionManager,
     SessionMeta,
     SessionRecord,
-    build_time_gap_message,
+
+    make_compact_boundary,
+    parse_compact_boundary,
     records_to_messages,
     validate_message_chain,
 )
 
 # =========================================================================
-# A. Instructions (MEWCODE.md)
+# A. 指令文件（MEWCODE.md）
 # =========================================================================
 
 class TestProcessIncludes:
@@ -97,7 +104,7 @@ class TestLoadInstructions:
         assert result == ""
 
 # =========================================================================
-# B. SessionRecord
+# B. 会话记录 SessionRecord
 # =========================================================================
 
 class TestSessionRecord:
@@ -155,7 +162,7 @@ class TestSessionRecord:
         assert records[0].content == "done"
 
 # =========================================================================
-# C. Session & SessionManager
+# C. 会话 Session 与会话管理器 SessionManager
 # =========================================================================
 
 class TestSession:
@@ -234,7 +241,7 @@ class TestSessionManager:
         s.close()
 
 # =========================================================================
-# D. Message chain validation & resume
+# D. 消息链校验与会话恢复
 # =========================================================================
 
 class TestValidateMessageChain:
@@ -372,22 +379,177 @@ class TestSessionResume:
         result.session.close()
 
 # =========================================================================
-# E. Time gap message
+# D2. 压缩边界的持久化 + 恢复时重新加载压缩后的状态
 # =========================================================================
 
-class TestTimeGapMessage:
-    def test_no_gap_returns_none(self) -> None:
-        recent = datetime.now(timezone.utc) - timedelta(hours=1)
-        assert build_time_gap_message(recent) is None
+class TestCompactBoundaryRoundTrip:
+    def test_make_and_parse_boundary_text_only(self) -> None:
+        keep = [
+            Message(role="user", content="recent question"),
+            Message(role="assistant", content="recent answer"),
+        ]
+        rec = make_compact_boundary("the summary", keep)
+        assert rec.type == RecordType.COMPACT_BOUNDARY
+        assert rec.content["summary"] == "the summary"
 
-    def test_gap_returns_message(self) -> None:
-        old = datetime.now(timezone.utc) - timedelta(hours=48)
-        msg = build_time_gap_message(old)
-        assert msg is not None
-        assert "代码可能有变更" in msg.content
+        # JSONL 往返序列化（content 是一个 dict，必须能完整地序列化/反序列化）
+        line = rec.to_jsonl()
+        restored = SessionRecord.from_jsonl(line)
+        assert restored is not None
+        assert restored.type == RecordType.COMPACT_BOUNDARY
+
+        summary, keep_msgs = parse_compact_boundary(restored)
+        assert summary == "the summary"
+        assert len(keep_msgs) == 2
+        assert keep_msgs[0].role == "user"
+        assert keep_msgs[0].content == "recent question"
+        assert keep_msgs[1].role == "assistant"
+        assert keep_msgs[1].content == "recent answer"
+
+    def test_boundary_preserves_tool_pairs_in_keep(self) -> None:
+        # 保留的尾部消息中包含 tool_use ↔ tool_result 配对，必须完整保留
+        keep = [
+            Message(
+                role="assistant",
+                content="running",
+                tool_uses=[
+                    ToolUseBlock(tool_use_id="t9", tool_name="Bash", arguments={"command": "ls"})
+                ],
+            ),
+            Message(
+                role="user",
+                content="",
+                tool_results=[ToolResultBlock(tool_use_id="t9", content="file.txt")],
+            ),
+            Message(role="assistant", content="done"),
+        ]
+        rec = make_compact_boundary("sum", keep)
+        restored = SessionRecord.from_jsonl(rec.to_jsonl())
+        _, keep_msgs = parse_compact_boundary(restored)
+        assert len(keep_msgs) == 3
+        assert keep_msgs[0].tool_uses[0].tool_use_id == "t9"
+        assert keep_msgs[1].tool_results[0].tool_use_id == "t9"
+        assert keep_msgs[1].tool_results[0].content == "file.txt"
+        assert keep_msgs[2].content == "done"
+
+    def test_parse_malformed_boundary_degrades(self) -> None:
+        bad = SessionRecord(
+            type=RecordType.COMPACT_BOUNDARY, content="not a dict",
+            timestamp=datetime.now(timezone.utc),
+        )
+        summary, keep_msgs = parse_compact_boundary(bad)
+        assert summary == ""
+        assert keep_msgs == []
+
+    def test_resume_rebuilds_compacted_state(self, tmp_path: Path) -> None:
+        """核心往返流程：原始前缀 + 边界（摘要 + 保留消息）+ 边界之后的消息。
+
+        恢复时必须重建出「已压缩」的状态：摘要存在、保留的消息原样保留、
+        边界之前的原始前缀不被重放，且边界之后追加的消息正常存在。
+        """
+        mgr = SessionManager(str(tmp_path))
+        s = mgr.create()
+        sid = s.session_id
+
+        # 已被摘要掉的原始前缀——不应被重放。
+        s.append(Message(role="user", content="OLD raw question one"))
+        s.append(Message(role="assistant", content="OLD raw answer one"))
+        s.append(Message(role="user", content="OLD raw question two"))
+        s.append(Message(role="assistant", content="OLD raw answer two"))
+
+        # 边界内联了摘要 + 原样保留的尾部消息。
+        keep = [
+            Message(role="user", content="KEPT recent question"),
+            Message(role="assistant", content="KEPT recent answer"),
+        ]
+        s.append_record(make_compact_boundary("SUMMARY OF OLD STUFF", keep))
+
+        # 边界之后的续写。
+        s.append(Message(role="user", content="NEW followup"))
+        s.append(Message(role="assistant", content="NEW reply"))
+        s.close()
+
+        result = mgr.resume(sid)
+        assert result is not None
+        contents = [m.content for m in result.messages]
+
+        # 摘要存在（以一条 user 消息的形式呈现）
+        assert any("SUMMARY OF OLD STUFF" in c for c in contents)
+        # 保留的尾部消息原样存在
+        assert "KEPT recent question" in contents
+        assert "KEPT recent answer" in contents
+        # 边界之后的续写存在
+        assert "NEW followup" in contents
+        assert "NEW reply" in contents
+        # 边界之前的原始前缀未被重放
+        assert all("OLD raw" not in c for c in contents)
+
+        # 结构顺序：先摘要，再保留消息，最后是边界之后的消息。
+        summary_idx = next(i for i, c in enumerate(contents) if "SUMMARY OF OLD STUFF" in c)
+        keep_idx = contents.index("KEPT recent question")
+        post_idx = contents.index("NEW followup")
+        assert summary_idx < keep_idx < post_idx
+        result.session.close()
+
+    def test_resume_uses_last_boundary_when_multiple(self, tmp_path: Path) -> None:
+        """链式压缩：只有最后一个边界才决定恢复后的状态。"""
+        mgr = SessionManager(str(tmp_path))
+        s = mgr.create()
+        sid = s.session_id
+
+        s.append(Message(role="user", content="gen0 raw"))
+        s.append_record(make_compact_boundary("FIRST summary", [
+            Message(role="user", content="gen1 kept"),
+        ]))
+        s.append(Message(role="assistant", content="between boundaries"))
+        s.append_record(make_compact_boundary("SECOND summary", [
+            Message(role="user", content="gen2 kept"),
+        ]))
+        s.append(Message(role="user", content="after second"))
+        s.close()
+
+        result = mgr.resume(sid)
+        assert result is not None
+        contents = [m.content for m in result.messages]
+        assert any("SECOND summary" in c for c in contents)
+        assert "gen2 kept" in contents
+        assert "after second" in contents
+        # 第一代压缩的所有内容都已消失。
+        assert all("FIRST summary" not in c for c in contents)
+        assert "gen1 kept" not in contents
+        assert "between boundaries" not in contents
+        assert all("gen0 raw" not in c for c in contents)
+        result.session.close()
+
+    def test_resume_no_boundary_full_replay(self, tmp_path: Path) -> None:
+        """向后兼容：没有边界的会话仍然完整重放。"""
+        mgr = SessionManager(str(tmp_path))
+        s = mgr.create()
+        sid = s.session_id
+        s.append(Message(role="user", content="q1"))
+        s.append(Message(role="assistant", content="a1"))
+        s.append(Message(role="user", content="q2"))
+        s.append(Message(role="assistant", content="a2"))
+        s.close()
+
+        result = mgr.resume(sid)
+        assert result is not None
+        contents = [m.content for m in result.messages]
+        assert contents == ["q1", "a1", "q2", "a2"]
+        result.session.close()
+
+    def test_append_record_does_not_bump_message_count(self, tmp_path: Path) -> None:
+        mgr = SessionManager(str(tmp_path))
+        s = mgr.create()
+        s.append(Message(role="user", content="hi"))
+        before = s.meta.message_count
+        s.append_record(make_compact_boundary("x", []))
+        assert s.meta.message_count == before  # 边界只是一个标记，不算一轮对话
+        s.close()
+
 
 # =========================================================================
-# F. SessionMeta
+# F. 会话元数据 SessionMeta
 # =========================================================================
 
 class TestSessionMeta:
@@ -414,7 +576,7 @@ class TestSessionMeta:
         assert SessionMeta.load(path) is None
 
 # =========================================================================
-# G. MemoryManager
+# G. 记忆管理器 MemoryManager
 # =========================================================================
 
 class TestMemoryManager:
@@ -491,7 +653,7 @@ class TestMemoryManager:
         assert "use spaces" not in project_content
 
 # =========================================================================
-# H. Conversation inject_long_term_memory
+# H. 会话注入长期记忆 inject_long_term_memory
 # =========================================================================
 
 class TestConversationInjection:
@@ -546,7 +708,7 @@ class TestConversationInjection:
         assert conv.ltm_injected is False
 
 # =========================================================================
-# I. Memory extraction prompt construction
+# I. 记忆抽取 prompt 的构造
 # =========================================================================
 
 class TestMemoryExtraction:

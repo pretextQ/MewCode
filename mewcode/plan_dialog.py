@@ -1,3 +1,7 @@
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
 from __future__ import annotations
 
 from enum import Enum
@@ -23,7 +27,7 @@ _OPTIONS = [
 
 
 class InlinePlanWidget(Vertical, can_focus=True):
-    """Inline plan approval widget matching Go TUI format."""
+    """内联的计划审批组件，格式与 Go 版 TUI 保持一致。"""
 
     BINDINGS = [
         Binding("up", "cursor_up", "Up", priority=True),
@@ -55,19 +59,19 @@ class InlinePlanWidget(Vertical, can_focus=True):
 
     def _build_content(self) -> str:
         lines = [
-            "\n [bold color(99)]MewCode has written up a plan and is ready to execute. "
-            "Would you like to proceed?[/]\n"
+            "\n [bold #875fff]MewCode has written up a plan and is ready to execute. "
+            "Would you like to proceed?[/bold #875fff]\n"
         ]
         for i, (label, _choice) in enumerate(_OPTIONS):
             if i == self._cursor:
-                lines.append(f" [bold cyan]❯[/] {i + 1}. [bold]{label}[/]")
+                lines.append(f" [bold cyan]❯[/bold cyan] {i + 1}. [bold]{label}[/bold]")
             else:
-                lines.append(f"   {i + 1}. [dim]{label}[/]")
+                lines.append(f"   {i + 1}. [dim]{label}[/dim]")
 
         if self._cursor == 2:
-            display = self._input if self._input else "[dim]Type feedback here...[/]"
+            display = self._input if self._input else "[dim]Type feedback here...[/dim]"
             lines.append(f"      {display}█")
-            lines.append("      [dim]shift+tab to approve with this feedback[/]")
+            lines.append("      [dim]shift+tab to approve with this feedback[/dim]")
 
         return "\n".join(lines)
 

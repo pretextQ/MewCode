@@ -1,3 +1,7 @@
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
 from __future__ import annotations
 
 import os
@@ -30,6 +34,15 @@ def detect_backend(
     teammate_mode: str = "",
     is_interactive: bool = True,
 ) -> BackendType:
+    """Default to in-process for real-time progress tracking."""
+    return BackendType.IN_PROCESS
+
+
+def detect_pane_backend(
+    teammate_mode: str = "",
+    is_interactive: bool = True,
+) -> BackendType:
+    """Detect pane backend when user explicitly requests tmux."""
     if teammate_mode == "in-process" or not is_interactive:
         return BackendType.IN_PROCESS
 

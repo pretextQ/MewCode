@@ -1,3 +1,7 @@
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -137,18 +141,21 @@ class ToolRegistry:
         return schemas
 
 
-def create_default_registry(file_cache: FileCache | None = None) -> ToolRegistry:
+def create_default_registry(file_cache: FileCache | None = None, file_history: Any = None) -> ToolRegistry:
     from mewcode.tools.bash import Bash
     from mewcode.tools.edit_file import EditFile
+    from mewcode.tools.file_state_cache import FileStateCache
     from mewcode.tools.glob import Glob
     from mewcode.tools.grep import Grep
     from mewcode.tools.read_file import ReadFile
     from mewcode.tools.write_file import WriteFile
 
+    file_state_cache = FileStateCache()
+
     registry = ToolRegistry()
-    registry.register(ReadFile(file_cache=file_cache))
-    registry.register(WriteFile(file_cache=file_cache))
-    registry.register(EditFile(file_cache=file_cache))
+    registry.register(ReadFile(file_cache=file_cache, file_state_cache=file_state_cache))
+    registry.register(WriteFile(file_cache=file_cache, file_history=file_history, file_state_cache=file_state_cache))
+    registry.register(EditFile(file_cache=file_cache, file_history=file_history, file_state_cache=file_state_cache))
     registry.register(Bash())
     registry.register(Glob())
     registry.register(Grep())

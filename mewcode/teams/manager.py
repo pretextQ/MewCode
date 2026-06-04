@@ -1,3 +1,7 @@
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
 from __future__ import annotations
 
 import json
@@ -14,6 +18,7 @@ from mewcode.teams.models import (
     resolve_team_dir,
     unique_team_name,
 )
+from mewcode.teams.progress import TeammateProgress
 from mewcode.teams.registry import AgentNameRegistry
 from mewcode.teams.shared_task import SharedTaskStore
 from mewcode.teams.spawn_inprocess import InProcessTeammateHandle
@@ -212,6 +217,34 @@ class TeamManager:
                     return name
         return None
 
+
+    def drain_lead_mailbox(self) -> list[str]:
+        notes: list[str] = []
+        for team_name in list(self._teams.keys()):
+            team = self.get_team(team_name)
+            if team is None:
+                continue
+            mailbox = self.get_mailbox(team_name)
+            if mailbox is None:
+                continue
+            msgs = mailbox.consume(team.lead_agent_id)
+            if not msgs:
+                continue
+            parts = [f'<team-notification team="{team_name}">']
+            for m in msgs:
+                parts.append(f"from={m.from_agent}: {m.content}")
+            parts.append("</team-notification>")
+            notes.append("\n".join(parts))
+        return notes
+
+    def get_all_teammate_progress(self) -> list[TeammateProgress]:
+        """Collect progress objects attached to every registered teammate."""
+        results: list[TeammateProgress] = []
+        for team in self._teams.values():
+            for member in team.members:
+                if hasattr(member, "progress") and member.progress is not None:
+                    results.append(member.progress)
+        return results
 
     def on_teammate_completed(self, agent_id: str) -> None:
         team_name = self.get_team_for_teammate(agent_id)

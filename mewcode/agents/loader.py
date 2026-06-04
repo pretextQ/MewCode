@@ -1,3 +1,7 @@
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
 from __future__ import annotations
 
 import importlib.resources
@@ -90,24 +94,24 @@ class AgentLoader:
     def load_all(self) -> dict[str, AgentDef]:
         seen: dict[str, AgentDef] = {}
 
-        # Priority 1: project-level (highest)
+        # 优先级 1：项目级（最高）
         project_path = Path(self._work_dir) / PROJECT_AGENTS_DIR
         for agent_def in self._scan_directory(project_path, "project"):
             if agent_def.agent_type not in seen:
                 seen[agent_def.agent_type] = agent_def
 
-        # Priority 2: user-level
+        # 优先级 2：用户级
         user_path = Path(USER_AGENTS_DIR).expanduser()
         for agent_def in self._scan_directory(user_path, "user"):
             if agent_def.agent_type not in seen:
                 seen[agent_def.agent_type] = agent_def
 
-        # Priority 3: built-in
+        # 优先级 3：内置
         for agent_def in self._load_builtins():
             if agent_def.agent_type not in seen:
                 seen[agent_def.agent_type] = agent_def
 
-        # Priority 4: plugin (reserved, not implemented)
+        # 优先级 4：插件（保留，未实现）
 
         self._agents = seen
         return seen
@@ -118,7 +122,7 @@ class AgentLoader:
         if cached is None:
             return None
 
-        # Hot reload from file
+        # 从文件热重载
         if cached.file_path is not None and cached.file_path.exists():
             try:
                 reloaded = parse_agent_file(cached.file_path)

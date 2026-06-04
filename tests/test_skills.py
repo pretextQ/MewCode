@@ -1,4 +1,9 @@
-"""Tests for Skill system — parser, loader, executor, LoadSkill tool."""
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
+
+"""Skill 系统的测试 —— 包括 parser、loader、executor 以及 LoadSkill 工具。"""
 from __future__ import annotations
 
 import json
@@ -25,7 +30,7 @@ from mewcode.tools import ToolRegistry
 from mewcode.tools.base import Tool, ToolResult
 
 # ---------------------------------------------------------------------------
-# Helpers
+# 辅助工具
 # ---------------------------------------------------------------------------
 
 VALID_SKILL_MD = textwrap.dedent("""\
@@ -79,7 +84,7 @@ class FakeTool(Tool):
         return ToolResult(output="ok")
 
 # ---------------------------------------------------------------------------
-# Parser tests
+# Parser 测试
 # ---------------------------------------------------------------------------
 
 class TestParseFrontmatter:
@@ -169,7 +174,7 @@ class TestSubstituteArguments:
         assert result == "x and x"
 
 # ---------------------------------------------------------------------------
-# Loader tests
+# Loader 测试
 # ---------------------------------------------------------------------------
 
 class TestSkillLoader:
@@ -313,7 +318,7 @@ class TestSkillLoader:
         assert "commit" in skills
 
 # ---------------------------------------------------------------------------
-# Executor: filter_tool_registry
+# Executor：filter_tool_registry
 # ---------------------------------------------------------------------------
 
 class TestFilterToolRegistry:
@@ -347,7 +352,7 @@ class TestFilterToolRegistry:
             filter_tool_registry(registry, ["NoSuchTool"])
 
 # ---------------------------------------------------------------------------
-# Directory Skill: tool.json parsing
+# 目录型 Skill：tool.json 解析
 # ---------------------------------------------------------------------------
 
 class TestDirectorySkill:
@@ -445,7 +450,7 @@ class TestDirectorySkill:
         assert "Hello Alice!" in result.output
 
 # ---------------------------------------------------------------------------
-# LoadSkill tool
+# LoadSkill 工具
 # ---------------------------------------------------------------------------
 
 class TestLoadSkillTool:
@@ -508,7 +513,7 @@ class TestLoadSkillTool:
         assert tool.category == "read"
 
 # ---------------------------------------------------------------------------
-# Agent integration
+# Agent 集成
 # ---------------------------------------------------------------------------
 
 class TestAgentSkillIntegration:

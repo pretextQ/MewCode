@@ -1,3 +1,7 @@
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
 from __future__ import annotations
 
 from textual.app import ComposeResult
@@ -33,7 +37,7 @@ def _relative_time(meta: SessionMeta) -> str:
 
 
 class InlineResumeWidget(Vertical, can_focus=True):
-    """Inline session resume view matching Go TUI format."""
+    """内联的会话恢复视图，格式与 Go 版 TUI 保持一致。"""
 
     BINDINGS = [
         Binding("up", "cursor_up", "Up", priority=True),
@@ -80,7 +84,7 @@ class InlineResumeWidget(Vertical, can_focus=True):
         if self._project:
             lines.append(f"\n  [dim]{self._project}[/]\n")
 
-        for i, meta in enumerate(self._filtered[:10]):  # max 10 visible
+        for i, meta in enumerate(self._filtered[:10]):  # 最多显示 10 条
             title = meta.title or "(empty session)"
             if i == self._cursor:
                 lines.append(f"[bold cyan]❯[/] [bold]{title}[/]")

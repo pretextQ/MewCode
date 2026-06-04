@@ -1,3 +1,7 @@
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
 from __future__ import annotations
 
 from textual.app import ComposeResult
@@ -8,10 +12,10 @@ from textual.widgets import Static
 
 
 class InlineAskUserWidget(Vertical, can_focus=True):
-    """Inline AskUser widget with multi-question tab navigation.
+    """内联的 AskUser 组件，支持多问题之间的 Tab 切换导航。
 
-    Matches Go TUI: nav bar with ☐/☑ checkmarks, cursor navigation,
-    MultiSelect toggle, "Other" input, review/submit view.
+    与 Go 版 TUI 保持一致：带 ☐/☑ 勾选标记的导航栏、光标导航、
+    多选（MultiSelect）切换、"Other" 自定义输入，以及复核/提交视图。
     """
 
     BINDINGS = [
@@ -50,7 +54,7 @@ class InlineAskUserWidget(Vertical, can_focus=True):
         self.focus()
 
     def _option_count(self, q_idx: int) -> int:
-        return len(self._questions[q_idx].get("options", [])) + 1  # +1 for Other
+        return len(self._questions[q_idx].get("options", [])) + 1  # +1 是为 Other 选项预留的
 
     def _build_content(self) -> str:
         if self._on_submit:
@@ -90,7 +94,7 @@ class InlineAskUserWidget(Vertical, can_focus=True):
             desc_part = f" — [dim]{desc}[/]" if desc else ""
             lines.append(f"{prefix}{check}{bold}{label}{end_bold}{desc_part}")
 
-        # "Other" option
+        # "Other" 选项
         other_idx = len(options)
         prefix = " ❯ " if cursor == other_idx else "   "
         bold = "[bold]" if cursor == other_idx else ""
@@ -150,7 +154,7 @@ class InlineAskUserWidget(Vertical, can_focus=True):
         cursor = self._cursors[self._q_idx]
         is_multi = q.get("multiSelect", False)
 
-        if cursor == len(options):  # "Other"
+        if cursor == len(options):  # "Other"（自定义输入）
             self._answered[self._q_idx] = self._others[self._q_idx] or "Other"
         elif is_multi:
             selected = [
@@ -254,7 +258,7 @@ class InlineAskUserWidget(Vertical, can_focus=True):
             return
         cursor = self._cursors[self._q_idx]
         options = self._questions[self._q_idx].get("options", [])
-        if cursor != len(options):  # not on "Other"
+        if cursor != len(options):  # 当前光标不在 "Other" 上
             return
         key = event.key
         if key == "backspace":

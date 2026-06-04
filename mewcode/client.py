@@ -1,3 +1,7 @@
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
 from __future__ import annotations
 
 import json
@@ -9,6 +13,11 @@ from openai import AsyncOpenAI
 
 from mewcode.config import ProviderConfig
 from mewcode.conversation import ConversationManager
+from mewcode.serialization import (
+    build_anthropic_messages,
+    build_chat_completion_messages,
+    build_openai_input,
+)
 from mewcode.tools.base import (
     StreamEnd,
     StreamEvent,
@@ -21,25 +30,31 @@ from mewcode.tools.base import (
 )
 
 
+# 限制自动拉取模型元数据的超时时间，防止慢响应或挂起的
+# /v1/models 端点拖延启动。超时后降级为 None（即"未知"），
+# 由下一层 context window 解析逻辑接管。
+ANTHROPIC_MODEL_FETCH_TIMEOUT = 3.0
+
+
 _EPHEMERAL = {"type": "ephemeral"}
 
 
 def _mark_last_user_tail_for_cache(messages: list[dict[str, Any]]) -> None:
-    """Attach cache_control to the last block of the final user message.
+    """给最后一条 user 消息的最后一个 block 附加 cache_control。
 
-    Mutates `messages` in place. Anthropic caches the prefix up to (and
-    including) this block; subsequent requests with a byte-identical prefix
-    pay 10% on cached tokens. Only Anthropic-protocol messages.
+    会原地修改 `messages`。Anthropic 会缓存到（且包含）这个 block 为止的前缀；
+    后续请求只要前缀逐字节相同，缓存命中的 token 只需支付 10% 的费用。
+    仅适用于 Anthropic 协议的消息。
     """
     if not messages:
         return
-    # Walk back to the last user-role message; assistant tails don't anchor cache.
+    # 从后往前找到最后一条 user 角色消息；assistant 尾部不能锚定 cache。
     for msg in reversed(messages):
         if msg.get("role") != "user":
             continue
         content = msg.get("content")
         if isinstance(content, str):
-            # Up-convert string content to block form so we can attach cache_control.
+            # 把字符串 content 升级为 block 形式，以便附加 cache_control。
             msg["content"] = [{
                 "type": "text",
                 "text": content,
@@ -53,11 +68,11 @@ def _mark_last_user_tail_for_cache(messages: list[dict[str, Any]]) -> None:
 
 
 def _mark_last_tool_for_cache(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Return a shallow-copied tools list with cache_control on the last tool.
+    """返回一个浅拷贝的 tools 列表，并在最后一个 tool 上标记 cache_control。
 
-    Tool schemas are stable across turns, so marking the tail caches the entire
-    tool block. We avoid mutating the caller's list because tool schemas are
-    often module-level singletons in the registry.
+    tool schema 在多轮对话之间是稳定的，因此标记列表尾部即可缓存整个 tool block。
+    我们不直接修改调用方传入的列表，因为这些 tool schema 往往是注册表里的
+    模块级单例。
     """
     if not tools:
         return tools
@@ -127,6 +142,26 @@ class AnthropicClient(LLMClient):
     def set_max_output_tokens(self, tokens: int) -> None:
         self.max_output_tokens = tokens
 
+    async def fetch_model_context_window(self) -> int | None:
+        """向 Anthropic 兼容的 /v1/models/{model} 端点查询模型的
+        max_input_tokens（context window 解析的第 2 层）。
+
+        采用尽力而为策略：遇到任何错误——非 anthropic 端点、网络故障、
+        超时、字段缺失——都返回 ``None`` 而非抛出异常，以便调用方降级到
+        下一层。它的阻塞时间不会超过 ANTHROPIC_MODEL_FETCH_TIMEOUT，也不会
+        向外传播异常，因此在启动时调用是安全的。
+        """
+        try:
+            info = await self._client.models.retrieve(
+                self.model, timeout=ANTHROPIC_MODEL_FETCH_TIMEOUT
+            )
+            window = getattr(info, "max_input_tokens", None)
+            if isinstance(window, int) and window > 0:
+                return window
+            return None
+        except Exception:
+            return None
+
     async def stream(
         self,
         conversation: ConversationManager,
@@ -135,13 +170,12 @@ class AnthropicClient(LLMClient):
     ) -> AsyncIterator[StreamEvent]:
         import anthropic as _anthropic
 
-        messages = conversation.serialize("anthropic")
+        messages = build_anthropic_messages(conversation.get_messages())
 
-        # Mark prompt-cache breakpoints on the longest-stable prefixes:
-        # system, tools, and the tail of the last user message. Anthropic
-        # caches up to each breakpoint and re-checks byte-identity on the
-        # next request — ContentReplacementState in context.manager guarantees
-        # that tool_result content past these breakpoints stays stable.
+        # 在最长稳定前缀上标记 prompt cache 断点：system、tools
+        # 以及最后一条 user 消息的尾部。Anthropic 会缓存到每个断点，
+        # 并在下次请求时按字节比对——context.manager 中的
+        # ContentReplacementState 保证断点之后的 tool_result 内容保持稳定。
         _mark_last_user_tail_for_cache(messages)
 
         kwargs: dict[str, Any] = {
@@ -227,10 +261,15 @@ class AnthropicClient(LLMClient):
                         pass
 
                 final = await stream.get_final_message()
+                usage = final.usage
                 yield StreamEnd(
                     stop_reason=final.stop_reason or "end_turn",
-                    input_tokens=final.usage.input_tokens,
-                    output_tokens=final.usage.output_tokens,
+                    input_tokens=usage.input_tokens,
+                    output_tokens=usage.output_tokens,
+                    cache_read=getattr(usage, "cache_read_input_tokens", 0) or 0,
+                    cache_creation=getattr(
+                        usage, "cache_creation_input_tokens", 0
+                    ) or 0,
                 )
 
         except _anthropic.AuthenticationError as e:
@@ -270,7 +309,7 @@ class OpenAIClient(LLMClient):
     ) -> AsyncIterator[StreamEvent]:
         import openai as _openai
 
-        input_messages = conversation.serialize("openai")
+        input_messages = build_openai_input(conversation.get_messages())
 
         kwargs: dict[str, Any] = {
             "model": self.model,
@@ -331,10 +370,19 @@ class OpenAIClient(LLMClient):
                 elif event.type == "response.completed":
                     resp = getattr(event, "response", None)
                     usage = getattr(resp, "usage", None) if resp else None
+                    # Responses API 通过 input_tokens_details.cached_tokens
+                    # 暴露 cache 命中数，没有 creation 计数。注意这里的
+                    # input_tokens *包含*了缓存 token，所以需要减去它们，
+                    # 保持 input + cache_read 可加性，与 Anthropic 对齐。
+                    details = getattr(usage, "input_tokens_details", None)
+                    cache_read = getattr(details, "cached_tokens", 0) or 0
+                    input_tokens = getattr(usage, "input_tokens", 0) or 0
                     yield StreamEnd(
                         stop_reason="end_turn",
-                        input_tokens=getattr(usage, "input_tokens", 0) or 0,
+                        input_tokens=max(input_tokens - cache_read, 0),
                         output_tokens=getattr(usage, "output_tokens", 0) or 0,
+                        cache_read=cache_read,
+                        cache_creation=0,
                     )
 
         except _openai.AuthenticationError as e:
@@ -354,13 +402,12 @@ class OpenAIClient(LLMClient):
 
 
 class OpenAICompatClient(LLMClient):
-    """Client for OpenAI-compatible providers using the Chat Completions API.
+    """面向 OpenAI 兼容 provider 的客户端，使用 Chat Completions API。
 
-    Unlike ``OpenAIClient`` which targets the newer Responses API
-    (``/responses``), this client uses the widely-supported Chat Completions
-    endpoint (``/chat/completions``), making it compatible with any provider
-    that exposes an OpenAI-compatible interface (e.g. vLLM, Ollama, Together,
-    Azure OpenAI, etc.).
+    与面向较新的 Responses API（``/responses``）的 ``OpenAIClient`` 不同，
+    本客户端使用受广泛支持的 Chat Completions 端点（``/chat/completions``），
+    因此能兼容任何暴露 OpenAI 兼容接口的 provider（例如 vLLM、Ollama、
+    Together、Azure OpenAI 等）。
     """
 
     def __init__(self, config: ProviderConfig) -> None:
@@ -379,16 +426,15 @@ class OpenAICompatClient(LLMClient):
 
     @staticmethod
     def _convert_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Convert tool schemas to Chat Completions format.
+        """把 tool schema 转换成 Chat Completions 格式。
 
-        The tool registry emits Responses-API-style dicts for the ``openai``
-        family::
+        tool 注册表为 ``openai`` 系列输出的是 Responses API 风格的 dict::
 
             {"type": "function", "name": "...", "description": "...",
              "parameters": {...}}
 
-        Chat Completions expects the name/description/parameters nested under
-        a ``function`` key::
+        而 Chat Completions 要求把 name/description/parameters 嵌套在
+        ``function`` 键下::
 
             {"type": "function", "function": {"name": "...",
              "description": "...", "parameters": {...}}}
@@ -413,9 +459,9 @@ class OpenAICompatClient(LLMClient):
     ) -> AsyncIterator[StreamEvent]:
         import openai as _openai
 
-        messages = conversation.serialize("openai-compat")
+        messages = build_chat_completion_messages(conversation.get_messages())
 
-        # Prepend system message if provided.
+        # 如果有 system 消息则插入到消息列表头部。
         if system:
             messages = [{"role": "system", "content": system}] + messages
 
@@ -429,32 +475,42 @@ class OpenAICompatClient(LLMClient):
         if tools:
             kwargs["tools"] = self._convert_tools(tools)
 
-        # State for accumulating streamed tool calls.  The Chat Completions
-        # stream delivers tool-call deltas indexed by position within the
-        # ``tool_calls`` list.  We track each in-flight call by its index.
-        active_calls: dict[int, dict[str, str]] = {}  # idx -> {id, name, args}
+        # 用于累积 streaming tool call 的状态。Chat Completions 流按
+        # tool_calls 列表中的位置索引下发 delta，我们按索引跟踪每个进行中的调用。
+        active_calls: dict[int, dict[str, str]] = {}  # 索引 -> {id, name, args}
 
         try:
             response = await self._client.chat.completions.create(**kwargs)
             async for chunk in response:
                 if not chunk.choices:
-                    # Final chunk with only usage data.
+                    # 最后一个 chunk，只包含 usage 数据。
                     if chunk.usage:
+                        # 部分兼容 provider 通过 prompt_tokens_details.cached_tokens
+                        # 上报 cache 命中数，大多数不上报（cache_read 保持 0）。
+                        # prompt_tokens 包含了缓存 token，需要减去以保持
+                        # input + cache_read 可加性。没有 provider 上报 creation 计数。
+                        details = getattr(
+                            chunk.usage, "prompt_tokens_details", None
+                        )
+                        cache_read = getattr(details, "cached_tokens", 0) or 0
+                        prompt_tokens = chunk.usage.prompt_tokens or 0
                         yield StreamEnd(
                             stop_reason="end_turn",
-                            input_tokens=chunk.usage.prompt_tokens or 0,
+                            input_tokens=max(prompt_tokens - cache_read, 0),
                             output_tokens=chunk.usage.completion_tokens or 0,
+                            cache_read=cache_read,
+                            cache_creation=0,
                         )
                     continue
 
                 choice = chunk.choices[0]
                 delta = choice.delta
 
-                # --- text content ---
+                # --- 文本内容 ---
                 if delta and delta.content:
                     yield TextDelta(text=delta.content)
 
-                # --- tool call deltas ---
+                # --- tool call 增量 ---
                 if delta and delta.tool_calls:
                     for tc in delta.tool_calls:
                         idx = tc.index
@@ -474,7 +530,7 @@ class OpenAICompatClient(LLMClient):
                             call["args"] += tc.function.arguments
                             yield ToolCallDelta(text=tc.function.arguments)
 
-                # --- finish reasons ---
+                # --- 结束原因 ---
                 if choice.finish_reason in ("tool_calls", "stop"):
                     if choice.finish_reason == "tool_calls":
                         for _idx, call in sorted(active_calls.items()):
@@ -513,3 +569,37 @@ def create_client(config: ProviderConfig) -> LLMClient:
     elif config.protocol == "openai-compat":
         return OpenAICompatClient(config)
     raise ValueError(f"Unknown protocol: {config.protocol}")
+
+
+async def resolve_context_window(config: ProviderConfig) -> None:
+    """context window 解析的第 2 层：对于 anthropic 协议的 provider，
+    从 {base_url}/v1/models/{model} 自动拉取一次模型的 max_input_tokens，
+    并通过 set_fetched_context_window 缓存到 ``config`` 上，这样后续
+    config.get_context_window() 调用就能直接使用、无需再次访问网络。
+
+    完全尽力而为，绝不抛出异常：非 anthropic provider、客户端构造失败
+    （例如缺少 API key）、拉取失败或超时，都会让缓存保持不变，从而让
+    get_context_window() 降级到内置映射表 / 默认值。在启动时调用是安全的——
+    阻塞时间不会超过拉取自身的超时，也不会导致崩溃。
+    """
+    # 配置中显式指定的 window 在 get_context_window() 中优先级最高，
+    # 上次调用已缓存的值也不需要重新拉取——直接跳过网络请求。
+    if config.context_window > 0 or config._fetched_context_window > 0:
+        return
+    if config.protocol != "anthropic":
+        return
+
+    try:
+        client = create_client(config)
+    except Exception:
+        return
+    fetch = getattr(client, "fetch_model_context_window", None)
+    if fetch is None:
+        return
+
+    try:
+        window = await fetch()
+    except Exception:
+        window = None
+    if window:
+        config.set_fetched_context_window(window)

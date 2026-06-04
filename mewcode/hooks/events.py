@@ -1,28 +1,33 @@
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
+
 from __future__ import annotations
 
 from enum import StrEnum
 
 
 class LifecycleEvent(StrEnum):
-    # Session level
+    # 会话（Session）级别
     SESSION_START = "session_start"
     SESSION_END = "session_end"
 
 
-    # Turn level
+    # 轮次（Turn）级别
     TURN_START = "turn_start"
     TURN_END = "turn_end"
 
 
-    # Tool level
+    # 工具（Tool）级别
     PRE_TOOL_USE = "pre_tool_use"
     POST_TOOL_USE = "post_tool_use"
 
-    # Message level
+    # 消息（Message）级别
     PRE_SEND = "pre_send"
     POST_RECEIVE = "post_receive"
 
-    # System level
+    # 系统（System）级别
     STARTUP = "startup"
     SHUTDOWN = "shutdown"
     ERROR = "error"

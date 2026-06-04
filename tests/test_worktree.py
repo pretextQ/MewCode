@@ -1,4 +1,9 @@
-"""Tests for the Git Worktree management system (Ch13)."""
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
+
+"""Git Worktree 管理系统的测试（第 13 章）。"""
 from __future__ import annotations
 
 import asyncio
@@ -20,7 +25,7 @@ from mewcode.worktree.session import load_worktree_session, save_worktree_sessio
 from mewcode.worktree.slug import flatten_slug, validate_slug
 
 # =========================================================================
-# A. Slug validation
+# A. Slug 校验
 # =========================================================================
 
 class TestValidateSlug:
@@ -109,10 +114,10 @@ class TestFileCache:
 
     def test_invalidate_nonexistent(self):
         cache = FileCache()
-        cache.invalidate("/nonexistent")  # should not raise
+        cache.invalidate("/nonexistent")  # 不应抛出异常
 
 # =========================================================================
-# C. Config extension
+# C. 配置扩展
 # =========================================================================
 
 class TestWorktreeConfig:
@@ -154,7 +159,7 @@ class TestWorktreeConfig:
         assert cfg.worktree.stale_cutoff_hours == 12
 
 # =========================================================================
-# H. Session persistence
+# H. 会话持久化
 # =========================================================================
 
 class TestSessionPersistence:
@@ -195,14 +200,14 @@ class TestSessionPersistence:
         assert load_worktree_session(tmp_path) is None
 
 # =========================================================================
-# Integration helper
+# 集成辅助函数
 # =========================================================================
 
 class TestIntegrationHelpers:
     def test_generate_worktree_name(self):
         name = generate_worktree_name()
         assert name.startswith("agent-")
-        assert len(name) == 14  # "agent-" + 8 hex chars
+        assert len(name) == 14  # "agent-" + 8 个十六进制字符
 
     def test_build_worktree_notice(self):
         notice = build_worktree_notice("/parent/dir", "/wt/dir")
@@ -211,7 +216,7 @@ class TestIntegrationHelpers:
         assert "WORKTREE CONTEXT" in notice
 
 # =========================================================================
-# D. WorktreeManager (requires real git repo)
+# D. WorktreeManager（需要真实的 git 仓库）
 # =========================================================================
 
 def _init_git_repo(path: Path) -> None:
@@ -332,7 +337,7 @@ class TestWorktreeManager:
             )
 
 # =========================================================================
-# F. Change detection & auto cleanup
+# F. 变更检测与自动清理
 # =========================================================================
 
 class TestChangeDetection:

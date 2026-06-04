@@ -1,3 +1,7 @@
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
 from __future__ import annotations
 
 from pathlib import Path
@@ -55,6 +59,26 @@ class MemoryManager:
     @property
     def project_path(self) -> Path:
         return self._project_path
+
+    @property
+    def user_mem_dir(self) -> Path:
+        """User-level memory directory (~/.mewcode/memory/).
+
+        This is where .md memory files with frontmatter (type user/feedback)
+        live. Distinct from ``user_path`` which points at the flat
+        ``memories.md`` file.
+        """
+        return Path.home() / ".mewcode" / "memory"
+
+    @property
+    def project_mem_dir(self) -> Path:
+        """Project-level memory directory (<project>/.mewcode/memory/).
+
+        This is where .md memory files with frontmatter (type
+        project/reference) live. Distinct from ``project_path`` which
+        points at the flat ``memories.md`` file.
+        """
+        return self._project_path.parent / "memory"
 
     def load(self) -> str:
         sections: list[str] = []

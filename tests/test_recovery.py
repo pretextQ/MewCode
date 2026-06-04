@@ -1,3 +1,8 @@
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
+
 from __future__ import annotations
 
 import time
@@ -31,20 +36,20 @@ def test_recovery_attachment_emits_all_sections():
     assert "planner" in out
     assert "- ReadFile — Read a file and return contents." in out
     assert "- Bash" in out
-    assert "提示" in out  # closing note section header
+    assert "提示" in out  # 结尾提示部分的标题
 
 def test_recovery_file_limit_and_order():
     state = RecoveryState()
-    # Record 7 files spread in time; only 5 newest should appear.
+    # 记录 7 个时间分散的文件；只有最新的 5 个应当出现。
     for i in range(7):
         state.record_file_read(f"/f{i}", "x")
-        # Force timestamps so order is deterministic
+        # 强制设置时间戳，使顺序确定
         rec = state._files[f"/f{i}"]
         rec.timestamp = 1000.0 + i
 
     files = state.snapshot_files(RECOVERY_FILE_LIMIT)
     assert len(files) == 5
-    assert files[0].path == "/f6"  # newest first
+    assert files[0].path == "/f6"  # 最新的排在最前
     assert files[-1].path == "/f2"
 
 def test_recovery_truncates_per_file():
@@ -65,5 +70,5 @@ def test_recovery_skills_budget():
 
     out = build_recovery_attachment(state, None)
     emitted = out.count("### skill-")
-    # 25K / 5K per skill ⇒ at most 5
+    # 25K / 每个 skill 5K ⇒ 最多 5 个
     assert 1 <= emitted <= 5

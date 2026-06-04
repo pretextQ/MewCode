@@ -1,4 +1,9 @@
-"""Tests for Agent Team system (Chapter 14)."""
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
+
+"""Agent Team（智能体团队）系统的测试（第 14 章）。"""
 
 from __future__ import annotations
 
@@ -41,7 +46,7 @@ from mewcode.tools import ToolRegistry
 from mewcode.tools.base import Tool, ToolResult
 
 # =====================================================================
-# Helpers
+# 辅助工具
 # =====================================================================
 
 class DummyTool(Tool):
@@ -257,7 +262,7 @@ class TestMailbox:
         assert messages[0].content == "Hello bob"
         assert messages[0].from_agent == "alice"
 
-        # Consumed — should be empty now
+        # 已被消费 —— 此时应该为空
         messages2 = mailbox.consume("bob-agent-id")
         assert len(messages2) == 0
 
@@ -269,7 +274,7 @@ class TestMailbox:
         messages = mailbox.read("bob-id")
         assert len(messages) == 1
 
-        # Still there
+        # 仍然存在
         messages2 = mailbox.read("bob-id")
         assert len(messages2) == 1
 
@@ -308,7 +313,7 @@ class TestAgentNameRegistry:
         reg = AgentNameRegistry.instance()
         reg.register("alice", "agent-abc")
         assert reg.resolve("alice") == "agent-abc"
-        assert reg.resolve("agent-abc") == "agent-abc"  # direct ID lookup
+        assert reg.resolve("agent-abc") == "agent-abc"  # 直接按 ID 查找
         assert reg.resolve("nonexistent") is None
 
     def test_unregister(self):
@@ -330,7 +335,7 @@ class TestAgentNameRegistry:
         assert r1 is r2
 
 # =====================================================================
-# 5. Backend Detection
+# 5. Backend Detection（后端探测）
 # =====================================================================
 
 class TestBackendDetect:
@@ -381,7 +386,7 @@ class TestBackendDetect:
                     detect_backend()
 
 # =====================================================================
-# 6. Tool Filtering
+# 6. Tool Filtering（工具过滤）
 # =====================================================================
 
 class TestToolFilter:
@@ -412,7 +417,7 @@ class TestToolFilter:
         assert "Bash" not in names
 
 # =====================================================================
-# 7. Coordinator Mode
+# 7. Coordinator Mode（协调者模式）
 # =====================================================================
 
 class TestCoordinatorMode:
@@ -477,7 +482,7 @@ class TestCoordinatorMode:
         assert "Workers" in ctx["workerToolsContext"]
 
 # =====================================================================
-# 8. Config Extensions
+# 8. Config Extensions（配置项扩展）
 # =====================================================================
 
 class TestConfigExtensions:
@@ -518,7 +523,7 @@ class TestConfigExtensions:
             load_config(config_path)
 
 # =====================================================================
-# 9. Transcript Persistence
+# 9. Transcript Persistence（会话记录持久化）
 # =====================================================================
 
 class TestTranscript:
@@ -548,7 +553,7 @@ class TestTranscript:
         assert result is None
 
 # =====================================================================
-# 10. Agent build_system_prompt integration
+# 10. Agent build_system_prompt 集成测试
 # =====================================================================
 
 class TestAgentCoordinatorIntegration:

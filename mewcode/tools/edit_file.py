@@ -1,7 +1,12 @@
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
+
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
@@ -9,6 +14,7 @@ from mewcode.tools.base import Tool, ToolResult
 
 if TYPE_CHECKING:
     from mewcode.cache import FileCache
+    from mewcode.tools.file_state_cache import FileStateCache
 
 
 class Params(BaseModel):
@@ -19,19 +25,33 @@ class Params(BaseModel):
 
 class EditFile(Tool):
     name = "EditFile"
-    description = "Replace an exact string in a file. The old_string must appear exactly once in the file."
+    description = (
+        "Replace an exact string in a file. The old_string must appear exactly once in the file.\n"
+        "You MUST read the file with ReadFile before editing. This tool will fail otherwise."
+    )
     params_model = Params
     category = "write"
 
 
-    def __init__(self, file_cache: FileCache | None = None) -> None:
+    def __init__(self, file_cache: FileCache | None = None, file_history: Any = None, file_state_cache: FileStateCache | None = None) -> None:
         self._cache = file_cache
+        self.file_history = file_history
+        self._state_cache = file_state_cache
 
 
     async def execute(self, params: Params) -> ToolResult:
+        if self.file_history is not None:
+            self.file_history.track_edit(params.file_path)
+
         path = Path(params.file_path)
         if not path.exists():
             return ToolResult(output=f"Error: file not found: {params.file_path}", is_error=True)
+
+        if self._state_cache:
+            resolved = str(path.resolve())
+            ok, err_msg = self._state_cache.check(resolved)
+            if not ok:
+                return ToolResult(output=err_msg, is_error=True)
 
         try:
             content = path.read_text(encoding="utf-8")
@@ -52,6 +72,8 @@ class EditFile(Tool):
             path.write_text(new_content, encoding="utf-8")
             if self._cache:
                 self._cache.invalidate(str(path.resolve()))
+            if self._state_cache:
+                self._state_cache.update(str(path.resolve()))
         except Exception as e:
             return ToolResult(output=f"Error writing file: {e}", is_error=True)
 

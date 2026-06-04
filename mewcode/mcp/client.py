@@ -1,6 +1,11 @@
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import AsyncExitStack
 from typing import Any
 
@@ -62,8 +67,10 @@ class MCPClient:
             args=self.config.args,
             env=build_child_env(self.config.env),
         )
+        devnull = open(os.devnull, "w")
+        self._stack.callback(devnull.close)
         read, write = await self._stack.enter_async_context(
-            stdio_client(params)
+            stdio_client(params, errlog=devnull)
         )
         return read, write
 

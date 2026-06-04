@@ -1,4 +1,9 @@
-"""Integration tests for Agent Loop — verifies checklist items programmatically."""
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
+
+"""Agent Loop 的集成测试 —— 以编程方式逐项验证 checklist。"""
 from __future__ import annotations
 
 import asyncio
@@ -10,6 +15,8 @@ from mewcode.agent import (
     Agent,
     ErrorEvent,
     LoopComplete,
+    PermissionRequest,
+    PermissionResponse,
     StreamText,
     ToolResultEvent,
     ToolUseEvent,
@@ -20,6 +27,7 @@ from mewcode.agent import (
 from mewcode.prompts import build_environment_context, build_plan_mode_reminder, build_system_prompt
 from mewcode.client import LLMClient
 from mewcode.conversation import ConversationManager
+from mewcode.serialization import build_anthropic_messages
 from mewcode.tools import create_default_registry
 from mewcode.tools.base import (
     StreamEnd,
@@ -29,7 +37,7 @@ from mewcode.tools.base import (
 )
 
 # ---------------------------------------------------------------------------
-# Mock LLM client that returns scripted responses
+# 返回预设脚本响应的 mock LLM 客户端
 # ---------------------------------------------------------------------------
 
 class MockLLMClient(LLMClient):
@@ -78,20 +86,20 @@ def _collect(events: list) -> dict[str, list]:
     return result
 
 # ---------------------------------------------------------------------------
-# Tests
+# 测试用例
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_single_step_tool_call():
-    """Agent calls ReadFile once, gets result, then stops."""
+    """Agent 调用一次 ReadFile，拿到结果后停止。"""
     client = MockLLMClient([
-        # Turn 1: model calls ReadFile
+        # 第 1 轮：模型调用 ReadFile
         [
             TextDelta("Let me read the file."),
             ToolCallComplete("t1", "ReadFile", {"file_path": "README.md"}),
             StreamEnd("end_turn", input_tokens=10, output_tokens=20),
         ],
-        # Turn 2: model gives final answer
+        # 第 2 轮：模型给出最终答案
         [
             TextDelta("The file contains project info."),
             StreamEnd("end_turn", input_tokens=30, output_tokens=15),
@@ -116,21 +124,21 @@ async def test_single_step_tool_call():
 
 @pytest.mark.asyncio
 async def test_multi_step_autonomous():
-    """Agent does WriteFile then ReadFile then stops — end-to-end multi-step."""
+    """Agent 先 WriteFile 再 ReadFile 然后停止 —— 端到端的多步流程。"""
     client = MockLLMClient([
-        # Turn 1: WriteFile
+        # 第 1 轮：WriteFile
         [
             TextDelta("Creating file."),
             ToolCallComplete("t1", "WriteFile", {"file_path": "/tmp/mewcode_test_hello.txt", "content": "Hello World"}),
             StreamEnd("end_turn", input_tokens=10, output_tokens=20),
         ],
-        # Turn 2: ReadFile to verify
+        # 第 2 轮：ReadFile 进行验证
         [
             TextDelta("Verifying content."),
             ToolCallComplete("t2", "ReadFile", {"file_path": "/tmp/mewcode_test_hello.txt"}),
             StreamEnd("end_turn", input_tokens=40, output_tokens=25),
         ],
-        # Turn 3: final answer
+        # 第 3 轮：最终答案
         [
             TextDelta("File created and verified. Content is correct."),
             StreamEnd("end_turn", input_tokens=60, output_tokens=30),
@@ -152,13 +160,13 @@ async def test_multi_step_autonomous():
     assert len(c["turn"]) == 2
     assert len(c["loop"]) == 1
     assert c["loop"][0].total_turns == 3
-    # Verify the file was actually created
+    # 验证文件确实被创建了
     assert not c["tool_result"][0].is_error
     assert not c["tool_result"][1].is_error
 
 @pytest.mark.asyncio
 async def test_stop_end_turn():
-    """Model stops naturally with end_turn."""
+    """模型以 end_turn 自然停止。"""
     client = MockLLMClient([
         [
             TextDelta("Hello! How can I help?"),
@@ -181,8 +189,8 @@ async def test_stop_end_turn():
 
 @pytest.mark.asyncio
 async def test_stop_max_iterations():
-    """Agent stops after reaching max_iterations."""
-    # Every response has a tool call, so loop never ends naturally
+    """Agent 在达到 max_iterations 后停止。"""
+    # 每个响应都带有工具调用，因此循环永远不会自然结束
     responses = []
     for i in range(5):
         responses.append([
@@ -207,10 +215,10 @@ async def test_stop_max_iterations():
 
 @pytest.mark.asyncio
 async def test_stop_cancel():
-    """Agent stops cleanly on CancelledError."""
+    """Agent 在收到 CancelledError 时干净地停止。"""
 
     class SlowMockClient(LLMClient):
-        """Mock client that sleeps between events to allow cancellation."""
+        """在事件之间 sleep 的 mock 客户端，以便留出取消的时机。"""
         def __init__(self) -> None:
             self._call_count = 0
 
@@ -256,7 +264,7 @@ async def test_stop_cancel():
 
 @pytest.mark.asyncio
 async def test_stop_consecutive_unknown_tools():
-    """Agent stops after 3 consecutive unknown tool calls."""
+    """Agent 在连续 3 次调用未知工具后停止。"""
     responses = []
     for i in range(5):
         responses.append([
@@ -281,16 +289,16 @@ async def test_stop_consecutive_unknown_tools():
 
 @pytest.mark.asyncio
 async def test_message_splicing():
-    """Assistant message has text + multiple tool_uses; tool_results are bundled."""
+    """assistant 消息包含 text + 多个 tool_use；对应的 tool_result 被打包在一起。"""
     client = MockLLMClient([
-        # Turn 1: two tool calls in one response
+        # 第 1 轮：一个响应里包含两次工具调用
         [
             TextDelta("Reading two files."),
             ToolCallComplete("t1", "ReadFile", {"file_path": "README.md"}),
             ToolCallComplete("t2", "ReadFile", {"file_path": "pyproject.toml"}),
             StreamEnd("end_turn", input_tokens=10, output_tokens=20),
         ],
-        # Turn 2: final
+        # 第 2 轮：最终响应
         [
             TextDelta("Done."),
             StreamEnd("end_turn", input_tokens=30, output_tokens=10),
@@ -305,22 +313,22 @@ async def test_message_splicing():
     async for e in agent.run(conv):
         events.append(e)
 
-    # Check conversation history
-    msgs = conv.serialize("anthropic")
-    # env_context(user) + user_message + assistant(text+2 tool_use) + user(2 tool_result) + assistant(final)
+    # 检查对话历史
+    msgs = build_anthropic_messages(conv.get_messages())
+    # env_context(user) + user_message + assistant(text+2 个 tool_use) + user(2 个 tool_result) + assistant(最终响应)
     assert len(msgs) == 5
     assistant_msg = msgs[2]
     assert assistant_msg["role"] == "assistant"
-    assert len(assistant_msg["content"]) == 3  # text + 2 tool_use
+    assert len(assistant_msg["content"]) == 3  # text + 2 个 tool_use
     tool_results_msg = msgs[3]
     assert tool_results_msg["role"] == "user"
-    assert len(tool_results_msg["content"]) == 2  # 2 tool_results
+    assert len(tool_results_msg["content"]) == 2  # 2 个 tool_result
     assert tool_results_msg["content"][0]["tool_use_id"] == "t1"
     assert tool_results_msg["content"][1]["tool_use_id"] == "t2"
 
 @pytest.mark.asyncio
 async def test_concurrent_batch_execution():
-    """Multiple ReadFile calls execute concurrently (same batch)."""
+    """多个 ReadFile 调用并发执行（属于同一批次）。"""
     client = MockLLMClient([
         [
             ToolCallComplete("t1", "ReadFile", {"file_path": "README.md"}),
@@ -343,12 +351,12 @@ async def test_concurrent_batch_execution():
 
     c = _collect(events)
     assert len(c["tool_result"]) == 2
-    # Both should succeed (files exist in project root)
+    # 两个都应成功（这些文件在项目根目录下存在）
     assert all(not r.is_error for r in c["tool_result"])
 
 @pytest.mark.asyncio
 async def test_token_usage_accumulates():
-    """Usage events show cumulative token counts."""
+    """Usage 事件展示的是累计的 token 数量。"""
     client = MockLLMClient([
         [
             TextDelta("Step 1"),
@@ -385,7 +393,7 @@ async def test_token_usage_accumulates():
 
 @pytest.mark.asyncio
 async def test_plan_mode():
-    """Plan mode via permission_mode."""
+    """通过 permission_mode 切换 plan 模式。"""
     from mewcode.permissions import PermissionMode
 
     registry = create_default_registry()
@@ -404,7 +412,8 @@ async def test_plan_mode():
 
 @pytest.mark.asyncio
 async def test_plan_mode_denied_tool_returns_error():
-    """In plan mode, write tools are denied by permission checker."""
+    """在 plan 模式下，写入类工具需要审批（effect=ask）；当用户
+    拒绝时，工具返回一个错误结果，而不会真正执行。"""
     from mewcode.permissions import (
         DangerousCommandDetector,
         PathSandbox,
@@ -439,6 +448,9 @@ async def test_plan_mode_denied_tool_returns_error():
     events = []
     async for e in agent.run(conv):
         events.append(e)
+        # plan 模式在写入前会询问；这里模拟用户拒绝。
+        if isinstance(e, PermissionRequest):
+            e.future.set_result(PermissionResponse.DENY)
 
     c = _collect(events)
     assert len(c["tool_result"]) == 1
@@ -447,7 +459,7 @@ async def test_plan_mode_denied_tool_returns_error():
     assert len(c["error"]) == 0
 
 def test_partition_tool_calls():
-    """Partition groups concurrent-safe calls together."""
+    """分批逻辑会把可并发执行的调用归到同一组。"""
     from mewcode.tools.base import ToolCallComplete
 
     calls = [

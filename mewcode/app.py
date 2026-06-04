@@ -1,3 +1,7 @@
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
 from __future__ import annotations
 
 import asyncio
@@ -35,6 +39,7 @@ from mewcode.client import (
     LLMClient,
     LLMError,
     create_client,
+    resolve_context_window,
 )
 from mewcode.commands import (
     CommandContext,
@@ -52,9 +57,11 @@ from mewcode.memory import (
     MemoryManager,
     Session,
     SessionManager,
-    build_time_gap_message,
+    find_relevant_memories,
     generate_session_summary,
     load_instructions,
+    make_compact_boundary,
+    render_reminder,
 )
 from mewcode.permissions import (
     DangerousCommandDetector,
@@ -82,6 +89,7 @@ from mewcode.tools.load_skill import LoadSkill
 from mewcode.worktree.cleanup import start_stale_cleanup_task
 from mewcode.worktree.manager import WorktreeManager
 from mewcode.commands.handlers.worktree import create_worktree_command
+from mewcode.teammate_tree import TeammateTree
 
 import re
 
@@ -136,8 +144,8 @@ class ChatInput(TextArea):
         Binding("ctrl+j", "newline", "Newline", priority=True),
         Binding("tab", "complete", "Complete", priority=True),
         Binding("escape", "dismiss_popup", "Dismiss", priority=True),
-        Binding("up", "history_prev", "History prev", priority=True),
-        Binding("down", "history_next", "History next", priority=True),
+        Binding("up", "nav_up", "Navigate up", priority=True),
+        Binding("down", "nav_down", "Navigate down", priority=True),
     ]
 
     class Submitted(TMessage):
@@ -177,7 +185,25 @@ class ChatInput(TextArea):
         except Exception:
             pass
 
+    def _popup(self) -> CompletionPopup | None:
+        try:
+            return self.app.query_one(CompletionPopup)
+        except Exception:
+            return None
+
     def action_submit(self) -> None:
+        popup = self._popup()
+        if popup is not None and popup.is_visible:
+            selected = popup.get_selected()
+            popup.hide()
+            if selected:
+                self._history.append(selected)
+                self._persist_entry(selected)
+                self._history_index = -1
+                self._history_draft = ""
+                self.post_message(self.Submitted(selected))
+                self.clear()
+                return
         text = self.text.strip()
         if text:
             self._history.append(text)
@@ -191,6 +217,14 @@ class ChatInput(TextArea):
         self.insert("\n")
 
     def action_complete(self) -> None:
+        popup = self._popup()
+        if popup is not None and popup.is_visible:
+            selected = popup.get_selected()
+            if selected:
+                popup.hide()
+                self.clear()
+                self.insert(selected + " ")
+            return
         text = self.text.strip()
         if text.startswith("/"):
             self.post_message(self.TabComplete(text))
@@ -198,9 +232,15 @@ class ChatInput(TextArea):
             self.insert("\t")
 
     def action_dismiss_popup(self) -> None:
-        self.app.query_one(CompletionPopup).hide()
+        popup = self._popup()
+        if popup is not None:
+            popup.hide()
 
-    def action_history_prev(self) -> None:
+    def action_nav_up(self) -> None:
+        popup = self._popup()
+        if popup is not None and popup.is_visible:
+            popup.move_up()
+            return
         if not self._history:
             return
         if self._history_index == -1:
@@ -213,7 +253,11 @@ class ChatInput(TextArea):
         self.clear()
         self.insert(self._history[self._history_index])
 
-    def action_history_next(self) -> None:
+    def action_nav_down(self) -> None:
+        popup = self._popup()
+        if popup is not None and popup.is_visible:
+            popup.move_down()
+            return
         if self._history_index == -1:
             return
         if self._history_index < len(self._history) - 1:
@@ -230,8 +274,22 @@ class ChatInput(TextArea):
             super().__init__()
             self.prefix = prefix
 
+    class SlashMenuUpdate(TMessage):
+        def __init__(self, prefix: str | None) -> None:
+            super().__init__()
+            self.prefix = prefix
+
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
         text = self.text
+        if text.startswith("/"):
+            prefix = text[1:]
+            if " " not in prefix and "\n" not in prefix:
+                self.post_message(self.SlashMenuUpdate(prefix))
+            else:
+                self.post_message(self.SlashMenuUpdate(None))
+        else:
+            self.post_message(self.SlashMenuUpdate(None))
+
         at_idx = text.rfind("@")
         if at_idx < 0:
             return
@@ -313,7 +371,7 @@ class ToolCallBlock(Static, can_focus=True):
         self._render_loading()
 
     def _render_loading(self) -> None:
-        self.update(f"  ⠋ {self._title} …")
+        self.update(f"  ● {self._title} …")
         self.add_class("tool-block-loading")
 
     def set_result(self, output: str, is_error: bool, elapsed: float) -> None:
@@ -369,7 +427,7 @@ SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
 
 def _to_past_tense(verb: str) -> str:
-    """Convert present-participle verb to past tense."""
+    """把现在进行时动词转换为过去式。"""
     if verb.endswith("ing"):
         stem = verb[:-3]
         if stem.endswith("e"):
@@ -402,7 +460,7 @@ THINKING_VERBS = [
     "Spinning", "Sprouting", "Synthesizing", "Thinking", "Tinkering",
     "Transfiguring", "Transmuting", "Undulating", "Unfurling", "Unravelling",
     "Vibing", "Wandering", "Whisking", "Working", "Wrangling", "Zigzagging",
-]  # 105 verbs, matches Go's internal/tui/verbs.go exactly
+]  # 共 105 个动词，与 Go 版 internal/tui/verbs.go 完全一致
 
 
 class ToolGroupSummary(Static, can_focus=True):
@@ -521,8 +579,9 @@ class MewCodeApp(App):
         worktree_config: Any = None,
         teammate_mode: str = "",
         enable_coordinator_mode: bool = False,
+        driver_class: type | None = None,
     ) -> None:
-        super().__init__()
+        super().__init__(driver_class=driver_class)
         self.providers = providers
         self._initial_permission_mode = permission_mode
         self._mcp_server_configs = mcp_servers or []
@@ -541,12 +600,12 @@ class MewCodeApp(App):
         self._mcp_init_task: asyncio.Task[None] | None = None
         self._selected_provider: ProviderConfig | None = None
         self._streaming = False
-        self._thinking = False
         self._thinking_start: float = 0.0
-        self._thinking_label: Static | None = None
         self._thinking_verb: str = ""
         self._spinner_idx: int = 0
         self._spinner_timer = None
+        self._spinner_label: Static | None = None
+        self._mcp_server_info: str = ""
         self._agent_task: asyncio.Task[None] | None = None
         self._subagent_task: asyncio.Task[None] | None = None
         self._subagent_start_time: float | None = None
@@ -571,6 +630,8 @@ class MewCodeApp(App):
         self._mcp_instructions: str = ""
         self._mcp_instructions_ok: bool = False
         self._mcp_connecting: bool = False
+        self._teammate_tree: TeammateTree | None = None
+        self._teammate_timer = None
 
     @staticmethod
     def _make_banner(model: str = "", work_dir: str = "") -> RichText:
@@ -597,12 +658,13 @@ class MewCodeApp(App):
                     id="provider-list",
                 )
         yield VerticalScroll(id="chat-area")
-        yield CompletionPopup()
         with Vertical(id="input-area"):
             yield ChatInput(id="chat-input")
             with Horizontal(id="status-bar"):
                 yield Static("  default", id="mode-label")
+                yield Static("", id="teammates-label")
                 yield Static("", id="model-label")
+            yield CompletionPopup()
 
     def on_mount(self) -> None:
         self.register_theme(_MEWCODE_THEME)
@@ -640,6 +702,12 @@ class MewCodeApp(App):
         self.session_manager.cleanup()
         self.session = self.session_manager.create()
 
+        from mewcode.filehistory import FileHistory
+        self.file_history = FileHistory(work_dir, self.session.session_id)
+        for tool in self.registry.list_tools():
+            if hasattr(tool, "file_history"):
+                tool.file_history = self.file_history
+
         load_skill_tool = LoadSkill()
         self.registry.register(load_skill_tool)
         self._load_skill_tool = load_skill_tool
@@ -649,16 +717,32 @@ class MewCodeApp(App):
         )
         self.registry.register(AskUserTool())
 
+        from mewcode.tools.exit_plan_mode import ExitPlanModeTool
+        self._exit_plan_tool = ExitPlanModeTool()
+        self.registry.register(self._exit_plan_tool)
+
         self.agent = Agent(
             client=self.client,
             registry=self.registry,
             protocol=provider.protocol,
             work_dir=work_dir,
             permission_checker=checker,
-            context_window=provider.context_window,
+            context_window=provider.get_context_window(),
             instructions_content=self._instructions_content,
             memory_manager=self.memory_manager,
             hook_engine=self.hook_engine,
+        )
+        self.agent.file_history = self.file_history
+        self.agent.session_id = self.session.session_id
+
+        self._exit_plan_tool._is_plan_mode = lambda: self.agent.plan_mode
+        self._exit_plan_tool._plan_exists = lambda: self.agent._get_plan_path().exists()
+
+        # Layer 2: 在后台异步拉取模型的 context window，不阻塞启动流程。
+        # agent 已经有一个同步解析的窗口值（来自配置 / 映射表 / 默认值）；
+        # 如果异步拉取成功，就原地升级为更准确的值。
+        self.run_worker(
+            self._resolve_context_window(provider), exclusive=False
         )
 
         self.skill_loader = SkillLoader(work_dir)
@@ -691,7 +775,7 @@ class MewCodeApp(App):
             self.command_registry, self.skill_loader, self.skill_executor
         )
 
-        # --- Worktree system setup ---
+        # --- Worktree 系统初始化 ---
         from mewcode.config import WorktreeConfig
         wt_cfg = self._worktree_config or WorktreeConfig()
         self.worktree_manager = WorktreeManager(
@@ -718,13 +802,13 @@ class MewCodeApp(App):
             )
         )
 
-        # --- SubAgent system setup ---
+        # --- 子 agent 系统初始化 ---
         self.agent_loader = AgentLoader(
             work_dir, enable_verification=self._enable_verification_agent
         )
         self.agent_loader.load_all()
 
-        # --- Agent Team system setup ---
+        # --- Agent 团队系统初始化 ---
         from mewcode.teams.manager import TeamManager
         from mewcode.tools.team_create import TeamCreateTool
         from mewcode.tools.team_delete import TeamDeleteTool
@@ -791,7 +875,7 @@ class MewCodeApp(App):
         trace_cmd = create_trace_command(self.trace_manager, self.agent.agent_id)
         self.command_registry.register_sync(trace_cmd)
 
-        # --- Coordinator Mode setup (tools registered, activation deferred to TeamCreate) ---
+        # --- 协调者模式初始化（工具已注册，激活推迟到 TeamCreate 时） ---
         from mewcode.tools.synthetic_output import SyntheticOutputTool
 
         self.registry.register(SyntheticOutputTool())
@@ -828,13 +912,24 @@ class MewCodeApp(App):
             self._start_notification_polling()
         )
 
+    async def _resolve_context_window(self, provider: ProviderConfig) -> None:
+        """Layer 2 后台 worker：异步拉取模型的 context window，
+        拉到就原地升级 agent 的窗口值。
+
+        尽力而为 — resolve_context_window 不会抛异常；如果拉不到，
+        agent 继续使用同步解析得到的窗口值。
+        """
+        await resolve_context_window(provider)
+        if self.agent is not None:
+            self.agent.context_window = provider.get_context_window()
+
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         if event.option_list.id == "provider-list":
             provider = self.providers[event.option_index]
             self._select_provider(provider)
 
     # -----------------------------------------------------------------
-    # UIController protocol implementation
+    # UIController 协议实现
     # -----------------------------------------------------------------
 
     def add_system_message(self, text: str) -> None:
@@ -848,8 +943,12 @@ class MewCodeApp(App):
     def set_plan_mode(self, enabled: bool) -> None:
         if self.agent is None:
             return
-        mode = PermissionMode.PLAN if enabled else PermissionMode.DEFAULT
-        self.agent.set_permission_mode(mode)
+        if enabled:
+            self._pre_plan_mode = self.agent.permission_mode
+            self.agent.set_permission_mode(PermissionMode.PLAN)
+        else:
+            restore = getattr(self, "_pre_plan_mode", PermissionMode.DEFAULT)
+            self.agent.set_permission_mode(restore)
         self._update_mode_label()
 
     def get_token_count(self) -> tuple[int, int]:
@@ -861,7 +960,7 @@ class MewCodeApp(App):
         self._update_mode_label()
 
     # -----------------------------------------------------------------
-    # Command dispatch
+    # 命令分发
     # -----------------------------------------------------------------
 
 
@@ -887,6 +986,23 @@ class MewCodeApp(App):
 
     def _set_session(self, session: Session) -> None:
         self.session = session
+        if self.agent:
+            self.agent.session_id = session.session_id
+
+    def _persist_compact_boundary(self, notification: CompactNotification) -> None:
+        """Layer-2 compact 后写入 compact_boundary 记录。
+
+        将摘要 + 原样保留的尾部内联到一条记录中，resume 时只需这一条
+        就能重建压缩后的状态。之前已写入磁盘的原始前缀不会被重放。
+        没有活跃 session 或 compact 未产出 boundary 时直接跳过。
+        """
+        if not self.session or notification.boundary is None:
+            return
+        record = make_compact_boundary(
+            notification.boundary.summary,
+            notification.boundary.keep,
+        )
+        self.session.append_record(record)
 
     def _set_conversation(self, conv: ConversationManager) -> None:
         self.conversation = conv
@@ -932,7 +1048,7 @@ class MewCodeApp(App):
             self._show_error(f"命令执行失败: {e}")
 
     # -----------------------------------------------------------------
-    # Input handling
+    # 输入处理
     # -----------------------------------------------------------------
 
     async def on_chat_input_submitted(self, event: ChatInput.Submitted) -> None:
@@ -940,10 +1056,12 @@ class MewCodeApp(App):
         if self._streaming and not text.startswith("/"):
             if self._agent_task and not self._agent_task.done():
                 self._agent_task.cancel()
-                self._streaming = False
-                self._stop_spinner()
-                self._show_system_message("(response interrupted)")
-                await asyncio.sleep(0.05)
+                try:
+                    await self._agent_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+            self._finish_streaming()
+            self._show_system_message("(response interrupted)")
         await self._dispatch_command(text)
 
     def on_chat_input_tab_complete(self, event: ChatInput.TabComplete) -> None:
@@ -954,9 +1072,20 @@ class MewCodeApp(App):
         if len(matches) == 1:
             input_widget = self.query_one("#chat-input", ChatInput)
             input_widget.clear()
-            input_widget.insert(matches[0] + " ")
+            input_widget.insert(matches[0][1] + " ")
         else:
-            popup.show(matches)
+            popup.show_pairs(matches)
+
+    def on_chat_input_slash_menu_update(self, event: ChatInput.SlashMenuUpdate) -> None:
+        popup = self.query_one(CompletionPopup)
+        if event.prefix is None:
+            popup.hide()
+            return
+        matches = complete(self.command_registry, event.prefix)
+        if not matches:
+            popup.hide()
+            return
+        popup.show_pairs(matches)
 
     def on_chat_input_at_file_request(self, event: ChatInput.AtFileRequest) -> None:
         work_dir = self.agent.work_dir if self.agent else os.getcwd()
@@ -1034,6 +1163,50 @@ class MewCodeApp(App):
                     return
             self._agent_task.cancel()
 
+    async def _prefetch_relevant_memories(self, query: str) -> str:
+        """Run the recall selector as a side-query with an 8s timeout.
+
+        Creates a fresh LLM client so the selector's system prompt is
+        independent of the main conversation's system prompt. Returns the
+        rendered system-reminder body, or "" on any failure / timeout.
+        """
+        if self.memory_manager is None or self._selected_provider is None:
+            return ""
+
+        provider = self._selected_provider
+        user_dir = self.memory_manager.user_mem_dir
+        project_dir = self.memory_manager.project_mem_dir
+
+        async def selector(system_prompt: str, user_message: str) -> str:
+            from mewcode.tools.base import StreamEnd, TextDelta
+
+            side_client = create_client(provider)
+            mini_conv = ConversationManager()
+            mini_conv.history = [Message(role="user", content=user_message)]
+            collected = ""
+            async for event in side_client.stream(mini_conv, system=system_prompt):
+                if isinstance(event, TextDelta):
+                    collected += event.text
+                elif isinstance(event, StreamEnd):
+                    pass
+            return collected
+
+        try:
+            results = await asyncio.wait_for(
+                find_relevant_memories(
+                    query=query,
+                    user_mem_dir=user_dir,
+                    project_mem_dir=project_dir,
+                    recent_tools=None,
+                    already_surfaced=None,
+                    selector=selector,
+                ),
+                timeout=8.0,
+            )
+            return render_reminder(results)
+        except (asyncio.TimeoutError, Exception):
+            return ""
+
     async def _send_message(self, text: str, is_notification: bool = False) -> None:
         assert self.agent is not None
 
@@ -1048,6 +1221,11 @@ class MewCodeApp(App):
         if text and "@" in text:
             text = expand_at_refs(text, self.agent.work_dir)
 
+        # Start memory recall prefetch before UI work.
+        prefetch_task = asyncio.create_task(
+            self._prefetch_relevant_memories(text)
+        ) if text else None
+
         if text:
             user_row = Vertical(classes="user-row")
             await chat.mount(user_row)
@@ -1057,7 +1235,7 @@ class MewCodeApp(App):
             user_rich.append(text, style="bold color(255)")
             user_bubble = Static(user_rich, classes="message user-message")
             await user_row.mount(user_bubble)
-            chat.scroll_end(animate=False)
+            self.call_after_refresh(chat.scroll_end, animate=False)
 
             self.conversation.add_user_message(text)
             if self.session:
@@ -1067,9 +1245,18 @@ class MewCodeApp(App):
             self.conversation.add_system_reminder(self._mcp_instructions)
             self._mcp_instructions_ok = True
 
+        # Collect prefetched recall with 3s timeout, inject as system-reminder.
+        if prefetch_task is not None:
+            try:
+                reminder = await asyncio.wait_for(prefetch_task, timeout=3.0)
+                if reminder:
+                    self.conversation.add_system_reminder(reminder)
+            except (asyncio.TimeoutError, Exception):
+                pass
+
         history_cursor = len(self.conversation.history)
 
-        # Prepare AI response area
+        # 准备 AI 回复区域
         ai_row = Vertical(classes="ai-row")
         await chat.mount(ai_row)
         streaming_label = Static("", classes="message ai-message")
@@ -1077,34 +1264,36 @@ class MewCodeApp(App):
 
         accumulated_text = ""
         tool_blocks: dict[str, ToolCallBlock] = {}
-        # random and _time imported at module level
+
+        # 在聊天区底部启动持续旋转的加载动画
+        self._thinking_start = _time.monotonic()
+        self._thinking_verb = random.choice(THINKING_VERBS)
+        self._spinner_idx = 0
+        self._spinner_label = Static(
+            f"  {SPINNER_FRAMES[0]} {self._thinking_verb}…",
+            id="spinner-live",
+        )
+        await chat.mount(self._spinner_label)
+
+        # Mount teammate tree (initially hidden) below the spinner
+        self._teammate_tree = TeammateTree(id="teammate-tree")
+        self._teammate_tree.display = False
+        await chat.mount(self._teammate_tree)
+        self._start_teammate_polling()
+
+        self.call_after_refresh(chat.scroll_end, animate=False)
+        self._start_spinner()
+
+        await asyncio.sleep(0)
 
         try:
             async for event in self.agent.run(self.conversation):
                 if isinstance(event, ThinkingText):
-                    if not self._thinking:
-                        self._thinking = True
-                        self._thinking_start = _time.monotonic()
-                        self._thinking_verb = random.choice(THINKING_VERBS)
-                        self._spinner_idx = 0
-                        if streaming_label is not None:
-                            frame = SPINNER_FRAMES[self._spinner_idx % len(SPINNER_FRAMES)]
-                            streaming_label.update(f"  {frame} {self._thinking_verb}…")
-                            self._thinking_label = streaming_label
-                            self._start_spinner()
-                    chat.scroll_end(animate=False)
+                    self.call_after_refresh(chat.scroll_end, animate=False)
 
                 elif isinstance(event, StreamText):
-                    if self._thinking and self._thinking_label is not None:
-                        self._stop_spinner()
-                        elapsed = _time.monotonic() - self._thinking_start
-                        past = _to_past_tense(self._thinking_verb)
-                        self._thinking_label.update(
-                            f"✻ {past} for {elapsed:.1f}s"
-                        )
-                        self._thinking_label.add_class("thinking-done")
-                        self._thinking = False
-                        self._thinking_label = None
+                    if streaming_label is not None and not accumulated_text:
+                        await streaming_label.remove()
                         streaming_label = Static("", classes="message ai-message")
                         await ai_row.mount(streaming_label)
                     accumulated_text += event.text
@@ -1113,14 +1302,15 @@ class MewCodeApp(App):
                     t.append("● ", style="bold color(99)")
                     t.append(accumulated_text)
                     streaming_label.update(t)
-                    chat.scroll_end(animate=False)
+                    self.call_after_refresh(chat.scroll_end, animate=False)
 
                 elif isinstance(event, RetryEvent):
                     self._show_system_message(f"↻ Retrying: {event.reason}")
 
                 elif isinstance(event, ToolUseEvent):
                     if accumulated_text:
-                        await streaming_label.remove()
+                        if streaming_label is not None:
+                            await streaming_label.remove()
                         from rich.text import Text as RichText
                         prefix = Static(RichText("●  ", style="bold color(99)"), classes="message")
                         await ai_row.mount(prefix)
@@ -1146,7 +1336,7 @@ class MewCodeApp(App):
                         )
                     await ai_row.mount(block)
                     tool_blocks[event.tool_id] = block
-                    chat.scroll_end(animate=False)
+                    self.call_after_refresh(chat.scroll_end, animate=False)
 
                 elif isinstance(event, PermissionRequest):
                     await self._handle_permission_request(event)
@@ -1155,7 +1345,7 @@ class MewCodeApp(App):
                     block = tool_blocks.get(event.tool_id)
                     if block:
                         block.set_result(event.output, event.is_error, event.elapsed)
-                    chat.scroll_end(animate=False)
+                    self.call_after_refresh(chat.scroll_end, animate=False)
 
                     ask_tool = self.registry.get("AskUserQuestion")
                     if ask_tool and isinstance(ask_tool, AskUserTool) and ask_tool._pending_event:
@@ -1189,10 +1379,10 @@ class MewCodeApp(App):
                     streaming_label = Static("", classes="message ai-message")
                     await ai_row.mount(streaming_label)
                     accumulated_text = ""
-                    chat.scroll_end(animate=False)
+                    self.call_after_refresh(chat.scroll_end, animate=False)
 
                 elif isinstance(event, UsageEvent):
-                    pass  # token display removed
+                    pass  # token 展示已移除
 
                 elif isinstance(event, HookEvent):
                     status = "✓" if event.success else "✗"
@@ -1202,27 +1392,24 @@ class MewCodeApp(App):
 
                 elif isinstance(event, CompactNotification):
                     self._show_system_message(event.message)
+                    # auto_compact 已重写 conversation.history（摘要 +
+                    # boundary + 保留尾部）。先持久化 boundary 记录，然后
+                    # 将游标推进到重建后的历史末尾，这样 TurnComplete/LoopComplete
+                    # 刷盘时只追加 boundary 之后的新消息，不会把已压缩的
+                    # 前缀作为普通记录重复写入。
+                    self._persist_compact_boundary(event)
+                    history_cursor = len(self.conversation.history)
 
                 elif isinstance(event, ErrorEvent):
                     self._show_error(event.message)
 
                 elif isinstance(event, LoopComplete):
                     total_time = _time.monotonic() - self._thinking_start
-                    if self._thinking and self._thinking_label is not None:
-                        self._stop_spinner()
-                        past = _to_past_tense(self._thinking_verb)
-                        self._thinking_label.update(
-                            f"✻ {past} for {total_time:.1f}s"
-                        )
-                        self._thinking_label.add_class("thinking-done")
-                        self._thinking = False
-                        self._thinking_label = None
-                    else:
-                        done_label = Static(
-                            f"✻ {_to_past_tense(self._thinking_verb)} for {total_time:.1f}s",
-                            classes="message thinking-done",
-                        )
-                        await ai_row.mount(done_label)
+                    done_label = Static(
+                        f"✻ {_to_past_tense(self._thinking_verb)} for {total_time:.1f}s",
+                        classes="message thinking-done",
+                    )
+                    await ai_row.mount(done_label)
                     if self.session:
                         for msg in self.conversation.history[history_cursor:]:
                             self.session.append(msg)
@@ -1239,7 +1426,7 @@ class MewCodeApp(App):
                             self._show_plan_approval()
                         )
 
-            # Finalize remaining text
+            # 收尾：渲染剩余的累积文本
             if accumulated_text and streaming_label is not None:
                 await streaming_label.remove()
                 md = Markdown(accumulated_text, classes="message ai-message")
@@ -1247,7 +1434,7 @@ class MewCodeApp(App):
             elif streaming_label is not None:
                 await streaming_label.remove()
 
-            chat.scroll_end(animate=False)
+            self.call_after_refresh(chat.scroll_end, animate=False)
 
         except asyncio.CancelledError:
             if accumulated_text:
@@ -1262,9 +1449,7 @@ class MewCodeApp(App):
         except LLMError as e:
             self._show_error(str(e))
         finally:
-            self._streaming = False
-            self._agent_task = None
-            self._stop_spinner()
+            self._finish_streaming()
             input_widget.focus()
 
             await self._process_task_notifications()
@@ -1291,9 +1476,24 @@ class MewCodeApp(App):
 
     async def _start_notification_polling(self) -> None:
         while True:
-            await asyncio.sleep(3)
+            await asyncio.sleep(2)
             if not self._streaming and self.agent is not None:
                 await self._process_task_notifications()
+                await self._process_mailbox_notifications()
+
+    async def _process_mailbox_notifications(self) -> None:
+        if not hasattr(self, "team_manager") or self.team_manager is None:
+            return
+        if self._streaming or self.agent is None:
+            return
+        notes = self.team_manager.drain_lead_mailbox()
+        if not notes:
+            return
+        for note in notes:
+            self.conversation.add_system_reminder(note)
+        self._agent_task = asyncio.create_task(
+            self._send_message("", is_notification=True)
+        )
 
     async def _show_plan_approval(self) -> None:
         from mewcode.plan_dialog import InlinePlanWidget
@@ -1301,7 +1501,7 @@ class MewCodeApp(App):
         chat = self.query_one("#chat-area", VerticalScroll)
         widget = InlinePlanWidget()
         await chat.mount(widget)
-        chat.scroll_end(animate=False)
+        self.call_after_refresh(chat.scroll_end, animate=False)
         try:
             self.query_one("#chat-input").disabled = True
         except Exception:
@@ -1335,13 +1535,14 @@ class MewCodeApp(App):
             except Exception:
                 pass
 
+        pre = getattr(self, "_pre_plan_mode", PermissionMode.DEFAULT)
         if choice == PlanChoice.YOLO:
             self.agent.set_permission_mode(PermissionMode.BYPASS)
             self._update_mode_label()
             if plan_content:
                 self.send_user_message(f"Execute this plan:\n\n{plan_content}")
         elif choice == PlanChoice.MANUAL:
-            self.agent.set_permission_mode(PermissionMode.DEFAULT)
+            self.agent.set_permission_mode(pre)
             self._update_mode_label()
             if plan_content:
                 self.send_user_message(f"Execute this plan:\n\n{plan_content}")
@@ -1358,7 +1559,7 @@ class MewCodeApp(App):
         widget = InlineAskUserWidget(event.questions)
         self._pending_askuser_event = event
         await chat.mount(widget)
-        chat.scroll_end(animate=False)
+        self.call_after_refresh(chat.scroll_end, animate=False)
         try:
             self.query_one("#chat-input").disabled = True
         except Exception:
@@ -1384,26 +1585,94 @@ class MewCodeApp(App):
             pass
 
     def _start_spinner(self) -> None:
-        """Start the braille spinner animation (80ms per frame)."""
+        """启动 braille spinner 动画（每帧 80ms）。"""
         if self._spinner_timer is not None:
             return
         self._spinner_timer = self.set_interval(0.08, self._tick_spinner)
 
     def _stop_spinner(self) -> None:
-        """Stop the spinner animation."""
+        """停止 spinner 动画。"""
         if self._spinner_timer is not None:
             self._spinner_timer.stop()
             self._spinner_timer = None
 
+    def _finish_streaming(self) -> None:
+        """清理所有 streaming 状态（取消或完成时调用）。"""
+        self._streaming = False
+        self._stop_spinner()
+        self._stop_teammate_polling()
+        self._agent_task = None
+        if self._teammate_tree is not None:
+            self._teammate_tree.remove()
+            self._teammate_tree = None
+        if self._spinner_label is not None:
+            self._spinner_label.remove()
+            self._spinner_label = None
+
     def _tick_spinner(self) -> None:
-        """Advance spinner frame and update the thinking label."""
+        """推进持久 spinner 标签上的动画帧。"""
         self._spinner_idx += 1
-        if self._thinking and self._thinking_label is not None:
-            frame = SPINNER_FRAMES[self._spinner_idx % len(SPINNER_FRAMES)]
-            elapsed = _time.monotonic() - self._thinking_start
-            self._thinking_label.update(
+        frame = SPINNER_FRAMES[self._spinner_idx % len(SPINNER_FRAMES)]
+        elapsed = _time.monotonic() - self._thinking_start
+        if self._spinner_label is not None:
+            self._spinner_label.update(
                 f"  {frame} {self._thinking_verb}…  ({elapsed:.0f}s)"
             )
+            if self._spinner_idx % 5 == 0:
+                try:
+                    self.query_one("#chat-area", VerticalScroll).scroll_end(animate=False)
+                except Exception:
+                    pass
+
+    def _start_teammate_polling(self) -> None:
+        """Start polling teammate progress every 0.5s."""
+        if self._teammate_timer is not None:
+            return
+        self._teammate_timer = self.set_interval(0.5, self._tick_teammate_tree)
+
+    def _stop_teammate_polling(self) -> None:
+        """Stop the teammate progress polling timer."""
+        if self._teammate_timer is not None:
+            self._teammate_timer.stop()
+            self._teammate_timer = None
+
+    def _tick_teammate_tree(self) -> None:
+        """Poll team_manager for teammate progress and update the tree widget."""
+        if not hasattr(self, "team_manager") or self.team_manager is None:
+            return
+        if self._teammate_tree is None:
+            return
+
+        progress_list = self.team_manager.get_all_teammate_progress()
+
+        if not progress_list:
+            self._teammate_tree.display = False
+            self._update_teammates_label(0)
+            return
+
+        # Update the reactive properties via mutate_reactive for list
+        self._teammate_tree.teammates = list(progress_list)
+
+        # Update leader tokens from main agent
+        if self.agent:
+            self._teammate_tree.leader_tokens = (
+                self.agent.total_input_tokens + self.agent.total_output_tokens
+            )
+
+        self._teammate_tree.display = True
+        active_count = sum(1 for p in progress_list if p.status == "running")
+        self._update_teammates_label(active_count)
+
+    def _update_teammates_label(self, count: int) -> None:
+        """Update the teammates count in the status bar."""
+        try:
+            label = self.query_one("#teammates-label", Static)
+            if count > 0:
+                label.update(f"[cyan]● {count} teammate{'s' if count != 1 else ''}[/cyan]  ")
+            else:
+                label.update("")
+        except Exception:
+            pass
 
     async def _handle_permission_request(self, request: PermissionRequest) -> None:
         from mewcode.permission_dialog import InlinePermissionWidget
@@ -1412,8 +1681,8 @@ class MewCodeApp(App):
         widget = InlinePermissionWidget(request.tool_name, request.description)
         self._pending_perm_request = request
         await chat.mount(widget)
-        chat.scroll_end(animate=False)
-        # Input disabled while permission prompt is active
+        self.call_after_refresh(chat.scroll_end, animate=False)
+        # 权限提示弹窗期间禁用输入框
         try:
             self.query_one("#chat-input").disabled = True
         except Exception:
@@ -1428,13 +1697,13 @@ class MewCodeApp(App):
         if req is not None:
             req.future.set_result(event.response)
             self._pending_perm_request = None
-        # Remove the widget from chat
+        # 从聊天区移除权限弹窗组件
         try:
             widget = self.query_one("#perm-inline", InlinePermissionWidget)
             widget.remove()
         except Exception:
             pass
-        # Re-enable input
+        # 重新启用输入框
         try:
             self.query_one("#chat-input").disabled = False
             self.query_one("#chat-input").focus()
@@ -1442,7 +1711,7 @@ class MewCodeApp(App):
             pass
 
     # -----------------------------------------------------------------
-    # Restored session rendering
+    # 恢复 session 的消息渲染
     # -----------------------------------------------------------------
 
     async def _render_restored_messages(self, messages: list[Message]) -> None:
@@ -1466,10 +1735,10 @@ class MewCodeApp(App):
                 md = Markdown(msg.content, classes="message ai-message")
                 await row.mount(md)
 
-        chat.scroll_end(animate=False)
+        self.call_after_refresh(chat.scroll_end, animate=False)
 
     # -----------------------------------------------------------------
-    # Session summary (async background)
+    # Session 摘要（异步后台生成）
     # -----------------------------------------------------------------
 
     async def _update_session_summary(self) -> None:
@@ -1507,7 +1776,7 @@ class MewCodeApp(App):
         mcp_tools = tools_after - tools_before
         server_count = len(manager._clients)
         if server_count > 0:
-            self._show_system_message(
+            self._mcp_server_info = (
                 f"Connected to {server_count} MCP server(s), {mcp_tools} tools registered"
             )
         if server_count > 0 and mcp_tools > 0:
@@ -1542,7 +1811,7 @@ class MewCodeApp(App):
             self.mcp_manager = None
 
     # -----------------------------------------------------------------
-    # Quit
+    # 退出
     # -----------------------------------------------------------------
 
     async def action_handle_ctrl_c(self) -> None:
@@ -1550,15 +1819,7 @@ class MewCodeApp(App):
             if self._agent_task and not self._agent_task.done():
                 self._agent_task.cancel()
             self._show_system_message("(response interrupted)")
-            self._streaming = False
-            self._stop_spinner()
-            if self._thinking and self._thinking_label is not None:
-                elapsed = _time.monotonic() - self._thinking_start
-                past = _to_past_tense(self._thinking_verb)
-                self._thinking_label.update(f"✻ {past} for {elapsed:.1f}s")
-                self._thinking_label.add_class("thinking-done")
-                self._thinking = False
-                self._thinking_label = None
+            self._finish_streaming()
             try:
                 inp = self.query_one("#chat-input", ChatInput)
                 inp.disabled = False
@@ -1567,60 +1828,65 @@ class MewCodeApp(App):
                 pass
             return
 
-        if self.agent and self.agent.memory_manager:
-            try:
-                await asyncio.wait_for(
-                    self.agent._extract_memories(self.conversation),
-                    timeout=10.0,
-                )
-            except (asyncio.TimeoutError, Exception):
-                pass
+        if getattr(self, "_exit_requested", False):
+            self.exit()
+            return
+        self._exit_requested = True
 
-        if self.hook_engine:
-            try:
-                await self.hook_engine.run_hooks(
-                    "shutdown", HookContext(event_name="shutdown")
-                )
-            except Exception:
-                pass
+        async def _cleanup() -> None:
+            tasks: list[asyncio.Task] = []
 
-        if self._stale_cleanup_task and not self._stale_cleanup_task.done():
-            self._stale_cleanup_task.cancel()
+            if self.agent and self.agent.memory_manager:
+                tasks.append(asyncio.create_task(
+                    self.agent._extract_memories(self.conversation)
+                ))
+            if self.hook_engine:
+                tasks.append(asyncio.create_task(
+                    self.hook_engine.run_hooks(
+                        "shutdown", HookContext(event_name="shutdown")
+                    )
+                ))
+            tasks.append(asyncio.create_task(self._shutdown_mcp()))
 
-        if hasattr(self, 'team_manager'):
-            for name in list(self.team_manager._teams):
-                try:
-                    team = self.team_manager._teams[name]
-                    for m in team.members:
-                        team.set_member_active(m.name, False)
-                    self.team_manager.delete_team(name)
-                except Exception:
-                    pass
+            if tasks:
+                await asyncio.wait(tasks, timeout=3.0)
+                for t in tasks:
+                    if not t.done():
+                        t.cancel()
 
-        if self.worktree_manager:
-            for wt in list(self.worktree_manager.active.values()):
-                try:
-                    await self.worktree_manager._remove_worktree(wt.name, wt)
-                except Exception:
-                    pass
+            if self._stale_cleanup_task and not self._stale_cleanup_task.done():
+                self._stale_cleanup_task.cancel()
 
-        if self.session:
-            self.session.close()
+            if hasattr(self, 'team_manager'):
+                for name in list(self.team_manager._teams):
+                    try:
+                        team = self.team_manager._teams[name]
+                        for m in team.members:
+                            team.set_member_active(m.name, False)
+                        self.team_manager.delete_team(name)
+                    except Exception:
+                        pass
 
-        await self._shutdown_mcp()
+            if self.session:
+                self.session.close()
+
+        try:
+            await _cleanup()
+        except Exception:
+            pass
         self.exit()
 
     def _show_error(self, text: str) -> None:
         chat = self.query_one("#chat-area", VerticalScroll)
         error_widget = Static(f"✖ {text}", classes="message error-message")
         chat.mount(error_widget)
-        chat.scroll_end(animate=False)
+        self.call_after_refresh(chat.scroll_end, animate=False)
 
     def _show_system_message(self, text: str) -> None:
         chat = self.query_one("#chat-area", VerticalScroll)
         msg = Static(f"  {text}", classes="message system-message")
         chat.mount(msg)
-        chat.scroll_end(animate=False)
+        self.call_after_refresh(chat.scroll_end, animate=False)
 
     _MODE_DISPLAY = {
         PermissionMode.DEFAULT: "default",
@@ -1650,4 +1916,4 @@ class MewCodeApp(App):
             pass
 
     def _update_token_label(self, input_tokens: int, output_tokens: int) -> None:
-        pass  # token label removed from UI
+        pass  # token 标签已从 UI 中移除

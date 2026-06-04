@@ -1,3 +1,7 @@
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
 from __future__ import annotations
 
 import json
@@ -5,6 +9,9 @@ import re
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
+from typing import Optional
+
+from mewcode.teams.progress import TeammateProgress
 
 
 class BackendType(str, Enum):
@@ -22,9 +29,19 @@ class TeammateInfo:
     worktree_path: str
     backend_type: str  # BackendType value
     is_active: bool | None = None
+    progress: Optional[TeammateProgress] = None
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        # Exclude progress (runtime-only, contains threading.Lock)
+        return {
+            "name": self.name,
+            "agent_id": self.agent_id,
+            "agent_type": self.agent_type,
+            "model": self.model,
+            "worktree_path": self.worktree_path,
+            "backend_type": self.backend_type,
+            "is_active": self.is_active,
+        }
 
     @classmethod
     def from_dict(cls, data: dict) -> TeammateInfo:

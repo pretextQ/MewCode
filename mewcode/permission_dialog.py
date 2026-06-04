@@ -1,3 +1,7 @@
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
 from __future__ import annotations
 
 from textual.app import ComposeResult
@@ -17,10 +21,10 @@ _PERM_OPTIONS = [
 
 
 class InlinePermissionWidget(Vertical, can_focus=True):
-    """Inline permission prompt rendered inside the chat area.
+    """渲染在聊天区域内部的内联权限确认提示。
 
-    Matches the Go TUI permission dialog: tool name + description + numbered
-    options with arrow-key navigation + Enter to confirm.
+    与 Go 版 TUI 的权限对话框一致：工具名 + 描述 + 带编号的
+    选项，支持方向键导航 + 回车确认。
     """
 
     BINDINGS = [

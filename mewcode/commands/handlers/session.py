@@ -1,8 +1,12 @@
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
+
 from __future__ import annotations
 
 from mewcode.commands.registry import Command, CommandContext, CommandType
 from mewcode.conversation import ConversationManager
-from mewcode.memory.session import build_time_gap_message
 
 
 async def handle_session(ctx: CommandContext) -> None:
@@ -71,9 +75,6 @@ async def handle_session(ctx: CommandContext) -> None:
         conv = ConversationManager()
         for msg in result.messages:
             conv.history.append(msg)
-        gap_msg = build_time_gap_message(result.last_active)
-        if gap_msg:
-            conv.history.append(gap_msg)
         ctx.config["set_conversation"](conv)
         if ctx.agent:
             ctx.agent._loop_count = 0

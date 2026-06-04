@@ -1,3 +1,8 @@
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
+
 from __future__ import annotations
 
 import tempfile
@@ -33,12 +38,17 @@ class PathSandbox:
         try:
             real_path = abs_path.resolve(strict=True)
         except OSError:
-            parent = abs_path.parent
+            ancestor = abs_path
+            while not ancestor.exists():
+                parent = ancestor.parent
+                if parent == ancestor:
+                    return False, f"无法解析路径: {path}"
+                ancestor = parent
             try:
-                parent_real = parent.resolve(strict=True)
+                resolved_ancestor = ancestor.resolve(strict=True)
             except OSError:
                 return False, f"无法解析路径: {path}"
-            real_path = parent_real / abs_path.name
+            real_path = resolved_ancestor / abs_path.relative_to(ancestor)
 
         for root in self._allowed_roots:
             try:

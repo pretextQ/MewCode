@@ -1,3 +1,8 @@
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
+
 """
 SubAgent 系统端到端验证脚本。
 不依赖 LLM，直接调用核心组件验证所有 Agent 类型和关键流程。
@@ -48,7 +53,7 @@ def check(name: str, condition: bool, detail: str = ""):
         print(msg)
 
 # ---------------------------------------------------------------------------
-# Dummy tool for testing
+# 用于测试的占位（dummy）工具
 # ---------------------------------------------------------------------------
 class DummyTool(Tool):
     from pydantic import BaseModel as _BM
@@ -229,7 +234,7 @@ def verify_fork():
     conv.add_assistant_message("好的，我来读取这个文件。")
 
     forked = build_forked_messages(conv, "顺便写个单元测试")
-    check("Fork 保留原始对话", len(forked.history) == 5)  # 4 original + 1 fork
+    check("Fork 保留原始对话", len(forked.history) == 5)  # 4 条原始消息 + 1 条 fork 消息
     check(
         "Fork 末尾注入 boilerplate",
         FORK_BOILERPLATE_TAG in forked.history[-1].content,
@@ -403,7 +408,7 @@ def verify_config():
     check("enable_verification_agent=True", config.enable_verification_agent is True)
 
 # ---------------------------------------------------------------------------
-# 8. Permission Mode
+# 8. 权限模式
 # ---------------------------------------------------------------------------
 def verify_permission():
     print("\n== 8. DONT_ASK 权限模式 ==")
@@ -470,7 +475,7 @@ def verify_agent_tool():
     check("isolation 参数可设置", params_wt.isolation == "worktree")
 
 # ===========================================================================
-# Main
+# 主流程
 # ===========================================================================
 async def main():
     global passed, failed

@@ -1,3 +1,8 @@
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -84,20 +89,20 @@ def resolve_agent_tools(
 ) -> ToolRegistry:
     all_tools = {t.name: t for t in parent_registry.list_tools()}
 
-    # Layer 0: MCP tools always pass through — separate before filtering
+    # 第 0 层：MCP 工具始终放行，先分离出来再做后续过滤
     mcp_tools = {name: tool for name, tool in all_tools.items() if _is_mcp_tool(name)}
     all_tools = {name: tool for name, tool in all_tools.items() if not _is_mcp_tool(name)}
 
-    # Layer 1: global disallowed
+    # 第 1 层：全局禁用工具
     for name in ALL_AGENT_DISALLOWED_TOOLS:
         all_tools.pop(name, None)
 
-    # Layer 2: custom agent extra restrictions
+    # 第 2 层：自定义 agent 额外限制
     if definition.source in ("project", "user", "plugin"):
         for name in CUSTOM_AGENT_DISALLOWED_TOOLS:
             all_tools.pop(name, None)
 
-    # Layer 3: background whitelist
+    # 第 3 层：后台任务白名单
     if is_background:
         all_tools = {
             name: tool
@@ -105,7 +110,7 @@ def resolve_agent_tools(
             if name in ASYNC_AGENT_ALLOWED_TOOLS
         }
 
-    # Layer 4: definition disallowed + allowed
+    # 第 4 层：按 agent 定义中的禁用/允许列表过滤
     if definition.disallowed_tools:
         for name in definition.disallowed_tools:
             all_tools.pop(name, None)
@@ -154,7 +159,7 @@ def build_teammate_tools(
         filtered.pop("TeamCreate", None)
         filtered.pop("TeamDelete", None)
 
-    # Apply agent definition restrictions
+    # 应用 agent 定义中的工具限制
     if definition is not None:
         if definition.disallowed_tools:
             for name in definition.disallowed_tools:

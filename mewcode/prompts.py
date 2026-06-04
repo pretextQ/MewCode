@@ -1,4 +1,8 @@
-"""System prompt construction for MewCode."""
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
+"""MewCode 的系统提示词（system prompt）构建。"""
 
 from __future__ import annotations
 
@@ -31,7 +35,7 @@ class PromptBuilder:
 
 
 # ---------------------------------------------------------------------------
-# Sections (matching Go's sections.go priorities 0-95)
+# prompt 分段（对应 Go 版 sections.go，优先级 0-95）
 # ---------------------------------------------------------------------------
 
 IDENTITY_SECTION = PromptSection(
@@ -114,6 +118,7 @@ USING_TOOLS_SECTION = PromptSection(
  - You can call multiple tools in a single response. If tools are independent of each other, call them all in parallel for maximum efficiency. Only call tools sequentially when one depends on the result of another.
  - When running multiple independent Bash commands, make separate parallel tool calls rather than chaining with &&.
  - Use the Agent tool to delegate complex, multi-step tasks to specialized sub-agents.
+ - When the user asks multiple agents to collaborate, form a team, or needs agents to communicate with each other, use TeamCreate to create a team, then spawn teammates with the Agent tool's team_name parameter. Teammates are long-running and communicate via SendMessage, unlike regular sub-agents which block and return inline.
  - Some specialized tools are deferred and not listed in your initial tool set. If you need a tool that isn't available, use ToolSearch to find and load it.""",
 )
 
@@ -157,7 +162,7 @@ def environment_section(work_dir: str) -> PromptSection:
 
 
 # ---------------------------------------------------------------------------
-# Plan Mode Reminders (matching Go's plan_mode.go)
+# Plan 模式提示语（对应 Go 版 plan_mode.go）
 # ---------------------------------------------------------------------------
 
 _PLAN_MODE_FULL_REMINDER = """\
@@ -229,7 +234,7 @@ def build_plan_mode_reminder(
 
 
 # ---------------------------------------------------------------------------
-# Public API
+# 对外接口
 # ---------------------------------------------------------------------------
 
 def build_system_prompt(

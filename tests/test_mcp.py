@@ -1,4 +1,9 @@
-"""Tests for the MCP Client system (Chapter 6)."""
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
+
+"""MCP 客户端系统的测试（第 6 章）。"""
 from __future__ import annotations
 
 import asyncio
@@ -75,7 +80,7 @@ class TestBuildChildEnv:
         assert len(env) == 1
 
 # ===========================================================================
-# load_config: mcp_servers parsing
+# load_config：解析 mcp_servers
 # ===========================================================================
 
 class TestLoadConfigMCP:
@@ -244,7 +249,7 @@ class TestExtractText:
         assert "[image: image/png]" in _extract_text(content)
 
 # ===========================================================================
-# MCPManager: partial failure tolerance
+# MCPManager：部分失败容错
 # ===========================================================================
 
 class TestMCPManagerPartialFailure:

@@ -1,4 +1,9 @@
-"""Tests for Hook system — events, conditions, executors, engine, loader, and agent integration."""
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
+
+"""Hook 系统的测试 —— 涵盖事件、条件、执行器、引擎、加载器以及与 agent 的集成。"""
 from __future__ import annotations
 
 import asyncio
@@ -95,7 +100,7 @@ class TestHookContext:
         assert ctx.expand("$FILE_PATH") == ""
 
 # ---------------------------------------------------------------------------
-# Condition parsing
+# 条件解析
 # ---------------------------------------------------------------------------
 
 class TestParseCondition:
@@ -140,7 +145,7 @@ class TestParseCondition:
             parse_condition("tool Bash")
 
 # ---------------------------------------------------------------------------
-# Condition evaluation
+# 条件求值
 # ---------------------------------------------------------------------------
 
 class TestConditionEvaluate:
@@ -272,7 +277,7 @@ class TestHttpExecutor:
 
         action = Action(type="http", url="https://httpbin.org/post", body='{"test": true}')
         ctx = HookContext()
-        # Use a mock to avoid real network calls
+        # 用 mock 避免发起真实的网络请求
         with patch("mewcode.hooks.executors.urlopen") as mock_urlopen:
             mock_resp = mock_urlopen.return_value.__enter__.return_value
             mock_resp.status = 200
@@ -496,11 +501,11 @@ class TestHookEngine:
         await engine.run_hooks("post_tool_use", ctx)
 
 # ---------------------------------------------------------------------------
-# Agent Loop integration
+# Agent 循环集成
 # ---------------------------------------------------------------------------
 
 class TestAgentHookIntegration:
-    """Test that pre_tool_use reject causes tool call to be skipped."""
+    """验证 pre_tool_use 拒绝会导致工具调用被跳过。"""
 
     @pytest.mark.asyncio
     async def test_pre_tool_use_reject_skips_tool(self):

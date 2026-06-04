@@ -1,3 +1,7 @@
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
 from __future__ import annotations
 
 import asyncio
@@ -58,7 +62,7 @@ class WorktreeManager:
         )
 
     # ------------------------------------------------------------------
-    # Fast recovery: read HEAD SHA from filesystem without git subprocess
+    # 快速恢复：直接从文件系统读取 HEAD SHA，无需启动 git 子进程
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -108,7 +112,7 @@ class WorktreeManager:
             return None
 
     # ------------------------------------------------------------------
-    # Create
+    # 创建 worktree
     # ------------------------------------------------------------------
 
     async def create(self, name: str, base_branch: str = "HEAD") -> Worktree:
@@ -166,7 +170,7 @@ class WorktreeManager:
             return wt
 
     # ------------------------------------------------------------------
-    # Enter
+    # 进入 worktree
     # ------------------------------------------------------------------
 
     async def enter(self, name: str) -> WorktreeSession:
@@ -190,7 +194,7 @@ class WorktreeManager:
         return session
 
     # ------------------------------------------------------------------
-    # Exit
+    # 退出 worktree
     # ------------------------------------------------------------------
 
 
@@ -220,7 +224,7 @@ class WorktreeManager:
             await self._remove_worktree(name, wt)
 
     # ------------------------------------------------------------------
-    # Remove (internal)
+    # 删除 worktree（内部方法）
     # ------------------------------------------------------------------
 
     async def _remove_worktree(self, name: str, wt: Worktree) -> None:
@@ -237,7 +241,7 @@ class WorktreeManager:
         self.active.pop(name, None)
 
     # ------------------------------------------------------------------
-    # Auto cleanup
+    # 自动清理
     # ------------------------------------------------------------------
 
 
@@ -253,7 +257,7 @@ class WorktreeManager:
         return CleanupResult(kept=False)
 
     # ------------------------------------------------------------------
-    # List / query
+    # 列出 / 查询
     # ------------------------------------------------------------------
 
     def list_worktrees(self) -> list[Worktree]:
@@ -264,7 +268,7 @@ class WorktreeManager:
         return self.current_session
 
     # ------------------------------------------------------------------
-    # Restore from persisted session
+    # 从持久化的 session 中恢复
     # ------------------------------------------------------------------
 
     def restore_session(self) -> WorktreeSession | None:
@@ -289,7 +293,7 @@ class WorktreeManager:
         return session
 
     # ------------------------------------------------------------------
-    # Helpers
+    # 辅助方法
     # ------------------------------------------------------------------
 
 

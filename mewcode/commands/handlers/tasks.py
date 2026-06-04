@@ -1,3 +1,7 @@
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
 from __future__ import annotations
 
 import time
@@ -67,7 +71,7 @@ def create_tasks_handler(task_manager: TaskManager):
                 )
             return
 
-        # Default: list all tasks
+        # 默认：列出所有任务
         tasks = task_manager.list_tasks()
         if not tasks:
             ctx.ui.add_system_message("没有后台任务")

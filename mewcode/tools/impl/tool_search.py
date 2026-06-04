@@ -1,3 +1,7 @@
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
 from __future__ import annotations
 
 import json
@@ -25,7 +29,7 @@ class ToolSearchTool(Tool):
     )
     params_model = ToolSearchParams
     category = "read"
-    should_defer = False  # ToolSearch itself is never deferred
+    should_defer = False  # ToolSearch 自身永远不延迟加载
 
 
     def __init__(
