@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
 
-# 简历模版：jianli.xiaolinnote.com
-# Agent网站：xiaolinnote.com
-# 后端八股网站：xiaolincoding.com
-# 来源：公众号@小林coding
 
 """Run trigger evaluation for a skill description.
 
@@ -25,10 +21,6 @@ from pathlib import Path
 from scripts.utils import parse_skill_md
 
 
-# 来源：公众号@小林coding
-# 简历模版：jianli.xiaolinnote.com
-# 后端八股网站：xiaolincoding.com
-# Agent网站：xiaolinnote.com
 
 def find_project_root() -> Path:
     """Find the project root by walking up from cwd looking for .claude/.
@@ -43,10 +35,6 @@ def find_project_root() -> Path:
     return current
 
 
-# Agent网站：xiaolinnote.com
-# 简历模版：jianli.xiaolinnote.com
-# 后端八股网站：xiaolincoding.com
-# 来源：公众号@小林coding
 
 def run_single_query(
     query: str,
@@ -197,10 +185,6 @@ def run_single_query(
             command_file.unlink()
 
 
-# 简历模版：jianli.xiaolinnote.com
-# 来源：公众号@小林coding
-# 后端八股网站：xiaolincoding.com
-# Agent网站：xiaolinnote.com
 
 def run_eval(
     eval_set: list[dict],
@@ -277,10 +261,6 @@ def run_eval(
     }
 
 
-# 后端八股网站：xiaolincoding.com
-# Agent网站：xiaolinnote.com
-# 来源：公众号@小林coding
-# 简历模版：jianli.xiaolinnote.com
 
 def main():
     parser = argparse.ArgumentParser(description="Run trigger evaluation for a skill description")

@@ -48,12 +48,6 @@ MIME_OVERRIDES = {
     ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 }
 
-
-# 后端八股网站：xiaolincoding.com
-# 简历模版：jianli.xiaolinnote.com
-# Agent网站：xiaolinnote.com
-# 来源：公众号@小林coding
-
 def get_mime_type(path: Path) -> str:
     ext = path.suffix.lower()
     if ext in MIME_OVERRIDES:
@@ -61,14 +55,12 @@ def get_mime_type(path: Path) -> str:
     mime, _ = mimetypes.guess_type(str(path))
     return mime or "application/octet-stream"
 
-
 def find_runs(workspace: Path) -> list[dict]:
     """Recursively find directories that contain an outputs/ subdirectory."""
     runs: list[dict] = []
     _find_runs_recursive(workspace, workspace, runs)
     runs.sort(key=lambda r: (r.get("eval_id", float("inf")), r["id"]))
     return runs
-
 
 def _find_runs_recursive(root: Path, current: Path, runs: list[dict]) -> None:
     if not current.is_dir():
@@ -85,7 +77,6 @@ def _find_runs_recursive(root: Path, current: Path, runs: list[dict]) -> None:
     for child in sorted(current.iterdir()):
         if child.is_dir() and child.name not in skip:
             _find_runs_recursive(root, child, runs)
-
 
 def build_run(root: Path, run_dir: Path) -> dict | None:
     """Build a run dict with prompt, outputs, and grading data."""
@@ -150,12 +141,6 @@ def build_run(root: Path, run_dir: Path) -> dict | None:
         "grading": grading,
     }
 
-
-# 后端八股网站：xiaolincoding.com
-# 简历模版：jianli.xiaolinnote.com
-# 来源：公众号@小林coding
-# Agent网站：xiaolinnote.com
-
 def embed_file(path: Path) -> dict:
     """Read a file and return an embedded representation."""
     ext = path.suffix.lower()
@@ -219,7 +204,6 @@ def embed_file(path: Path) -> dict:
             "data_uri": f"data:{mime};base64,{b64}",
         }
 
-
 def load_previous_iteration(workspace: Path) -> dict[str, dict]:
     """Load previous iteration's feedback and outputs.
 
@@ -256,12 +240,6 @@ def load_previous_iteration(workspace: Path) -> dict[str, dict]:
 
     return result
 
-
-# Agent网站：xiaolinnote.com
-# 后端八股网站：xiaolincoding.com
-# 简历模版：jianli.xiaolinnote.com
-# 来源：公众号@小林coding
-
 def generate_html(
     runs: list[dict],
     skill_name: str,
@@ -294,7 +272,6 @@ def generate_html(
     data_json = json.dumps(embedded)
 
     return template.replace("/*__EMBEDDED_DATA__*/", f"const EMBEDDED_DATA = {data_json};")
-
 
 # ---------------------------------------------------------------------------
 # HTTP server (stdlib only, zero dependencies)
@@ -394,20 +371,9 @@ class ReviewHandler(BaseHTTPRequestHandler):
         else:
             self.send_error(404)
 
-    # Agent网站：xiaolinnote.com
-    # 来源：公众号@小林coding
-    # 后端八股网站：xiaolincoding.com
-    # 简历模版：jianli.xiaolinnote.com
-
     def log_message(self, format: str, *args: object) -> None:
         # Suppress request logging to keep terminal clean
         pass
-
-
-# 来源：公众号@小林coding
-# Agent网站：xiaolinnote.com
-# 简历模版：jianli.xiaolinnote.com
-# 后端八股网站：xiaolincoding.com
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate and serve eval review")
@@ -490,7 +456,6 @@ def main() -> None:
     except KeyboardInterrupt:
         print("\nStopped.")
         server.server_close()
-
 
 if __name__ == "__main__":
     main()

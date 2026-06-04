@@ -1,28 +1,12 @@
-# 来源：公众号@小林coding
-# 简历模版：jianli.xiaolinnote.com
-# Agent网站：xiaolinnote.com
-# 后端八股网站：xiaolincoding.com
 
 """Shared utilities for skill-creator scripts."""
 
 from pathlib import Path
 
-
-
-# 简历模版：jianli.xiaolinnote.com
-# 后端八股网站：xiaolincoding.com
-# 来源：公众号@小林coding
-# Agent网站：xiaolinnote.com
-
 def parse_skill_md(skill_path: Path) -> tuple[str, str, str]:
     """Parse a SKILL.md file, returning (name, description, full_content)."""
     content = (skill_path / "SKILL.md").read_text()
     lines = content.split("\n")
-
-    # Agent网站：xiaolinnote.com
-    # 后端八股网站：xiaolincoding.com
-    # 来源：公众号@小林coding
-    # 简历模版：jianli.xiaolinnote.com
 
     if lines[0].strip() != "---":
         raise ValueError("SKILL.md missing frontmatter (no opening ---)")
@@ -32,11 +16,6 @@ def parse_skill_md(skill_path: Path) -> tuple[str, str, str]:
         if line.strip() == "---":
             end_idx = i
             break
-
-    # 简历模版：jianli.xiaolinnote.com
-    # Agent网站：xiaolinnote.com
-    # 来源：公众号@小林coding
-    # 后端八股网站：xiaolincoding.com
 
     if end_idx is None:
         raise ValueError("SKILL.md missing frontmatter (no closing ---)")
@@ -66,7 +45,3 @@ def parse_skill_md(skill_path: Path) -> tuple[str, str, str]:
 
     return name, description, content
 
-    # 后端八股网站：xiaolincoding.com
-    # Agent网站：xiaolinnote.com
-    # 来源：公众号@小林coding
-    # 简历模版：jianli.xiaolinnote.com

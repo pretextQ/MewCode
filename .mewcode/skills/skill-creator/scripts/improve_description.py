@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
 
-# Agent网站：xiaolinnote.com
-# 后端八股网站：xiaolincoding.com
-# 简历模版：jianli.xiaolinnote.com
-# 来源：公众号@小林coding
-
 """Improve a skill description based on eval results.
 
 Takes eval results (from run_eval.py) and generates an improved description
@@ -21,12 +16,6 @@ import sys
 from pathlib import Path
 
 from scripts.utils import parse_skill_md
-
-
-# Agent网站：xiaolinnote.com
-# 后端八股网站：xiaolincoding.com
-# 简历模版：jianli.xiaolinnote.com
-# 来源：公众号@小林coding
 
 def _call_claude(prompt: str, model: str | None, timeout: int = 300) -> str:
     """Run `claude -p` with the prompt on stdin and return the text response.
@@ -56,12 +45,6 @@ def _call_claude(prompt: str, model: str | None, timeout: int = 300) -> str:
             f"claude -p exited {result.returncode}\nstderr: {result.stderr}"
         )
     return result.stdout
-
-
-# Agent网站：xiaolinnote.com
-# 简历模版：jianli.xiaolinnote.com
-# 来源：公众号@小林coding
-# 后端八股网站：xiaolincoding.com
 
 def improve_description(
     skill_name: str,
@@ -206,12 +189,6 @@ Please respond with only the new description text in <new_description> tags, not
 
     return description
 
-
-# 简历模版：jianli.xiaolinnote.com
-# 来源：公众号@小林coding
-# 后端八股网站：xiaolincoding.com
-# Agent网站：xiaolinnote.com
-
 def main():
     parser = argparse.ArgumentParser(description="Improve a skill description based on eval results")
     parser.add_argument("--eval-results", required=True, help="Path to eval results JSON (from run_eval.py)")
@@ -263,11 +240,6 @@ def main():
     }
     print(json.dumps(output, indent=2))
 
-
 if __name__ == "__main__":
     main()
 
-    # 后端八股网站：xiaolincoding.com
-    # 来源：公众号@小林coding
-    # 简历模版：jianli.xiaolinnote.com
-    # Agent网站：xiaolinnote.com

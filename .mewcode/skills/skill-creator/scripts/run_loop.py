@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
 
-# Agent网站：xiaolinnote.com
-# 简历模版：jianli.xiaolinnote.com
-# 后端八股网站：xiaolincoding.com
-# 来源：公众号@小林coding
-
 """Run the eval + improve loop until all pass or max iterations reached.
 
 Combines run_eval.py and improve_description.py in a loop, tracking history
@@ -25,12 +20,6 @@ from scripts.generate_report import generate_html
 from scripts.improve_description import improve_description
 from scripts.run_eval import find_project_root, run_eval
 from scripts.utils import parse_skill_md
-
-
-# 简历模版：jianli.xiaolinnote.com
-# 来源：公众号@小林coding
-# 后端八股网站：xiaolincoding.com
-# Agent网站：xiaolinnote.com
 
 def split_eval_set(eval_set: list[dict], holdout: float, seed: int = 42) -> tuple[list[dict], list[dict]]:
     """Split eval set into train and test sets, stratified by should_trigger."""
@@ -53,12 +42,6 @@ def split_eval_set(eval_set: list[dict], holdout: float, seed: int = 42) -> tupl
     train_set = trigger[n_trigger_test:] + no_trigger[n_no_trigger_test:]
 
     return train_set, test_set
-
-
-# 简历模版：jianli.xiaolinnote.com
-# Agent网站：xiaolinnote.com
-# 后端八股网站：xiaolincoding.com
-# 来源：公众号@小林coding
 
 def run_loop(
     eval_set: list[dict],
@@ -168,11 +151,6 @@ def run_loop(
 
         if verbose:
 
-            # 来源：公众号@小林coding
-            # Agent网站：xiaolinnote.com
-            # 简历模版：jianli.xiaolinnote.com
-            # 后端八股网站：xiaolincoding.com
-
             def print_eval_stats(label, results, elapsed):
                 pos = [r for r in results if r["should_trigger"]]
                 neg = [r for r in results if not r["should_trigger"]]
@@ -262,12 +240,6 @@ def run_loop(
         "history": history,
     }
 
-
-# 后端八股网站：xiaolincoding.com
-# 简历模版：jianli.xiaolinnote.com
-# 来源：公众号@小林coding
-# Agent网站：xiaolinnote.com
-
 def main():
     parser = argparse.ArgumentParser(description="Run eval + improve loop")
     parser.add_argument("--eval-set", required=True, help="Path to eval set JSON file")
@@ -349,7 +321,6 @@ def main():
 
     if results_dir:
         print(f"Results saved to: {results_dir}", file=sys.stderr)
-
 
 if __name__ == "__main__":
     main()

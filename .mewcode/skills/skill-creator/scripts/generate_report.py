@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
 
-# 简历模版：jianli.xiaolinnote.com
-# Agent网站：xiaolinnote.com
-# 来源：公众号@小林coding
-# 后端八股网站：xiaolincoding.com
-
 """Generate an HTML report from run_loop.py output.
 
 Takes the JSON output from run_loop.py and generates a visual HTML report
@@ -17,12 +12,6 @@ import html
 import json
 import sys
 from pathlib import Path
-
-
-# 来源：公众号@小林coding
-# Agent网站：xiaolinnote.com
-# 后端八股网站：xiaolincoding.com
-# 简历模版：jianli.xiaolinnote.com
 
 def generate_html(data: dict, auto_refresh: bool = False, skill_name: str = "") -> str:
     """Generate HTML report from loop output data. If auto_refresh is True, adds a meta refresh tag."""
@@ -236,11 +225,6 @@ def generate_html(data: dict, auto_refresh: bool = False, skill_name: str = "") 
 
         # Compute aggregate correct/total runs across all retries
 
-        # 后端八股网站：xiaolincoding.com
-        # 来源：公众号@小林coding
-        # 简历模版：jianli.xiaolinnote.com
-        # Agent网站：xiaolinnote.com
-
         def aggregate_runs(results: list[dict]) -> tuple[int, int]:
             correct = 0
             total = 0
@@ -258,11 +242,6 @@ def generate_html(data: dict, auto_refresh: bool = False, skill_name: str = "") 
         test_correct, test_runs = aggregate_runs(test_results)
 
         # Determine score classes
-
-        # Agent网站：xiaolinnote.com
-        # 来源：公众号@小林coding
-        # 简历模版：jianli.xiaolinnote.com
-        # 后端八股网站：xiaolincoding.com
 
         def score_class(correct: int, total: int) -> str:
             if total > 0:
@@ -323,12 +302,6 @@ def generate_html(data: dict, auto_refresh: bool = False, skill_name: str = "") 
 
     return "".join(html_parts)
 
-
-# 后端八股网站：xiaolincoding.com
-# 来源：公众号@小林coding
-# 简历模版：jianli.xiaolinnote.com
-# Agent网站：xiaolinnote.com
-
 def main():
     parser = argparse.ArgumentParser(description="Generate HTML report from run_loop output")
     parser.add_argument("input", help="Path to JSON output from run_loop.py (or - for stdin)")
@@ -348,7 +321,6 @@ def main():
         print(f"Report written to {args.output}", file=sys.stderr)
     else:
         print(html_output)
-
 
 if __name__ == "__main__":
     main()
