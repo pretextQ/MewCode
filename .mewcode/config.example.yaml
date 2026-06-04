@@ -1,0 +1,40 @@
+providers:
+  - name: anthropic-official
+    protocol: anthropic
+    base_url: https://api.deepseek.com/anthropic
+    api_key: "your-api-key-here"
+    model: deepseek-v4-flash
+    thinking: true
+
+  # OpenAI 协议示例
+  # - name: openai-official
+  #   protocol: openai
+  #   base_url: https://api.openai.com/v1
+  #   api_key: "your-api-key-here"
+  #   model: gpt-4o
+
+  # OpenAI 兼容协议示例（适用于第三方中转站、本地部署等）
+  # - name: openai-compat
+  #   protocol: openai-compat
+  #   base_url: https://your-proxy.example.com/v1
+  #   api_key: "your-api-key-here"
+  #   model: claude-sonnet-4-20250514
+
+permission_mode: default
+
+mcp_servers:
+  # stdio 模式示例：
+  - name: context7
+    command: npx
+    args: ["-y", "@upstash/context7-mcp"]
+
+  # - name: playwright
+  #   command: npx
+  #   args: ["-y", "@playwright/mcp"]
+
+  # Streamable HTTP 模式示例：
+  # - name: my-http-mcp
+  #   url: https://example.com/mcp
+  #   transport: http
+  #   headers:
+  #     Authorization: "Bearer ${MY_TOKEN}"

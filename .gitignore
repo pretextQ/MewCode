@@ -7,6 +7,8 @@ dist/
 build/
 .idea/
 .vscode/
-.mewcode/
+.mewcode/*
+!.mewcode/config.example.yaml
+!.mewcode/skills/
 .claude/
 CLAUDE.md
