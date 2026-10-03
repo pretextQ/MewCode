@@ -687,3 +687,36 @@ async def test_run_to_completion_retries_on_rate_limit():
 
     result = await agent.run_to_completion("hi")
     assert result == "done"
+
+
+# ---------------------------------------------------------------------------
+# F2.6 空 assistant 消息防护
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_max_tokens_recovery_with_empty_text_skips_empty_assistant():
+    """max_tokens 恢复分支收到空回复时不得产生空 assistant 消息（API 400）。"""
+    client = _ScaledMockClient([
+        [
+            StreamEnd("max_tokens", input_tokens=10, output_tokens=16000),
+        ],
+        [
+            TextDelta("recovered"),
+            StreamEnd("end_turn", input_tokens=10, output_tokens=100),
+        ],
+    ], max_output_tokens=64000)
+    agent = Agent(client, create_default_registry(), "anthropic")
+    agent.stream_retry_delays = (0.01, 0.01, 0.01)
+    conv = ConversationManager()
+    conv.add_user_message("continue")
+
+    events = []
+    async for e in agent.run(conv):
+        events.append(e)
+
+    c = _collect(events)
+    assert len(c["error"]) == 0
+    for m in build_anthropic_messages(conv.get_messages()):
+        assert not (m["role"] == "assistant" and m["content"] == ""), (
+            f"empty assistant message in history: {m}"
+        )

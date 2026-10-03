@@ -592,9 +592,11 @@ class Agent:
                     # 已处于上限，升级为空操作，落入恢复分块流程
                 if output_recoveries < MAX_OUTPUT_TOKENS_RECOVERIES:
                     output_recoveries += 1
-                    conversation.add_assistant_message(
-                        response.text, thinking_blocks=conv_thinking
-                    )
+                    if response.text:
+                        # 空文本不加历史：空 assistant 消息会被 API 400 拒绝
+                        conversation.add_assistant_message(
+                            response.text, thinking_blocks=conv_thinking
+                        )
                     conversation.add_user_message(
                         "Output token limit hit. Resume directly from where you stopped. "
                         "Break remaining work into smaller pieces."

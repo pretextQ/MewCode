@@ -12,6 +12,15 @@ from mewcode.conversation import Message
 def build_anthropic_messages(messages: list[Message]) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     for m in messages:
+        if (
+            m.role == "assistant"
+            and not m.content
+            and not m.tool_uses
+            and not m.thinking_blocks
+            and not m.tool_results
+        ):
+            # 空 assistant 消息会被 Anthropic API 以 400 拒绝
+            continue
         if m.tool_uses or m.thinking_blocks:
             content: list[dict[str, Any]] = []
             for tb in m.thinking_blocks:
