@@ -381,6 +381,14 @@ class TestBackendDetect:
                 with pytest.raises(BackendDetectionError):
                     detect_backend()
 
+    def test_explicit_tmux_unavailable_raises(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("TMUX", None)
+            os.environ.pop("TERM_PROGRAM", None)
+            with patch("mewcode.teams.backend_detect.shutil.which", return_value=None):
+                with pytest.raises(BackendDetectionError, match="tmux"):
+                    detect_backend(teammate_mode="tmux")
+
 # =====================================================================
 # 6. Tool Filtering（工具过滤）
 # =====================================================================
@@ -554,9 +562,9 @@ class TestTranscript:
 
 class TestAgentCoordinatorIntegration:
     def test_normal_prompt(self):
-        from mewcode.prompts import build_system_prompt, BASE_PERSONA
+        from mewcode.prompts import IDENTITY_SECTION, build_system_prompt
         prompt = build_system_prompt()
-        assert BASE_PERSONA in prompt
+        assert IDENTITY_SECTION.content.strip() in prompt
 
     def test_coordinator_prompt(self):
         from mewcode.prompts import build_system_prompt
@@ -566,7 +574,10 @@ class TestAgentCoordinatorIntegration:
         assert "Synthesis" in prompt
 
     def test_coordinator_overrides_plan(self):
-        from mewcode.prompts import build_system_prompt, PLAN_MODE_INSTRUCTIONS
-        prompt = build_system_prompt(plan_mode=True, coordinator_mode=True)
-        assert PLAN_MODE_INSTRUCTIONS not in prompt
+        from mewcode.prompts import build_plan_mode_reminder, build_system_prompt
+        prompt = build_system_prompt(coordinator_mode=True)
         assert "coordinator" in prompt.lower()
+        plan_reminder = build_plan_mode_reminder(
+            "/tmp/plan.md", plan_exists=False, iteration=1
+        )
+        assert plan_reminder.strip() not in prompt
