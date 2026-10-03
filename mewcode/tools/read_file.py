@@ -33,7 +33,7 @@ class ReadFile(Tool):
 
 
     async def execute(self, params: Params) -> ToolResult:
-        path = Path(params.file_path)
+        path = Path(self._resolve_work_path(params.file_path))
         if not path.exists():
             return ToolResult(output=f"Error: file not found: {params.file_path}", is_error=True)
         if not path.is_file():

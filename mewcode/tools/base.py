@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+import copy
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel
@@ -27,11 +29,29 @@ class Tool(ABC):
     is_concurrency_safe: bool = False
     is_system_tool: bool = False
     should_defer: bool = False
+    _work_dir: str | None = None
 
     @property
     def is_read_only(self) -> bool:
         return self.category == "read"
 
+
+    def bind(self, work_dir: str) -> "Tool":
+        """返回绑定 work_dir 的浅拷贝代理：相对路径与子进程 cwd 以 work_dir
+        为基准（in-process 子代理运行在 worktree 时使用）。未绑定工具保持
+        原有进程 CWD 行为。"""
+        proxy = copy.copy(self)
+        proxy._work_dir = work_dir
+        return proxy
+
+    def _resolve_work_path(self, path: str) -> str:
+        """相对路径解析到绑定的 work_dir；绝对路径或未绑定时原样返回。"""
+        if not path or not self._work_dir:
+            return path
+        p = Path(path)
+        if p.is_absolute():
+            return path
+        return str(Path(self._work_dir) / p)
 
     def get_schema(self) -> dict[str, Any]:
         schema = self.params_model.model_json_schema()

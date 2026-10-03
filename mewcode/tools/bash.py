@@ -28,6 +28,7 @@ class Bash(Tool):
         try:
             proc = await asyncio.create_subprocess_shell(
                 params.command,
+                cwd=self._work_dir or None,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )

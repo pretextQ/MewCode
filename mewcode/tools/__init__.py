@@ -17,6 +17,18 @@ class ToolRegistry:
     def register(self, tool: Tool) -> None:
         self._tools[tool.name] = tool
 
+    def bind_work_dir(self, work_dir: str) -> "ToolRegistry":
+        """返回所有工具绑定 work_dir 的新注册表；原注册表不变。
+
+        用于子代理运行在 worktree 等隔离目录时统一相对路径基准。
+        """
+        bound = ToolRegistry()
+        bound._disabled = set(self._disabled)
+        bound._discovered = set(self._discovered)
+        for name, tool in self._tools.items():
+            bound._tools[name] = tool.bind(work_dir)
+        return bound
+
     def get(self, name: str) -> Tool | None:
         return self._tools.get(name)
 

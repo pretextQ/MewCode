@@ -744,3 +744,114 @@ async def test_hook_command_injection_blocked_via_stdin_json(tmp_path: Path):
     assert out.exists(), "hook 脚本应能从 stdin 读到 JSON 上下文"
     assert out.read_text(encoding="utf-8") == malicious
     assert result.success
+
+
+# ---------------------------------------------------------------------------
+# F1.7 相对路径基准统一（沙箱 work_dir vs 进程 CWD）
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_bound_tools_resolve_relative_paths_against_work_dir(
+    tmp_path: Path, monkeypatch
+):
+    """绕过示例：in-process teammate 的 work_dir 是 worktree，沙箱按 worktree
+    校验放行，文件却写进主仓库（§3.7）——绑定后相对路径必须落在 work_dir。"""
+    from mewcode.tools.bash import Bash
+    from mewcode.tools.write_file import WriteFile, Params as WriteParams
+    from mewcode.tools.read_file import ReadFile, Params as ReadParams
+    from mewcode.tools.glob import Glob, Params as GlobParams
+    from mewcode.tools.grep import Grep, Params as GrepParams
+    from mewcode.tools.bash import Params as BashParams
+
+    repo = tmp_path / "repo"
+    wt = tmp_path / "wt"
+    (repo / "src").mkdir(parents=True)
+    (wt / "src").mkdir(parents=True)
+    monkeypatch.chdir(repo)
+
+    write = WriteFile()
+    bound_write = write.bind(str(wt))
+
+    # 绑定后：相对路径写入 work_dir，而不是进程 CWD
+    r = await bound_write.execute(
+        WriteParams.model_validate({"file_path": "src/a.py", "content": "x"})
+    )
+    assert not r.is_error
+    assert (wt / "src" / "a.py").exists()
+    assert not (repo / "src" / "a.py").exists()
+
+    # 读回：绑定的 ReadFile 相对路径也以 work_dir 为基准
+    bound_read = ReadFile().bind(str(wt))
+    r = await bound_read.execute(
+        ReadParams.model_validate({"file_path": "src/a.py"})
+    )
+    assert not r.is_error
+
+    # 未绑定工具保持旧行为：相对进程 CWD
+    r = await write.execute(
+        WriteParams.model_validate({"file_path": "src/old.py", "content": "x"})
+    )
+    assert (repo / "src" / "old.py").exists()
+    assert not (wt / "src" / "old.py").exists()
+
+    # Bash 的 cwd 落在 work_dir
+    bound_bash = Bash().bind(str(wt))
+    r = await bound_bash.execute(BashParams.model_validate({"command": "pwd"}))
+    assert not r.is_error
+    # Git Bash (MSYS) 会把 Windows 路径显示为 /tmp/... 形式，按目录名断言
+    last_line = r.output.strip().splitlines()[-1]
+    assert last_line.endswith("wt"), last_line
+    assert not last_line.endswith("repo"), last_line
+
+    # Glob/Grep 的搜索根以 work_dir 为基准
+    bound_glob = Glob().bind(str(wt))
+    r = await bound_glob.execute(
+        GlobParams.model_validate({"pattern": "**/*.py", "path": "."})
+    )
+    assert "a.py" in r.output
+    assert "old.py" not in r.output
+
+    bound_grep = Grep().bind(str(wt))
+    r = await bound_grep.execute(
+        GrepParams.model_validate({"pattern": "x", "path": "."})
+    )
+    assert str(wt) in r.output or "a.py" in r.output
+    assert "old.py" not in r.output
+
+
+def test_registry_bind_work_dir_preserves_state():
+    from mewcode.tools import ToolRegistry
+    from mewcode.tools.write_file import WriteFile
+    from mewcode.tools.bash import Bash
+
+    reg = ToolRegistry()
+    reg.register(WriteFile())
+    reg.register(Bash())
+    reg.disable("Bash")
+
+    bound = reg.bind_work_dir("/some/worktree")
+    assert bound.get("WriteFile") is not reg.get("WriteFile")
+    assert bound.get("WriteFile")._work_dir == "/some/worktree"
+    assert reg.get("WriteFile")._work_dir is None, "原注册表不得被修改"
+    assert not bound.is_enabled("Bash"), "禁用状态应保留"
+
+
+def test_sandbox_rooted_at_worktree_denies_parent_repo(tmp_path: Path, monkeypatch):
+    """沙箱与绑定同基准：worktree 沙箱拒绝主仓库路径。
+
+    tmp_path 位于系统临时目录（默认放行根）之下，故把 gettempdir 定向到
+    worktree 本身，使 repo 与 wt 互不在对方允许根内。
+    """
+    repo = tmp_path / "repo"
+    wt = tmp_path / "wt"
+    repo.mkdir()
+    wt.mkdir()
+    monkeypatch.setattr(
+        "mewcode.permissions.sandbox.tempfile.gettempdir", lambda: str(wt)
+    )
+    sandbox = PathSandbox(str(wt))
+    ok, _ = sandbox.check(str(repo / "file.txt"))
+    assert not ok
+    ok, _ = sandbox.check(str(wt / "file.txt"))
+    assert ok
