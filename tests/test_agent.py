@@ -495,3 +495,38 @@ def test_environment_context():
     assert "/home/user/project" in ctx
     assert "Operating system" in ctx
     assert "Current time" in ctx
+
+
+# ---------------------------------------------------------------------------
+# F2.1 run_to_completion：传入 conversation 时 compact 不崩溃、指令注入幂等
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_run_to_completion_with_conversation_survives_compact(tmp_path):
+    """真实调用路径都传入 conversation：长对话触发 auto-compact 不得 NameError。"""
+    client = MockLLMClient([
+        # 第 1 次调用：auto_compact 的摘要请求
+        [TextDelta("This is the summary."), StreamEnd("end_turn", input_tokens=10, output_tokens=10)],
+        # 第 2 次调用：压缩后的正式请求
+        [TextDelta("final answer"), StreamEnd("end_turn", input_tokens=10, output_tokens=10)],
+    ])
+    agent = Agent(
+        client, create_default_registry(), "anthropic",
+        work_dir=str(tmp_path),
+        # 阈值 = context_window - 33000；50k 窗口 + ~43k 历史可稳定触发
+        context_window=50_000,
+        instructions_content="PROJECT-INSTRUCTIONS-MARKER",
+    )
+    conv = ConversationManager()
+    for i in range(30):
+        conv.add_user_message(f"message {i}: " + "content " * 625)
+
+    result = await agent.run_to_completion("", conversation=conv)
+    assert result == "final answer"
+
+    # 项目指令恰好注入一次（压缩重建后 env/ltm 标志复位，env 会重注入，
+    # 但 instructions 只能出现一次）
+    marker_count = sum(
+        m.content.count("PROJECT-INSTRUCTIONS-MARKER") for m in conv.get_messages()
+    )
+    assert marker_count == 1, f"expected 1 instruction injection, got {marker_count}"

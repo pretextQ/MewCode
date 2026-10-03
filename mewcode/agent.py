@@ -1148,16 +1148,20 @@ class Agent:
         if conversation is None:
             conversation = ConversationManager()
 
-            env_context = build_environment_context(
-                self.work_dir, self.active_skills, self._skill_catalog, self._agent_catalog
-            )
-            conversation.inject_environment(env_context)
+        # 无条件注入：真实调用路径（__main__ / agent_tool / task_manager）
+        # 传入已有 conversation，compact 成功后的重注入依赖这里的 env_context。
+        # inject_environment / inject_long_term_memory 的幂等标志保证
+        # fork 场景（标志已同步）不会重复注入。
+        env_context = build_environment_context(
+            self.work_dir, self.active_skills, self._skill_catalog, self._agent_catalog
+        )
+        conversation.inject_environment(env_context)
 
-            if self.instructions_content:
-                memory_content = self.memory_manager.load() if self.memory_manager else ""
-                conversation.inject_long_term_memory(
-                    self.instructions_content, memory_content
-                )
+        if self.instructions_content:
+            memory_content = self.memory_manager.load() if self.memory_manager else ""
+            conversation.inject_long_term_memory(
+                self.instructions_content, memory_content
+            )
 
         if task:
             conversation.add_user_message(task)
@@ -1205,6 +1209,12 @@ class Agent:
             )
             if isinstance(compact_result, CompactEvent):
                 conversation.inject_environment(env_context)
+                # replace_history 复位了 env/ltm 标志，项目指令需随环境一同
+                # 重注入，与 run() 的压缩分支保持一致
+                mem = self.memory_manager.load() if self.memory_manager else ""
+                conversation.inject_long_term_memory(
+                    self.instructions_content, mem
+                )
 
             deferred_names = self.registry.get_deferred_tool_names()
             if deferred_names:
