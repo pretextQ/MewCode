@@ -44,10 +44,13 @@ class TeammateInfo:
         return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
 
 
-def _sanitize_name(name: str) -> str:
+def sanitize_team_name(name: str) -> str:
     slug = re.sub(r"[^a-zA-Z0-9_-]", "-", name.strip().lower())
     slug = re.sub(r"-+", "-", slug).strip("-")
     return slug or "team"
+
+
+_sanitize_name = sanitize_team_name
 
 
 @dataclass

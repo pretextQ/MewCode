@@ -12,6 +12,7 @@ from mewcode.teams.models import (
     BackendType,
     TeammateInfo,
     resolve_team_dir,
+    sanitize_team_name,
     unique_team_name,
 )
 from mewcode.teams.progress import TeammateProgress
@@ -89,24 +90,32 @@ class TeamManager:
 
 
     def get_team(self, name: str) -> AgentTeam | None:
+        # 缓存键统一为 sanitize 后的 slug（create_team 写入时用的键）；
+        # 旧实现直接用原始名查询，display name 永远 miss
+        slug = sanitize_team_name(name)
+        if slug in self._teams:
+            return self._teams[slug]
         if name in self._teams:
             return self._teams[name]
         team_dir = resolve_team_dir(name)
         config_path = team_dir / "config.json"
         if config_path.exists():
             team = AgentTeam.load(str(config_path))
-            self._teams[name] = team
+            self._teams[slug] = team
             return team
         return None
 
     def get_task_store(self, team_name: str) -> SharedTaskStore | None:
+        slug = sanitize_team_name(team_name)
+        if slug in self._task_stores:
+            return self._task_stores[slug]
         if team_name in self._task_stores:
             return self._task_stores[team_name]
         team_dir = resolve_team_dir(team_name)
         tasks_path = team_dir / "tasks.json"
         if tasks_path.exists():
             store = SharedTaskStore(tasks_path)
-            self._task_stores[team_name] = store
+            self._task_stores[slug] = store
             return store
         return None
 
@@ -198,9 +207,13 @@ class TeamManager:
         team_dir = resolve_team_dir(team_name)
         self._remove_dir(team_dir)
 
+        slug = sanitize_team_name(team_name)
         self._teams.pop(team_name, None)
+        self._teams.pop(slug, None)
         self._task_stores.pop(team_name, None)
+        self._task_stores.pop(slug, None)
         self._mailboxes.pop(team_name, None)
+        self._mailboxes.pop(slug, None)
 
         log.info("Deleted team '%s'", team_name)
 

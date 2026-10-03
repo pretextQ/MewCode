@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -26,6 +28,23 @@ class SharedTask:
         return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
 
 
+def _atomic_replace(src: str, dst: Path) -> None:
+    """os.replace 在 Windows 上与并发的读取者存在共享冲突（WinError 5/32），
+    短暂重试即可。其余平台一次成功。"""
+    import time as _time
+
+    last: OSError | None = None
+    for _ in range(10):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError as e:  # Windows sharing violation
+            last = e
+            _time.sleep(0.05)
+    if last is not None:
+        raise last
+
+
 class SharedTaskStore:
 
 
@@ -38,19 +57,60 @@ class SharedTaskStore:
     def _load(self) -> None:
         if not self._path.exists():
             return
-        data = json.loads(self._path.read_text(encoding="utf-8"))
-        self._next_id = data.get("next_id", 1)
+        try:
+            data = json.loads(self._path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return
+        next_id = data.get("next_id", 1)
+        self._next_id = max(self._next_id if self._tasks else 1, next_id)
         for t in data.get("tasks", []):
-            task = SharedTask.from_dict(t)
+            try:
+                task = SharedTask.from_dict(t)
+            except (TypeError, ValueError):
+                continue
+            # 合并而非覆盖：磁盘记录优先，但本地后写的字段不被丢
             self._tasks[task.id] = task
 
     def _save(self) -> None:
+        """读-合并-写：写前重新 _load 吸收其它进程的并发写入，
+        再用临时文件 + os.replace 原子替换，避免盲覆盖与半截文件。"""
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        data = {
+        merged: dict[str, SharedTask] = {}
+        next_id = self._next_id
+        if self._path.exists():
+            try:
+                data = json.loads(self._path.read_text(encoding="utf-8"))
+                next_id = max(next_id, data.get("next_id", 1))
+                for t in data.get("tasks", []):
+                    try:
+                        task = SharedTask.from_dict(t)
+                    except (TypeError, ValueError):
+                        continue
+                    merged[task.id] = task
+            except (json.JSONDecodeError, OSError):
+                pass
+        # 本地视图覆盖磁盘同名记录（本地才是最新的修改者）
+        merged.update(self._tasks)
+        self._tasks = merged
+        self._next_id = next_id
+
+        payload = {
             "next_id": self._next_id,
             "tasks": [t.to_dict() for t in self._tasks.values()],
         }
-        self._path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        fd, tmp_name = tempfile.mkstemp(
+            dir=str(self._path.parent), prefix=".tasks-", suffix=".tmp"
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(payload, indent=2, ensure_ascii=False))
+            _atomic_replace(tmp_name, self._path)
+        except BaseException:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+            raise
 
     def create(
         self,
@@ -61,6 +121,8 @@ class SharedTaskStore:
         blocked_by: list[str] | None = None,
         created_by: str = "",
     ) -> SharedTask:
+        # 先同步磁盘状态：另一进程可能已创建任务，_next_id 需要跟上
+        self._load()
         task_id = str(self._next_id)
         self._next_id += 1
         task = SharedTask(
@@ -128,4 +190,19 @@ class SharedTaskStore:
     def init_empty(self) -> None:
         self._tasks.clear()
         self._next_id = 1
-        self._save()
+        # 重置语义：绕过 _save 的读-合并，直接从空状态落盘
+        payload = {"next_id": 1, "tasks": []}
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(
+            dir=str(self._path.parent), prefix=".tasks-", suffix=".tmp"
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(payload, indent=2, ensure_ascii=False))
+            _atomic_replace(tmp_name, self._path)
+        except BaseException:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+            raise

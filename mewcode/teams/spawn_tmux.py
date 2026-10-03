@@ -44,12 +44,16 @@ def build_cli_command(
         parts.extend(["--agent-type", agent_type])
     if model:
         parts.extend(["--model", model])
+    def _sh_quote(value: str) -> str:
+        # teammate 名由 LLM 生成可含空格/元字符：单引号包裹并转义内部单引号
+        return "'" + value.replace("'", "'\\''") + "'"
+
     env_parts = [
-        f"MEWCODE_TEAM_NAME={team_name}",
-        f"MEWCODE_TEAMMATE_NAME={teammate_name}",
+        f"MEWCODE_TEAM_NAME={_sh_quote(team_name)}",
+        f"MEWCODE_TEAMMATE_NAME={_sh_quote(teammate_name)}",
     ]
     if mailbox_dir:
-        env_parts.append(f"MEWCODE_MAILBOX_DIR={mailbox_dir}")
+        env_parts.append(f"MEWCODE_MAILBOX_DIR={_sh_quote(mailbox_dir)}")
     env_prefix = " ".join(env_parts)
     cmd = " ".join(parts)
     full_prompt = prompt.replace("'", "'\\''")
