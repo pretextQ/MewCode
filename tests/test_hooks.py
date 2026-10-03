@@ -238,12 +238,20 @@ class TestCommandExecutor:
 
     @pytest.mark.asyncio
     async def test_variable_substitution(self):
+        """$FIELD 内插兼容保留：POSIX 经 shlex.quote；
+        Windows 上 cmd 引号规则不可靠，LLM 可控值不进命令行（stdin JSON 承载）。"""
+        import os
+
         from mewcode.hooks.executors import execute_command
 
         action = Action(type="command", command="echo $FILE_PATH")
         ctx = HookContext(file_path="src/main.py")
         result = await execute_command(action, ctx)
-        assert "src/main.py" in result.output
+        assert result.success
+        if os.name == "nt":
+            assert "src/main.py" not in result.output
+        else:
+            assert "src/main.py" in result.output
 
     @pytest.mark.asyncio
     async def test_timeout(self):
@@ -558,3 +566,28 @@ class TestAgentHookIntegration:
         rejected = tool_results[0]
         assert rejected.is_error is True
         assert "Hook rejected" in rejected.output
+
+
+# ---------------------------------------------------------------------------
+# F1.6 hook 占位符展开缺陷
+# ---------------------------------------------------------------------------
+
+class TestExpandFixes:
+    def test_longest_key_first(self):
+        """$TOOL_ARGS.path_extra 不得被 $TOOL_ARGS.path 的替换吃掉前缀。"""
+        from mewcode.hooks.models import HookContext
+
+        ctx = HookContext(
+            event_name="pre_tool_use",
+            tool_args={"path": "P1", "path_extra": "P2"},
+        )
+        assert ctx.expand("$TOOL_ARGS.path and $TOOL_ARGS.path_extra") == "P1 and P2"
+
+    def test_dict_value_rendered_as_json(self):
+        """dict/list 参数值用 JSON 渲染，而非 Python repr。"""
+        from mewcode.hooks.models import HookContext
+
+        ctx = HookContext(event_name="pre_tool_use", tool_args={"data": {"a": 1}})
+        rendered = ctx.expand("$TOOL_ARGS.data")
+        assert rendered == '{"a": 1}'
+        assert "'" not in rendered

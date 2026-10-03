@@ -695,3 +695,52 @@ async def test_deny_rule_beats_safe_whitelist(tmp_path: Path):
     )
     d = checker.check(Bash(), {"command": "echo secret"})
     assert d.effect == "deny"
+
+
+# ---------------------------------------------------------------------------
+# F1.6 hook 命令注入修复
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_hook_command_injection_blocked_via_stdin_json(tmp_path: Path):
+    """绕过示例：LLM 控制的工具参数被直接插值进 hook shell 命令（§3.6）。
+
+    file_path 携带 shell 元字符时，不得在用于安全防护的 hook 中执行第二条
+    命令；hook 脚本应从 stdin 读到完整 JSON 上下文。
+    """
+    import json as _json
+    import sys as _sys
+
+    from mewcode.hooks import Action, HookContext
+    from mewcode.hooks.executors import execute_action
+
+    reader = tmp_path / "read_stdin.py"
+    reader.write_text(
+        "import sys, json\n"
+        "data = json.load(sys.stdin)\n"
+        "open(sys.argv[1], 'w', encoding='utf-8').write(data['file_path'])\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "out.json"
+
+    malicious = 'a & echo pwned > pwned.txt'
+    action = Action(
+        type="command",
+        command=f'{_sys.executable} "{reader}" "{out}" $FILE_PATH',
+    )
+    ctx = HookContext(
+        event_name="pre_tool_use",
+        tool_name="WriteFile",
+        tool_args={"file_path": malicious},
+        file_path=malicious,
+    )
+
+    result = await execute_action(action, ctx)
+
+    assert not (tmp_path / "pwned.txt").exists(), (
+        "hook 参数值不得被 shell 执行"
+    )
+    assert out.exists(), "hook 脚本应能从 stdin 读到 JSON 上下文"
+    assert out.read_text(encoding="utf-8") == malicious
+    assert result.success

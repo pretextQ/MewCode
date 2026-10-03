@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import os
 from urllib.request import Request, urlopen
 from urllib.error import URLError
 
@@ -11,16 +13,23 @@ log = logging.getLogger(__name__)
 
 
 async def execute_command(action: Action, ctx: HookContext) -> ActionResult:
-    command = ctx.expand(action.command)
+    # LLM 控制的工具参数不得直接插值进 shell 命令：POSIX 经 shlex.quote，
+    # Windows 仅展开系统字段；完整上下文一律通过 stdin JSON 传递
+    if os.name == "nt":
+        command = ctx.expand_system_only(action.command)
+    else:
+        command = ctx.expand_shellsafe(action.command)
+    stdin_data = json.dumps(ctx.to_payload(), ensure_ascii=False).encode("utf-8")
     try:
         proc = await asyncio.create_subprocess_shell(
             command,
+            stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
         try:
             stdout, _ = await asyncio.wait_for(
-                proc.communicate(), timeout=action.timeout
+                proc.communicate(input=stdin_data), timeout=action.timeout
             )
         except asyncio.TimeoutError:
             proc.kill()

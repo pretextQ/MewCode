@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -68,15 +69,66 @@ class HookContext:
         return ""
 
     def expand(self, template: str) -> str:
+        """普通展开（prompt/http 等非 shell 场景）。
+
+        占位符按最长 key 优先替换，防止 $TOOL_ARGS.path 吃掉
+        $TOOL_ARGS.path_extra 的前缀；dict/list 值用 JSON 渲染而非 Python repr。
+        """
         result = template
         result = result.replace("$EVENT", self.event_name)
         result = result.replace("$TOOL_NAME", self.tool_name)
         result = result.replace("$FILE_PATH", self.file_path)
         result = result.replace("$MESSAGE", self.message)
         result = result.replace("$ERROR", self.error)
-        for key, value in self.tool_args.items():
-            result = result.replace(f"$TOOL_ARGS.{key}", str(value))
+        for key in sorted(self.tool_args, key=len, reverse=True):
+            value = self.tool_args[key]
+            if isinstance(value, (dict, list)):
+                rendered = json.dumps(value, ensure_ascii=False)
+            else:
+                rendered = str(value)
+            result = result.replace(f"$TOOL_ARGS.{key}", rendered)
         return result
+
+    def expand_shellsafe(self, template: str) -> str:
+        """shell 场景展开（POSIX）：所有内插值经 shlex.quote，杜绝注入。
+
+        值的完整上下文应改由 stdin JSON 传入；$FIELD 内插仅为兼容保留。
+        """
+        import shlex
+
+        result = template
+        result = result.replace("$EVENT", shlex.quote(self.event_name))
+        result = result.replace("$TOOL_NAME", shlex.quote(self.tool_name))
+        result = result.replace("$FILE_PATH", shlex.quote(self.file_path))
+        result = result.replace("$MESSAGE", shlex.quote(self.message))
+        result = result.replace("$ERROR", shlex.quote(self.error))
+        for key in sorted(self.tool_args, key=len, reverse=True):
+            value = self.tool_args[key]
+            if isinstance(value, (dict, list)):
+                rendered = json.dumps(value, ensure_ascii=False)
+            else:
+                rendered = str(value)
+            result = result.replace(f"$TOOL_ARGS.{key}", shlex.quote(rendered))
+        return result
+
+    def expand_system_only(self, template: str) -> str:
+        """shell 场景展开（Windows）：cmd 引号规则不可靠，仅展开系统控制的
+        $EVENT/$TOOL_NAME；LLM 可控的值一律不经命令行传递，走 stdin JSON。"""
+        result = template
+        result = result.replace("$EVENT", self.event_name)
+        result = result.replace("$TOOL_NAME", self.tool_name)
+        return result
+
+    def to_payload(self) -> dict[str, Any]:
+        """stdin JSON 上下文：hook 脚本从这里拿到全部字段。"""
+        return {
+            "event": self.event_name,
+            "tool": self.tool_name,
+            "file_path": self.file_path,
+            "message": self.message,
+            "error": self.error,
+            "args": self.tool_args,
+        }
 
 
 class ToolRejectedError(Exception):
