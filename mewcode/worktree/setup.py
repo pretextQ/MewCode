@@ -56,13 +56,22 @@ def _setup_git_hooks(root: Path, wt: Path) -> None:
         return
 
     try:
+        # linked worktree 里 `git config core.hooksPath` 默认写主仓库共享
+        # 配置（静默覆写用户设置）。先启用 worktreeConfig，再用 --worktree
+        # 把设置限定在本 worktree 的 config.worktree 文件里
         subprocess.run(
-            ["git", "config", "core.hooksPath", hooks_path],
+            ["git", "config", "extensions.worktreeConfig", "true"],
+            cwd=str(root),
+            capture_output=True,
+            timeout=10,
+        )
+        subprocess.run(
+            ["git", "config", "--worktree", "core.hooksPath", hooks_path],
             cwd=str(wt),
             capture_output=True,
             timeout=10,
         )
-        log.debug("Set core.hooksPath to %s in worktree", hooks_path)
+        log.debug("Set worktree-local core.hooksPath to %s", hooks_path)
     except (subprocess.SubprocessError, OSError) as e:
         log.warning("Failed to set hooks path: %s", e)
 

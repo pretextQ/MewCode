@@ -129,32 +129,41 @@ class WorktreeManager:
 
             head_sha = self.read_worktree_head_sha(wt_path)
             if head_sha is not None:
-                log.info("Fast recovery: reusing existing worktree at %s", wt_path)
-                wt = Worktree(
-                    name=name,
-                    path=wt_path,
-                    branch=branch_name,
-                    based_on=base_branch,
-                    head_commit=head_sha,
+                # 快速恢复前校验 worktree 仍注册在仓库里：目录可能是残留
+                # 的无效副本（git worktree prune 后），直接复用会得到
+                # 一个 git 不认识的路径
+                if await asyncio.to_thread(self._is_registered_worktree, wt_path):
+                    log.info("Fast recovery: reusing existing worktree at %s", wt_path)
+                    wt = Worktree(
+                        name=name,
+                        path=wt_path,
+                        branch=branch_name,
+                        based_on=base_branch,
+                        head_commit=head_sha,
+                    )
+                    self.active[name] = wt
+                    return wt
+                log.warning(
+                    "Skipping fast recovery: %s is not a registered worktree",
+                    wt_path,
                 )
-                self.active[name] = wt
-                return wt
 
             os.makedirs(self.worktree_dir, exist_ok=True)
 
-            result = self._run_git([
-                "worktree", "add",
-                "-B", branch_name, wt_path, base_branch,
-            ])
+            result = await asyncio.to_thread(
+                self._run_git,
+                ["worktree", "add", "-B", branch_name, wt_path, base_branch],
+            )
             if result.returncode != 0:
                 raise WorktreeError(
                     f"git worktree add failed: {result.stderr.strip()}"
                 )
 
-            perform_post_creation_setup(
+            await asyncio.to_thread(
+                perform_post_creation_setup,
                 self.repo_root,
                 wt_path,
-                symlink_directories=self.symlink_directories,
+                self.symlink_directories,
             )
 
             head_sha = self.read_worktree_head_sha(wt_path) or ""
@@ -211,7 +220,9 @@ class WorktreeManager:
             raise WorktreeError(f"worktree not found: {name}")
 
         if action == "remove" and not discard_changes:
-            changes = count_worktree_changes(wt.path, wt.head_commit)
+            changes = await asyncio.to_thread(
+                count_worktree_changes, wt.path, wt.head_commit
+            )
             if changes.uncommitted > 0 or changes.new_commits > 0:
                 raise WorktreeError(
                     f"worktree has changes ({changes.uncommitted} uncommitted, "
@@ -219,28 +230,50 @@ class WorktreeManager:
                     "Set discard_changes=True to force removal."
                 )
 
+        if action == "remove":
+            # 先删 worktree：删除失败时 session 必须保留，便于用户重试；
+            # 旧实现先清 session，删除失败后会话记录已丢、worktree 成孤儿
+            await self._remove_worktree(name, wt)
+
         self.current_session = None
         save_worktree_session(self._mewcode_dir, None)
-
-        if action == "remove":
-            await self._remove_worktree(name, wt)
 
     # ------------------------------------------------------------------
     # 删除 worktree（内部方法）
     # ------------------------------------------------------------------
 
     async def _remove_worktree(self, name: str, wt: Worktree) -> None:
-        result = self._run_git(["worktree", "remove", "--force", wt.path])
+        result = await asyncio.to_thread(
+            self._run_git, ["worktree", "remove", "--force", wt.path]
+        )
         if result.returncode != 0:
-            log.warning("git worktree remove failed: %s", result.stderr.strip())
+            raise WorktreeError(
+                f"git worktree remove failed: {result.stderr.strip()}"
+            )
 
         await asyncio.sleep(0.1)
 
         flat_slug = flatten_slug(name)
         branch_name = f"worktree-{flat_slug}"
-        self._run_git(["branch", "-D", branch_name])
+        await asyncio.to_thread(self._run_git, ["branch", "-D", branch_name])
 
         self.active.pop(name, None)
+
+    def _is_registered_worktree(self, wt_path: str) -> bool:
+        """校验路径是当前仓库已注册的 worktree（快速恢复前的有效性检查）。"""
+        try:
+            result = self._run_git(["worktree", "list", "--porcelain"])
+        except (subprocess.SubprocessError, OSError):
+            return False
+        if result.returncode != 0:
+            return False
+        target = os.path.normcase(os.path.abspath(wt_path))
+        for line in result.stdout.splitlines():
+            if line.startswith("worktree "):
+                listed = os.path.normcase(os.path.abspath(line[len("worktree "):].strip()))
+                if listed == target:
+                    return True
+        return False
 
     # ------------------------------------------------------------------
     # 自动清理
@@ -252,10 +285,14 @@ class WorktreeManager:
         if wt is None:
             return CleanupResult(kept=False)
 
-        if has_worktree_changes(wt.path, head_commit):
+        if await asyncio.to_thread(has_worktree_changes, wt.path, head_commit):
             return CleanupResult(kept=True, path=wt.path, branch=wt.branch)
 
-        await self._remove_worktree(name, wt)
+        try:
+            await self._remove_worktree(name, wt)
+        except WorktreeError as e:
+            log.warning("auto cleanup failed to remove %s: %s", name, e)
+            return CleanupResult(kept=True, path=wt.path, branch=wt.branch)
         return CleanupResult(kept=False)
 
     # ------------------------------------------------------------------

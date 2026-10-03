@@ -15,7 +15,9 @@ from mewcode.worktree.manager import WorktreeManager
 log = logging.getLogger(__name__)
 
 EPHEMERAL_PATTERNS = [
-    re.compile(r"^agent-a[0-9a-f]{7}$"),
+    # 生成器产出 "agent-" + 8 位随机 hex（integration.generate_worktree_name）；
+    # 旧正则要求首字符恰为 'a'，约 94% 的 worktree 永不回收
+    re.compile(r"^agent-[0-9a-f]{8}$"),
     re.compile(r"^wf_[0-9a-f]{8}-[0-9a-f]{3}-\d+$"),
     re.compile(r"^wf-\d+$"),
     re.compile(r"^bridge-[A-Za-z0-9_]+(-[A-Za-z0-9_]+)*$"),
@@ -68,12 +70,15 @@ async def cleanup_stale_worktrees(manager: WorktreeManager, cutoff_hours: int) -
             if flat_name in manager.active:
                 await manager._remove_worktree(flat_name, manager.active[flat_name])
             else:
-                result = manager._run_git(
-                    ["worktree", "remove", "--force", str(entry)]
+                result = await asyncio.to_thread(
+                    manager._run_git,
+                    ["worktree", "remove", "--force", str(entry)],
                 )
                 if result.returncode == 0:
                     await asyncio.sleep(0.1)
-                    manager._run_git(["branch", "-D", f"worktree-{flat_name}"])
+                    await asyncio.to_thread(
+                        manager._run_git, ["branch", "-D", f"worktree-{flat_name}"]
+                    )
             removed += 1
             log.info("Cleaned up stale worktree: %s", name)
         except Exception as e:

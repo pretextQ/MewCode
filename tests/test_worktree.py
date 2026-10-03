@@ -388,3 +388,88 @@ class TestReadWorktreeHeadSha:
     def test_not_a_worktree(self, tmp_path):
         sha = WorktreeManager.read_worktree_head_sha(str(tmp_path))
         assert sha is None
+
+
+# ---------------------------------------------------------------------------
+# F3.5 worktree 修复
+# ---------------------------------------------------------------------------
+
+class TestEphemeralPattern:
+    def test_generated_names_all_match(self):
+        """生成器产出的名字必须全部被清理正则命中（旧正则只匹配 a 开头）。"""
+        from mewcode.worktree.cleanup import _is_ephemeral
+
+        for _ in range(1000):
+            name = generate_worktree_name()
+            assert _is_ephemeral(name), name
+
+    def test_explicit_names(self):
+        from mewcode.worktree.cleanup import _is_ephemeral
+
+        assert _is_ephemeral("agent-abc12345")
+        assert _is_ephemeral("agent-0123abcd")
+        assert not _is_ephemeral("agent-feature")
+
+
+class TestHooksPathIsolation:
+    def test_main_repo_config_untouched(self, tmp_path):
+        """hooksPath 必须写入 per-worktree 配置，不得覆写主仓库。"""
+        import subprocess as _sp
+
+        from mewcode.worktree.setup import perform_post_creation_setup
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo)
+        (repo / ".husky").mkdir()
+        wt = tmp_path / "wt"
+        _sp.run(["git", "worktree", "add", "-b", "hwt", str(wt), "HEAD"],
+                cwd=str(repo), capture_output=True, check=True)
+
+        perform_post_creation_setup(str(repo), str(wt), symlink_directories=[])
+
+        main_config = (repo / ".git" / "config").read_text(encoding="utf-8")
+        assert "hooksPath" not in main_config, (
+            "主仓库 .git/config 被静默覆写"
+        )
+
+
+class TestExitOrdering:
+    @pytest.mark.asyncio
+    async def test_remove_failure_keeps_session(self, manager, git_repo, monkeypatch):
+        """worktree 删除失败时抛错并保留 session（旧实现先清 session 再删）。"""
+        await manager.create("exit-fail")
+        await manager.enter("exit-fail")
+
+        def _failing_run_git(args, cwd=None):
+            class R:
+                returncode = 1
+                stderr = "simulated failure"
+                stdout = ""
+            return R()
+
+        monkeypatch.setattr(manager, "_run_git", _failing_run_git)
+        with pytest.raises(WorktreeError, match="remove failed"):
+            await manager.exit("exit-fail", action="remove", discard_changes=True)
+        # 删除失败：session 与 active 必须保留，便于用户重试
+        assert manager.current_session is not None
+        assert "exit-fail" in manager.active
+
+    @pytest.mark.asyncio
+    async def test_remove_success_clears_session(self, manager):
+        await manager.create("exit-ok")
+        await manager.enter("exit-ok")
+        await manager.exit("exit-ok", action="remove", discard_changes=True)
+        assert manager.current_session is None
+        assert "exit-ok" not in manager.active
+
+
+class TestQuickRecoveryValidation:
+    def test_registered_worktree_lookup(self, manager, git_repo):
+        """快速恢复前的有效性校验依据 git worktree list --porcelain。"""
+        import asyncio as _aio
+
+        wt = _aio.run(manager.create("recover-valid"))
+        assert manager._is_registered_worktree(wt.path)
+        assert not manager._is_registered_worktree(str(git_repo / "ghost"))
+
