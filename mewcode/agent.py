@@ -57,6 +57,7 @@ log = logging.getLogger(__name__)
 MEMORY_EXTRACTION_INTERVAL = 5
 MAX_TOKENS_CEILING = 64000
 MAX_OUTPUT_TOKENS_RECOVERIES = 3
+STREAM_RETRY_DELAYS: tuple[float, ...] = (1.0, 2.0, 4.0)
 
 
 # ---------------------------------------------------------------------------
@@ -313,6 +314,8 @@ class Agent:
         self.client = client
         self.registry = registry
         self.protocol = protocol
+        # LLM 流调用重试的退避间隔；测试可注入更短间隔
+        self.stream_retry_delays: tuple[float, ...] = STREAM_RETRY_DELAYS
         self.work_dir = work_dir
         self.max_iterations = max_iterations
         self.permission_checker = permission_checker
@@ -543,7 +546,9 @@ class Agent:
                 append_replacement_records(self.session_dir, _new_records)
 
             collector = StreamCollector()
-            llm_stream = self.client.stream(api_conv, system=system, tools=tools)
+            llm_stream = self._stream_with_retry(
+                lambda: self.client.stream(api_conv, system=system, tools=tools)
+            )
             async for event in collector.consume(llm_stream):
                 yield event
 
@@ -779,6 +784,46 @@ class Agent:
                     yield he
             yield TurnComplete(turn=iteration)
 
+
+    @staticmethod
+    def _is_retryable_llm_error(e: BaseException) -> bool:
+        from mewcode.client import LLMError, NetworkError, RateLimitError
+
+        if isinstance(e, (RateLimitError, NetworkError, asyncio.TimeoutError, ConnectionError)):
+            return True
+        # APIStatusError 被映射为 LLMError("API error (status): ...")，5xx 可重试
+        return isinstance(e, LLMError) and "api error (5" in str(e).lower()
+
+    async def _stream_with_retry(self, factory: Callable[[], Any]) -> Any:
+        """流式 LLM 调用重试：仅对**流开始前**的异常按指数退避重试
+        （RateLimit 优先用服务端 retry_after）；流中途断开不重试，
+        维持原错误路径。"""
+        from mewcode.client import RateLimitError
+
+        delays = self.stream_retry_delays
+        for attempt in range(len(delays) + 1):
+            gen = factory()
+            try:
+                first = await gen.__anext__()
+            except StopAsyncIteration:
+                return
+            except Exception as e:
+                if attempt < len(delays) and self._is_retryable_llm_error(e):
+                    wait = delays[attempt]
+                    if isinstance(e, RateLimitError) and e.retry_after:
+                        wait = max(wait, float(e.retry_after))
+                    log.warning(
+                        "LLM stream retryable error: %s; backing off %.1fs "
+                        "(attempt %d/%d)",
+                        e, wait, attempt + 1, len(delays),
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+                raise
+            yield first
+            async for event in gen:
+                yield event
+            return
 
     def _consume_mailbox(self, conversation: ConversationManager) -> None:
         if not self.team_name or not self._team_manager:
@@ -1249,7 +1294,9 @@ class Agent:
                 append_replacement_records(self.session_dir, _new_records)
 
             collector = StreamCollector()
-            llm_stream = self.client.stream(api_conv, system=system, tools=tools)
+            llm_stream = self._stream_with_retry(
+                lambda: self.client.stream(api_conv, system=system, tools=tools)
+            )
             async for _event in collector.consume(llm_stream):
                 pass
 

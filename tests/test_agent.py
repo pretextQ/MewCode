@@ -619,3 +619,71 @@ async def test_consecutive_unknown_tools_leave_paired_history():
     assert tool_use_ids == tool_result_ids, (
         "orphan tool_use in history would get the next API call rejected with 400"
     )
+
+
+# ---------------------------------------------------------------------------
+# F2.5 LLM 流调用重试与退避
+# ---------------------------------------------------------------------------
+
+class _FlakyRateLimitClient(MockLLMClient):
+    def __init__(self, responses, failures: int = 2) -> None:
+        super().__init__(responses)
+        self._remaining_failures = failures
+
+    async def stream(self, conversation, system="", tools=None):
+        if self._remaining_failures > 0:
+            self._remaining_failures -= 1
+            from mewcode.client import RateLimitError
+            raise RateLimitError("Rate limited.", retry_after=0.01)
+        async for e in super().stream(conversation, system, tools):
+            yield e
+
+
+@pytest.mark.asyncio
+async def test_llm_stream_retries_on_rate_limit():
+    """前 2 次 RateLimitError、第 3 次成功 → 正常完成。"""
+    client = _FlakyRateLimitClient([
+        [TextDelta("ok"), StreamEnd("end_turn", input_tokens=1, output_tokens=1)],
+    ], failures=2)
+    agent = Agent(client, create_default_registry(), "anthropic")
+    agent.stream_retry_delays = (0.01, 0.01, 0.01)
+    conv = ConversationManager()
+    conv.add_user_message("hi")
+
+    events = []
+    async for e in agent.run(conv):
+        events.append(e)
+
+    c = _collect(events)
+    assert c["text"] == ["ok"]
+    assert len(c["error"]) == 0
+
+
+@pytest.mark.asyncio
+async def test_llm_stream_retry_exhaustion_raises_original():
+    """持续限流超过重试次数 → 抛出原异常。"""
+    from mewcode.client import RateLimitError
+
+    client = _FlakyRateLimitClient([
+        [TextDelta("ok"), StreamEnd("end_turn", input_tokens=1, output_tokens=1)],
+    ], failures=10)
+    agent = Agent(client, create_default_registry(), "anthropic")
+    agent.stream_retry_delays = (0.01, 0.01, 0.01)
+    conv = ConversationManager()
+    conv.add_user_message("hi")
+
+    with pytest.raises(RateLimitError):
+        async for _ in agent.run(conv):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_run_to_completion_retries_on_rate_limit():
+    client = _FlakyRateLimitClient([
+        [TextDelta("done"), StreamEnd("end_turn", input_tokens=1, output_tokens=1)],
+    ], failures=1)
+    agent = Agent(client, create_default_registry(), "anthropic")
+    agent.stream_retry_delays = (0.01, 0.01, 0.01)
+
+    result = await agent.run_to_completion("hi")
+    assert result == "done"
