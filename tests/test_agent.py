@@ -12,6 +12,7 @@ from mewcode.agent import (
     ErrorEvent,
     LoopComplete,
     PermissionRequest,
+    RetryEvent,
     PermissionResponse,
     StreamText,
     ToolResultEvent,
@@ -530,3 +531,43 @@ async def test_run_to_completion_with_conversation_survives_compact(tmp_path):
         m.content.count("PROJECT-INSTRUCTIONS-MARKER") for m in conv.get_messages()
     )
     assert marker_count == 1, f"expected 1 instruction injection, got {marker_count}"
+
+
+# ---------------------------------------------------------------------------
+# F2.2 max_tokens 升级：初始值 * 2（封顶 CEILING），而非跳到天花板
+# ---------------------------------------------------------------------------
+
+class _ScaledMockClient(MockLLMClient):
+    def __init__(self, responses, max_output_tokens: int = 16000) -> None:
+        super().__init__(responses)
+        self.max_output_tokens = max_output_tokens
+
+    def set_max_output_tokens(self, tokens: int) -> None:
+        self.max_output_tokens = tokens
+
+
+@pytest.mark.asyncio
+async def test_max_tokens_escalation_doubles_from_initial():
+    client = _ScaledMockClient([
+        [
+            TextDelta("partial output"),
+            StreamEnd("max_tokens", input_tokens=10, output_tokens=15000),
+        ],
+        [
+            TextDelta("resumed fine"),
+            StreamEnd("end_turn", input_tokens=10, output_tokens=100),
+        ],
+    ])
+    agent = Agent(client, create_default_registry(), "anthropic")
+    conv = ConversationManager()
+    conv.add_user_message("write a long thing")
+
+    retries = []
+    async for e in agent.run(conv):
+        if isinstance(e, RetryEvent):
+            retries.append(e)
+
+    assert len(retries) >= 1
+    assert client.max_output_tokens == 32000, (
+        f"escalation should double 16000, got {client.max_output_tokens}"
+    )

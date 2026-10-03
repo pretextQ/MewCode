@@ -113,15 +113,6 @@ class LLMClient(ABC):
         pass
 
 
-def _supports_adaptive_thinking(model: str) -> bool:
-    for family in ("claude-opus-4-", "claude-sonnet-4-"):
-        if model.startswith(family):
-            rest = model[len(family):]
-            if rest and rest[0].isdigit() and int(rest[0]) >= 6:
-                return True
-    return False
-
-
 class AnthropicClient(LLMClient):
     def __init__(self, config: ProviderConfig) -> None:
         self.model = config.model
@@ -137,6 +128,19 @@ class AnthropicClient(LLMClient):
 
     def set_max_output_tokens(self, tokens: int) -> None:
         self.max_output_tokens = tokens
+
+    def _thinking_budget(self) -> int | None:
+        """thinking 预算计入 max_tokens：给可见输出（含 tool_use 参数）留出
+        固定余量，避免思考吃满上限导致响应被 max_tokens 截断。
+
+        不依赖任何私有"0 预算=自适应"约定，所有模型统一走显式预算。
+        """
+        if not self.thinking:
+            return None
+        budget = max(self.max_output_tokens - 8192, 1024)
+        if budget >= self.max_output_tokens:
+            budget = max(self.max_output_tokens - 1, 1024)
+        return budget
 
     async def fetch_model_context_window(self) -> int | None:
         """向 Anthropic 兼容的 /v1/models/{model} 端点查询模型的
@@ -189,13 +193,10 @@ class AnthropicClient(LLMClient):
             kwargs["tools"] = _mark_last_tool_for_cache(tools)
 
         if self.thinking:
-            if _supports_adaptive_thinking(self.model):
-                kwargs["thinking"] = {"type": "enabled", "budget_tokens": 0}
-            else:
-                kwargs["thinking"] = {
-                    "type": "enabled",
-                    "budget_tokens": max(self.max_output_tokens - 1, 1024),
-                }
+            kwargs["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": self._thinking_budget(),
+            }
 
         current_tool_name = ""
         current_tool_id = ""

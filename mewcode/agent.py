@@ -569,19 +569,23 @@ class Agent:
 
             if response.stop_reason == "max_tokens":
                 if not max_tokens_escalated:
-                    self.client.set_max_output_tokens(MAX_TOKENS_CEILING)
                     max_tokens_escalated = True
-                    if response.text:
-                        conversation.add_assistant_message(
-                            response.text, thinking_blocks=conv_thinking
-                        )
-                        conversation.add_user_message(
-                            "Output token limit hit. Resume directly from where you stopped. "
-                            "Do not apologize or repeat previous content. Pick up mid-thought if needed."
-                        )
-                    yield RetryEvent(reason="max_tokens escalation")
-                    continue
-                elif output_recoveries < MAX_OUTPUT_TOKENS_RECOVERIES:
+                    current_max = self.client.max_output_tokens
+                    new_max = min(current_max * 2, MAX_TOKENS_CEILING)
+                    if new_max > current_max:
+                        self.client.set_max_output_tokens(new_max)
+                        if response.text:
+                            conversation.add_assistant_message(
+                                response.text, thinking_blocks=conv_thinking
+                            )
+                            conversation.add_user_message(
+                                "Output token limit hit. Resume directly from where you stopped. "
+                                "Do not apologize or repeat previous content. Pick up mid-thought if needed."
+                            )
+                        yield RetryEvent(reason="max_tokens escalation")
+                        continue
+                    # 已处于上限，升级为空操作，落入恢复分块流程
+                if output_recoveries < MAX_OUTPUT_TOKENS_RECOVERIES:
                     output_recoveries += 1
                     conversation.add_assistant_message(
                         response.text, thinking_blocks=conv_thinking
