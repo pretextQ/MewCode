@@ -50,7 +50,7 @@ class TestDangerousCommandDetector:
     def test_rm_rf_root(self) -> None:
         hit, reason = self.detector.detect("rm -rf / ")
         assert hit
-        assert "根目录" in reason
+        assert "递归强制删除" in reason
 
     def test_rm_rf_root_no_space(self) -> None:
         hit, _ = self.detector.detect("rm -rf /")

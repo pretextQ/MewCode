@@ -1,10 +1,11 @@
 
 from __future__ import annotations
 
+import os
 import re
 
 _DANGEROUS_PATTERNS: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"rm\s+-[a-z]*r[a-z]*f[a-z]*\s+/\s*$"), "递归强制删除根目录"),
+    (re.compile(r"rm\s+-[a-z]*r[a-z]*f[a-z]*\s+/\S*"), "递归强制删除绝对路径"),
     (re.compile(r"mkfs\."), "格式化磁盘"),
     (re.compile(r"dd\s+if=.*of=/dev/"), "直接写磁盘设备"),
     (re.compile(r"chmod\s+-R\s+777\s+/"), "递归修改根目录权限"),
@@ -12,6 +13,18 @@ _DANGEROUS_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"curl\s+.*\|\s*(ba)?sh"), "管道执行远程脚本"),
     (re.compile(r"wget\s+.*\|\s*(ba)?sh"), "管道执行远程脚本"),
     (re.compile(r">\s*/dev/sd"), "覆盖磁盘设备"),
+]
+
+# win32 专属模式（大小写不敏感）。BYPASS/DONT_ASK 模式下没有 ask 兜底，
+# 黑名单是这些命令的唯一屏障
+_WINDOWS_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"rd(?:ir)?\s+/s\b", re.IGNORECASE), "递归强制删除目录 (rd /s)"),
+    (re.compile(r"del\s+/f\s+/s\b", re.IGNORECASE), "递归强制删除文件 (del /f /s)"),
+    (re.compile(r"format\s+[a-z]:", re.IGNORECASE), "格式化磁盘"),
+    (re.compile(r"reg\s+add\s+[^\n]*\\currentversion\\run\b", re.IGNORECASE), "写入注册表自启动项"),
+    (re.compile(r"certutil\s+[^\n]*-urlcache\b", re.IGNORECASE), "certutil 远程下载"),
+    (re.compile(r"powershell(\.\w+)?\s+[^\n]*-\w*enc(?:oded(?:command)?)?\b", re.IGNORECASE), "PowerShell 编码命令执行"),
+    (re.compile(r"remove-item\b(?=[^\n]*-recurse\b)(?=[^\n]*-force\b)(?=[^\n]*\s[a-z]:\\(?:\s|-|/|$))", re.IGNORECASE), "PowerShell 递归强制删除盘根"),
 ]
 
 
@@ -61,6 +74,8 @@ class DangerousCommandDetector:
 
     def __init__(self, extra_patterns: list[tuple[str, str]] | None = None) -> None:
         self._patterns = list(_DANGEROUS_PATTERNS)
+        if os.name == "nt":
+            self._patterns += _WINDOWS_PATTERNS
         if extra_patterns:
             for regex_str, reason in extra_patterns:
                 self._patterns.append((re.compile(regex_str), reason))

