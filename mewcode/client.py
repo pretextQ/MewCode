@@ -311,6 +311,7 @@ class OpenAIClient(LLMClient):
         kwargs: dict[str, Any] = {
             "model": self.model,
             "input": input_messages,
+            "max_output_tokens": self.max_output_tokens,
             "stream": True,
         }
         if system:
@@ -321,6 +322,7 @@ class OpenAIClient(LLMClient):
         current_tool_name = ""
         current_call_id = ""
         json_accum = ""
+        end_emitted = False
 
         try:
             response_stream = await self._client.responses.create(**kwargs)
@@ -374,13 +376,33 @@ class OpenAIClient(LLMClient):
                     details = getattr(usage, "input_tokens_details", None)
                     cache_read = getattr(details, "cached_tokens", 0) or 0
                     input_tokens = getattr(usage, "input_tokens", 0) or 0
+                    # status == "incomplete" 表示输出被截断；不映射的话
+                    # agent 的 max_tokens 升级/恢复分支永远不会触发
+                    status = getattr(resp, "status", "completed") if resp else "completed"
+                    stop_reason = "end_turn"
+                    if status == "incomplete":
+                        incomplete = getattr(resp, "incomplete_details", None)
+                        reason = getattr(incomplete, "reason", "") if incomplete else ""
+                        stop_reason = (
+                            "max_tokens" if reason == "max_output_tokens" else "end_turn"
+                        )
+                    end_emitted = True
                     yield StreamEnd(
-                        stop_reason="end_turn",
+                        stop_reason=stop_reason,
                         input_tokens=max(input_tokens - cache_read, 0),
                         output_tokens=getattr(usage, "output_tokens", 0) or 0,
                         cache_read=cache_read,
                         cache_creation=0,
                     )
+
+            if not end_emitted:
+                # provider 未按约定发 response.completed 时兜底，
+                # 避免整轮 token 统计与 stop_reason 丢失
+                yield StreamEnd(
+                    stop_reason="end_turn",
+                    input_tokens=0,
+                    output_tokens=0,
+                )
 
         except _openai.AuthenticationError as e:
             raise AuthenticationError(f"Invalid API key: {e}") from e
@@ -475,29 +497,26 @@ class OpenAICompatClient(LLMClient):
         # 用于累积 streaming tool call 的状态。Chat Completions 流按
         # tool_calls 列表中的位置索引下发 delta，我们按索引跟踪每个进行中的调用。
         active_calls: dict[int, dict[str, str]] = {}  # 索引 -> {id, name, args}
+        stop_reason = "end_turn"
+        seen_usage: dict[str, int] = {}
 
         try:
             response = await self._client.chat.completions.create(**kwargs)
             async for chunk in response:
+                # usage 与 finish_reason 的到达顺序因 provider 而异，
+                # 都先记录，StreamEnd 在流结束后统一发一次
+                usage = getattr(chunk, "usage", None)
+                if usage:
+                    details = getattr(usage, "prompt_tokens_details", None)
+                    cache_read = getattr(details, "cached_tokens", 0) or 0
+                    prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+                    seen_usage = {
+                        "input_tokens": max(prompt_tokens - cache_read, 0),
+                        "output_tokens": getattr(usage, "completion_tokens", 0) or 0,
+                        "cache_read": cache_read,
+                    }
+
                 if not chunk.choices:
-                    # 最后一个 chunk，只包含 usage 数据。
-                    if chunk.usage:
-                        # 部分兼容 provider 通过 prompt_tokens_details.cached_tokens
-                        # 上报 cache 命中数，大多数不上报（cache_read 保持 0）。
-                        # prompt_tokens 包含了缓存 token，需要减去以保持
-                        # input + cache_read 可加性。没有 provider 上报 creation 计数。
-                        details = getattr(
-                            chunk.usage, "prompt_tokens_details", None
-                        )
-                        cache_read = getattr(details, "cached_tokens", 0) or 0
-                        prompt_tokens = chunk.usage.prompt_tokens or 0
-                        yield StreamEnd(
-                            stop_reason="end_turn",
-                            input_tokens=max(prompt_tokens - cache_read, 0),
-                            output_tokens=chunk.usage.completion_tokens or 0,
-                            cache_read=cache_read,
-                            cache_creation=0,
-                        )
                     continue
 
                 choice = chunk.choices[0]
@@ -528,7 +547,11 @@ class OpenAICompatClient(LLMClient):
                             yield ToolCallDelta(text=tc.function.arguments)
 
                 # --- 结束原因 ---
-                if choice.finish_reason in ("tool_calls", "stop"):
+                # "length" 是输出截断信号，必须映射为 max_tokens，
+                # 否则 agent 的升级/恢复分支永远不会触发
+                if choice.finish_reason in ("tool_calls", "stop", "length"):
+                    if choice.finish_reason == "length":
+                        stop_reason = "max_tokens"
                     if choice.finish_reason == "tool_calls":
                         for _idx, call in sorted(active_calls.items()):
                             try:
@@ -541,6 +564,15 @@ class OpenAICompatClient(LLMClient):
                                 arguments=args,
                             )
                         active_calls.clear()
+
+            # 无论 provider 是否发 finish_reason/usage chunk，每轮必有 StreamEnd
+            yield StreamEnd(
+                stop_reason=stop_reason,
+                input_tokens=seen_usage.get("input_tokens", 0),
+                output_tokens=seen_usage.get("output_tokens", 0),
+                cache_read=seen_usage.get("cache_read", 0),
+                cache_creation=0,
+            )
 
         except _openai.AuthenticationError as e:
             raise AuthenticationError(f"Invalid API key: {e}") from e
