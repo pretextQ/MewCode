@@ -205,6 +205,18 @@ class TaskManager:
             return True
         return False
 
+    def has_pending_work(self) -> bool:
+        """是否存在仍在运行/监听的后台任务，或尚未消费的完成通知。
+
+        非交互运行的门控依据：不关心具体是团队还是普通后台任务。
+        """
+        if not self._notify_queue.empty():
+            return True
+        for bg in self._tasks.values():
+            if bg.status in ("running", "listening"):
+                return True
+        return any(not t.done() for t in self._async_tasks.values())
+
     def poll_completed(self) -> list[BackgroundTask]:
         completed: list[BackgroundTask] = []
         while not self._notify_queue.empty():

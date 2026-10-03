@@ -186,28 +186,21 @@ async def _run_prompt(config, permission_mode, hook_engine, prompt: str) -> None
     last_result = await agent.run_to_completion(prompt, conv)
     print(last_result, flush=True)
 
-    if not team_manager._teams:
-        return
-
-    import sys
-    for i in range(90):
-        await asyncio.sleep(2)
-        running = {k: not t.done() for k, t in task_manager._async_tasks.items()}
-        completed_ids = [t.id for t in task_manager._tasks.values() if t.status != "running"]
-        print(f"[poll {i}] running={running} completed={completed_ids} teams={list(team_manager._teams.keys())} queue_size={task_manager._notify_queue.qsize()}", file=sys.stderr, flush=True)
+    # 门控改为 TaskManager 的公开接口：仅用 AgentTool 后台任务（无 team）
+    # 的运行此前会直接 return，asyncio.run 退出时在途任务被整体取消
+    for _ in range(90):
         notes = drain_notifications()
-        if not notes:
-            has_running = any(v for v in running.values())
-            if not has_running:
-                print(f"[poll {i}] no running tasks, breaking", file=sys.stderr, flush=True)
-                break
+        if notes:
+            for note in notes:
+                conv.add_system_reminder(note)
+            last_result = await agent.run_to_completion(
+                "Teammate notifications received. Process them and continue.", conv
+            )
+            print(last_result, flush=True)
             continue
-        for note in notes:
-            conv.add_system_reminder(note)
-        last_result = await agent.run_to_completion(
-            "Teammate notifications received. Process them and continue.", conv
-        )
-        print(last_result, flush=True)
+        if not task_manager.has_pending_work():
+            break
+        await asyncio.sleep(2)
 
 
 if __name__ == "__main__":
