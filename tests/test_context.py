@@ -751,3 +751,83 @@ class TestCleanupToolResults:
             )],
         )
         assert collect_referenced_persisted_paths([msg], session) == {str(f1)}
+
+
+# ---------------------------------------------------------------------------
+# F2.9 compact 重试判定：ContextOverflowError 结构化异常
+# ---------------------------------------------------------------------------
+
+class _StubSummaryClient:
+    def __init__(self, failures: list[Exception]) -> None:
+        self._failures = list(failures)
+        self.calls = 0
+
+    async def stream(self, conversation, system="", tools=None):
+        self.calls += 1
+        if self._failures:
+            raise self._failures.pop(0)
+        from mewcode.tools.base import StreamEnd, TextDelta
+        yield TextDelta("This is the summary.")
+        yield StreamEnd("end_turn", input_tokens=10, output_tokens=10)
+
+
+def _big_conversation() -> ConversationManager:
+    conv = ConversationManager()
+    for i in range(30):
+        conv.add_user_message(f"message {i}: " + "content " * 625)
+    return conv
+
+
+@pytest.mark.asyncio
+async def test_context_overflow_triggers_shrink_retry(tmp_path):
+    """openai 风格超长错误（ContextOverflowError）→ 缩减前缀后重试成功。"""
+    from mewcode.client import ContextOverflowError
+    from mewcode.context.manager import CompactEvent
+
+    client = _StubSummaryClient([
+        ContextOverflowError("This model's maximum context length is 8192 tokens"),
+    ])
+    result = await auto_compact(
+        _big_conversation(), client, 50_000, tmp_path,
+    )
+    assert isinstance(result, CompactEvent)
+    assert client.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_message_does_not_trigger_shrink(tmp_path):
+    """"Too many requests" 限流文案不得触发缩减重试（旧实现的运算符
+    优先级缺陷会让它命中）。"""
+    from mewcode.client import RateLimitError
+    from mewcode.context.manager import CompactEvent
+
+    client = _StubSummaryClient([
+        RateLimitError("Too many requests, please retry later"),
+    ])
+    result = await auto_compact(
+        _big_conversation(), client, 50_000, tmp_path,
+    )
+    assert not isinstance(result, CompactEvent)
+    assert client.calls == 1
+
+
+def test_context_overflow_message_matcher():
+    from mewcode.client import is_context_overflow_message
+
+    assert is_context_overflow_message("prompt is too long: 250000 tokens > 200000")
+    assert is_context_overflow_message("maximum context length is 8192 tokens")
+    assert is_context_overflow_message("This model supports up to 32768 context_length_exceeded")
+    assert is_context_overflow_message(
+        "input length and `max_tokens` exceed context limit"
+    )
+    assert not is_context_overflow_message("Too many requests")
+    assert not is_context_overflow_message("invalid api key")
+
+
+def test_parse_retry_after_handles_garbage():
+    from mewcode.client import parse_retry_after
+
+    assert parse_retry_after("1.5") == 1.5
+    assert parse_retry_after(None) is None
+    assert parse_retry_after("") is None
+    assert parse_retry_after("not-a-number") is None

@@ -99,6 +99,36 @@ class NetworkError(LLMError):
     pass
 
 
+class ContextOverflowError(LLMError):
+    """输入超出模型上下文窗口（各 provider 文案已归一化）。
+
+    compact 层据此触发缩减重试，避免对错误文案做字符串猜测。
+    """
+
+
+_CONTEXT_OVERFLOW_PATTERNS: tuple[str, ...] = (
+    "prompt is too long",
+    "input length and `max_tokens` exceed context limit",
+    "maximum context length",
+    "context_length_exceeded",
+)
+
+
+def is_context_overflow_message(message: str) -> bool:
+    m = (message or "").lower()
+    return any(pattern in m for pattern in _CONTEXT_OVERFLOW_PATTERNS)
+
+
+def parse_retry_after(retry: str | None) -> float | None:
+    """解析 retry-after 头；非数字值返回 None 而非抛 ValueError。"""
+    if not retry:
+        return None
+    try:
+        return float(retry)
+    except ValueError:
+        return None
+
+
 class LLMClient(ABC):
     @abstractmethod
     async def stream(
@@ -275,11 +305,15 @@ class AnthropicClient(LLMClient):
             retry = e.response.headers.get("retry-after") if e.response else None
             raise RateLimitError(
                 f"Rate limited. {f'Retry after {retry}s.' if retry else 'Please wait.'}",
-                retry_after=float(retry) if retry else None,
+                retry_after=parse_retry_after(retry),
             ) from e
         except _anthropic.APIConnectionError as e:
             raise NetworkError(f"Network error: {e}") from e
         except _anthropic.APIStatusError as e:
+            if is_context_overflow_message(e.message):
+                raise ContextOverflowError(
+                    f"Context overflow ({e.status_code}): {e.message}"
+                ) from e
             raise LLMError(f"API error ({e.status_code}): {e.message}") from e
 
 
@@ -412,11 +446,15 @@ class OpenAIClient(LLMClient):
                 retry = e.response.headers.get("retry-after")
             raise RateLimitError(
                 f"Rate limited. {f'Retry after {retry}s.' if retry else 'Please wait.'}",
-                retry_after=float(retry) if retry else None,
+                retry_after=parse_retry_after(retry),
             ) from e
         except _openai.APIConnectionError as e:
             raise NetworkError(f"Network error: {e}") from e
         except _openai.APIStatusError as e:
+            if is_context_overflow_message(e.message):
+                raise ContextOverflowError(
+                    f"Context overflow ({e.status_code}): {e.message}"
+                ) from e
             raise LLMError(f"API error ({e.status_code}): {e.message}") from e
 
 
@@ -582,11 +620,15 @@ class OpenAICompatClient(LLMClient):
                 retry = e.response.headers.get("retry-after")
             raise RateLimitError(
                 f"Rate limited. {f'Retry after {retry}s.' if retry else 'Please wait.'}",
-                retry_after=float(retry) if retry else None,
+                retry_after=parse_retry_after(retry),
             ) from e
         except _openai.APIConnectionError as e:
             raise NetworkError(f"Network error: {e}") from e
         except _openai.APIStatusError as e:
+            if is_context_overflow_message(e.message):
+                raise ContextOverflowError(
+                    f"Context overflow ({e.status_code}): {e.message}"
+                ) from e
             raise LLMError(f"API error ({e.status_code}): {e.message}") from e
 
 

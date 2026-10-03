@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
+from mewcode.client import ContextOverflowError
 from mewcode.conversation import (
     ConversationManager,
     Message,
@@ -832,18 +833,18 @@ async def auto_compact(
             llm_output = collected_text
             break
 
+        except ContextOverflowError:
+            # 输入超出模型上下文：按轮次缩减 20% 前缀后重试
+            groups = _group_messages_by_turn(summary_conv.history[1:-1])
+            drop_count = max(1, len(groups) // 5)
+            remaining = groups[drop_count:]
+            summary_conv.history = (
+                [summary_conv.history[0]]
+                + [m for g in remaining for m in g]
+                + [summary_conv.history[-1]]
+            )
+            continue
         except Exception as e:
-            err_msg = str(e).lower()
-            if "prompt" in err_msg and "long" in err_msg or "too many" in err_msg:
-                groups = _group_messages_by_turn(summary_conv.history[1:-1])
-                drop_count = max(1, len(groups) // 5)
-                remaining = groups[drop_count:]
-                summary_conv.history = (
-                    [summary_conv.history[0]]
-                    + [m for g in remaining for m in g]
-                    + [summary_conv.history[-1]]
-                )
-                continue
             if breaker is not None:
                 breaker.record_failure()
             return f"摘要生成失败: {e}"
