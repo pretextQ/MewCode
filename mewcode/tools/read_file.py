@@ -44,8 +44,10 @@ class ReadFile(Tool):
         try:
             text = self._cache.get(resolved) if self._cache else None
             if text is None:
+                import asyncio
+
                 from mewcode.tools.base import read_text_preserve
-                text = read_text_preserve(path)
+                text = await asyncio.to_thread(read_text_preserve, path)
                 if self._cache:
                     self._cache.put(resolved, text)
         except Exception as e:

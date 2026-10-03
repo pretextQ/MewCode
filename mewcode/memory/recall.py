@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
@@ -246,10 +247,11 @@ async def find_relevant_memories(
     the main conversation.
     """
     all_headers: list[MemoryHeader] = []
+    # 同步 rglob + 逐文件读取放线程池，外层 wait_for 才能真正超时抢占
     if user_mem_dir is not None:
-        all_headers.extend(scan_memory_files(user_mem_dir, "user"))
+        all_headers.extend(await asyncio.to_thread(scan_memory_files, user_mem_dir, "user"))
     if project_mem_dir is not None:
-        all_headers.extend(scan_memory_files(project_mem_dir, "project"))
+        all_headers.extend(await asyncio.to_thread(scan_memory_files, project_mem_dir, "project"))
 
     surfaced = already_surfaced or set()
     candidates = [m for m in all_headers if m.file_path not in surfaced]

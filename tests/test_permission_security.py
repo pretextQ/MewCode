@@ -976,3 +976,90 @@ class TestFileToolWindowsCompat:
 
         with pytest.raises(ValidationError):
             ReadParams.model_validate({"file_path": "x", "offset": -1})
+
+
+# ---------------------------------------------------------------------------
+# F3.2 工具层阻塞 I/O 移出事件循环 + grep 加固
+# ---------------------------------------------------------------------------
+
+class TestGrepHardening:
+    def test_binary_file_skipped_no_pseudo_match(self, tmp_path):
+        import asyncio
+
+        from mewcode.tools.grep import Grep, Params
+
+        binary = tmp_path / "blob.bin"
+        binary.write_bytes(b"secretkey\x00\x01\x02" * 100)
+        (tmp_path / "text.txt").write_text("secretkey here\n")
+
+        r = asyncio.run(Grep().execute(Params.model_validate({
+            "pattern": "secretkey", "path": str(tmp_path),
+        })))
+        assert "blob.bin" not in r.output
+        assert "text.txt" in r.output
+
+    def test_oversized_file_skipped(self, tmp_path):
+        import asyncio
+
+        from mewcode.tools.grep import Grep, Params
+
+        big = tmp_path / "big.log"
+        big.write_text("needle\n" * 200_000)
+        (tmp_path / "small.txt").write_text("needle\n")
+
+        r = asyncio.run(Grep().execute(Params.model_validate({
+            "pattern": "needle", "path": str(tmp_path),
+        })))
+        assert "big.log" not in r.output
+        assert "small.txt" in r.output
+
+    def test_result_cap(self, tmp_path):
+        import asyncio
+
+        from mewcode.tools.grep import Grep, Params
+        from mewcode.tools.grep import GREP_MAX_RESULTS
+
+        for i in range(50):
+            (tmp_path / f"f{i:03}.txt").write_text("hit\n" * 10)
+
+        r = asyncio.run(Grep().execute(Params.model_validate({
+            "pattern": "hit", "path": str(tmp_path),
+        })))
+        assert r.output.count("\n") <= GREP_MAX_RESULTS + 1
+
+    def test_grep_does_not_block_event_loop(self, tmp_path):
+        """扫描期间心跳协程持续推进（未在 to_thread 外同步执行）。"""
+        import asyncio
+
+        from mewcode.tools.grep import Grep, Params
+
+        for i in range(5000):
+            (tmp_path / f"f{i:04}.txt").write_text("x\n" * 200)
+
+        async def _run():
+            heartbeats = 0
+
+            async def heartbeat():
+                nonlocal heartbeats
+                while True:
+                    await asyncio.sleep(0.002)
+                    heartbeats += 1
+
+            hb = asyncio.create_task(heartbeat())
+            # 让心跳先跑起来再开始扫描
+            await asyncio.sleep(0.004)
+            baseline = heartbeats
+            await asyncio.wait_for(
+                Grep().execute(Params.model_validate({
+                    "pattern": "x", "path": str(tmp_path),
+                })),
+                timeout=5.0,
+            )
+            hb.cancel()
+            # 若扫描同步阻塞事件循环，心跳在扫描期间一跳都不会有；
+            # to_thread 下 2ms 间隔的心跳必然继续推进
+            assert heartbeats >= baseline + 1, (
+                f"event loop starved: {heartbeats - baseline} beats during scan"
+            )
+
+        asyncio.run(_run())

@@ -1086,10 +1086,25 @@ class MewCodeApp(App):
 
     def on_chat_input_at_file_request(self, event: ChatInput.AtFileRequest) -> None:
         work_dir = self.agent.work_dir if self.agent else os.getcwd()
-        matches = scan_files_for_at(event.prefix, work_dir)
-        if matches:
-            popup = self.query_one(CompletionPopup)
-            popup.show([f"@{m}" for m in matches])
+        prefix = event.prefix
+        # 目录扫描挪入线程池 + 200ms 防抖：连续输入只取最后一次
+        self._at_scan_seq = getattr(self, "_at_scan_seq", 0) + 1
+        seq = self._at_scan_seq
+
+        async def _scan() -> None:
+            try:
+                await asyncio.sleep(0.2)
+                if seq != getattr(self, "_at_scan_seq", 0):
+                    return
+                matches = await asyncio.to_thread(scan_files_for_at, prefix, work_dir)
+                if not matches or seq != getattr(self, "_at_scan_seq", 0):
+                    return
+                popup = self.query_one(CompletionPopup)
+                popup.show([f"@{m}" for m in matches])
+            except Exception:
+                return
+
+        asyncio.create_task(_scan())
 
     def on_completion_popup_selected(self, event: CompletionPopup.Selected) -> None:
         input_widget = self.query_one("#chat-input", ChatInput)
@@ -1231,7 +1246,7 @@ class MewCodeApp(App):
                 ),
                 timeout=8.0,
             )
-            return render_reminder(results)
+            return await asyncio.to_thread(render_reminder, results)
         except (asyncio.TimeoutError, Exception):
             return ""
 

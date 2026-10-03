@@ -1,6 +1,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -26,12 +27,15 @@ class Glob(Tool):
         if not base.exists():
             return ToolResult(output=f"Error: path not found: {params.path}", is_error=True)
 
-        try:
-            matches = sorted(
+        def _scan() -> list[str]:
+            return sorted(
                 str(p.relative_to(base))
                 for p in base.glob(params.pattern)
                 if p.is_file() and not any(part in SKIP_DIRS for part in p.parts)
             )
+
+        try:
+            matches = await asyncio.to_thread(_scan)
         except Exception as e:
             return ToolResult(output=f"Error: {e}", is_error=True)
 

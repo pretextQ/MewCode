@@ -953,7 +953,7 @@ class Agent:
         except Exception as e:
             result = ToolResult(output=f"Tool execution error: {e}", is_error=True)
 
-        self._snapshot_for_recovery(tc, result)
+        await self._snapshot_for_recovery(tc, result)
 
         return _ToolExecResult(
             tool_id=tc.tool_id,
@@ -1131,12 +1131,12 @@ class Agent:
                 output=f"Tool execution error: {e}", is_error=True
             )
 
-        self._snapshot_for_recovery(tc, result)
+        await self._snapshot_for_recovery(tc, result)
 
         elapsed = time.monotonic() - start
         yield result, elapsed, is_unknown
 
-    def _snapshot_for_recovery(
+    async def _snapshot_for_recovery(
         self, tc: ToolCallComplete, result: ToolResult
     ) -> None:
         """捕获 ReadFile 刚交给模型的内容，以便 Layer 2 压缩对话后
@@ -1148,10 +1148,16 @@ class Agent:
         path = tc.arguments.get("file_path") if isinstance(tc.arguments, dict) else None
         if not path:
             return
-        try:
-            with open(path, "r", encoding="utf-8", errors="replace") as fh:
-                content = fh.read()
-        except OSError:
+
+        def _read() -> str | None:
+            try:
+                with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                    return fh.read(2048)
+            except OSError:
+                return None
+
+        content = await asyncio.to_thread(_read)
+        if content is None:
             return
         self.recovery_state.record_file_read(path, content)
 
