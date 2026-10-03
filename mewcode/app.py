@@ -777,6 +777,7 @@ class MewCodeApp(App):
         self.worktree_manager = WorktreeManager(
             repo_root=work_dir,
             symlink_directories=wt_cfg.symlink_directories,
+            file_cache=self.file_cache,
         )
         restored = self.worktree_manager.restore_session()
         if restored:

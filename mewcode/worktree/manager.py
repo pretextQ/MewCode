@@ -8,6 +8,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from mewcode.cache import FileCache
 from mewcode.worktree.changes import (
     CleanupResult,
     Changes,
@@ -34,6 +35,7 @@ class WorktreeManager:
         repo_root: str,
         symlink_directories: list[str] | None = None,
         worktree_dir: str | None = None,
+        file_cache: FileCache | None = None,
     ) -> None:
         self.repo_root = repo_root
         self.symlink_directories = symlink_directories or []
@@ -41,6 +43,7 @@ class WorktreeManager:
             Path(repo_root) / ".mewcode" / "worktrees"
         )
         self._mewcode_dir = Path(repo_root) / ".mewcode"
+        self.file_cache = file_cache
         self._lock = asyncio.Lock()
         self.active: dict[str, Worktree] = {}
         self.current_session: WorktreeSession | None = None
@@ -187,6 +190,9 @@ class WorktreeManager:
         )
         self.current_session = session
         save_worktree_session(self._mewcode_dir, session)
+        # enter 切换了工作目录语义，缓存的相对路径内容全部过期，全量清空
+        if self.file_cache is not None:
+            self.file_cache.clear()
         return session
 
     # ------------------------------------------------------------------
