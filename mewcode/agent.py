@@ -646,8 +646,14 @@ class Agent:
 
             for batch in batches:
                 if batch.concurrent and len(batch.calls) > 1:
-                    batch_results = await self._execute_batch_parallel(batch.calls)
-                    for br in batch_results:
+                    async for item in self._execute_batch_parallel(batch.calls):
+                        if isinstance(item, PermissionRequest):
+                            yield item
+                            continue
+                        if isinstance(item, HookEvent):
+                            yield item
+                            continue
+                        br = item
                         if br.is_unknown:
                             consecutive_unknown += 1
                         else:
@@ -675,40 +681,29 @@ class Agent:
                         elapsed = 0.0
                         is_unknown = False
 
-                        if self.hook_engine:
-                            file_path = self._infer_file_path(tc.arguments)
-                            hook_ctx = self._build_hook_context(
-                                "pre_tool_use",
-                                tool_name=tc.tool_name,
-                                tool_args=tc.arguments,
-                                file_path=file_path,
+                        rejection, hook_events = await self._run_pre_tool_hooks(tc)
+                        for he in hook_events:
+                            yield he
+                        if rejection is not None:
+                            result = rejection
+                            content = self._maybe_persist_or_truncate(
+                                tc.tool_id, result.output
                             )
-                            rejection = await self.hook_engine.run_pre_tool_hooks(hook_ctx)
-                            for he in self._drain_hook_events():
-                                yield he
-                            if rejection is not None:
-                                result = ToolResult(
-                                    output=f"Hook rejected: {rejection.reason}",
+                            tool_results.append(
+                                ToolResultBlock(
+                                    tool_use_id=tc.tool_id,
+                                    content=content,
                                     is_error=True,
                                 )
-                                content = self._maybe_persist_or_truncate(
-                                    tc.tool_id, result.output
-                                )
-                                tool_results.append(
-                                    ToolResultBlock(
-                                        tool_use_id=tc.tool_id,
-                                        content=content,
-                                        is_error=True,
-                                    )
-                                )
-                                yield ToolResultEvent(
-                                    tool_id=tc.tool_id,
-                                    tool_name=tc.tool_name,
-                                    output=result.output,
-                                    is_error=True,
-                                    elapsed=0.0,
-                                )
-                                continue
+                            )
+                            yield ToolResultEvent(
+                                tool_id=tc.tool_id,
+                                tool_name=tc.tool_name,
+                                output=result.output,
+                                is_error=True,
+                                elapsed=0.0,
+                            )
+                            continue
 
                         async for item in self._execute_tool(tc):
                             if isinstance(item, PermissionRequest):
@@ -724,17 +719,8 @@ class Agent:
                         else:
                             consecutive_unknown = 0
 
-                        if self.hook_engine:
-                            file_path = self._infer_file_path(tc.arguments)
-                            hook_ctx = self._build_hook_context(
-                                "post_tool_use",
-                                tool_name=tc.tool_name,
-                                tool_args=tc.arguments,
-                                file_path=file_path,
-                            )
-                            await self.hook_engine.run_hooks("post_tool_use", hook_ctx)
-                            for he in self._drain_hook_events():
-                                yield he
+                        async for he in self._run_post_tool_hooks(tc):
+                            yield he
 
                         content = self._maybe_persist_or_truncate(
                             tc.tool_id, result.output
@@ -801,9 +787,79 @@ class Agent:
             return tc.arguments.get("file_path", tc.tool_name)
         return str(tc.arguments)
 
-    async def _execute_single_tool_direct(
+    def _gate_tool_call(self, tc: ToolCallComplete) -> _ToolExecResult | None:
+        """共享门禁：unknown / disabled / 权限 deny。None = 放行继续。"""
+        tool = self.registry.get(tc.tool_name)
+
+        if tool is None:
+            return _ToolExecResult(
+                tool_id=tc.tool_id,
+                tool_name=tc.tool_name,
+                result=ToolResult(output=f"Error: unknown tool '{tc.tool_name}'", is_error=True),
+                elapsed=0.0,
+                is_unknown=True,
+            )
+
+        if not self.registry.is_enabled(tc.tool_name):
+            return _ToolExecResult(
+                tool_id=tc.tool_id,
+                tool_name=tc.tool_name,
+                result=ToolResult(output=f"Error: tool '{tc.tool_name}' is disabled in current mode", is_error=True),
+                elapsed=0.0,
+                is_unknown=False,
+            )
+
+        if self.permission_checker:
+            decision = self.permission_checker.check(tool, tc.arguments)
+            if decision.effect == "deny":
+                return _ToolExecResult(
+                    tool_id=tc.tool_id,
+                    tool_name=tc.tool_name,
+                    result=ToolResult(output=f"Permission denied: {decision.reason}", is_error=True),
+                    elapsed=0.0,
+                    is_unknown=False,
+                )
+        return None
+
+    async def _run_pre_tool_hooks(
         self, tc: ToolCallComplete
-    ) -> _ToolExecResult:
+    ) -> tuple[ToolResult | None, list[HookEvent]]:
+        """返回 (拒绝结果, 事件列表)。拒绝结果非 None 时调用方应终止该工具。"""
+        if not self.hook_engine:
+            return None, []
+        file_path = self._infer_file_path(tc.arguments)
+        hook_ctx = self._build_hook_context(
+            "pre_tool_use",
+            tool_name=tc.tool_name,
+            tool_args=tc.arguments,
+            file_path=file_path,
+        )
+        rejection = await self.hook_engine.run_pre_tool_hooks(hook_ctx)
+        events = self._drain_hook_events()
+        if rejection is not None:
+            return (
+                ToolResult(output=f"Hook rejected: {rejection.reason}", is_error=True),
+                events,
+            )
+        return None, events
+
+    async def _run_post_tool_hooks(
+        self, tc: ToolCallComplete
+    ) -> AsyncIterator[HookEvent]:
+        if self.hook_engine:
+            file_path = self._infer_file_path(tc.arguments)
+            hook_ctx = self._build_hook_context(
+                "post_tool_use",
+                tool_name=tc.tool_name,
+                tool_args=tc.arguments,
+                file_path=file_path,
+            )
+            await self.hook_engine.run_hooks("post_tool_use", hook_ctx)
+            for he in self._drain_hook_events():
+                yield he
+
+    async def _execute_raw_tool(self, tc: ToolCallComplete) -> _ToolExecResult:
+        """已过门禁（hooks/权限）的纯执行函数，供并行批次复用。"""
         tool = self.registry.get(tc.tool_name)
         start = time.monotonic()
 
@@ -820,7 +876,7 @@ class Agent:
             return _ToolExecResult(
                 tool_id=tc.tool_id,
                 tool_name=tc.tool_name,
-                result=ToolResult(output=f"Error: tool '{tc.tool_name}' is disabled", is_error=True),
+                result=ToolResult(output=f"Error: tool '{tc.tool_name}' is disabled in current mode", is_error=True),
                 elapsed=time.monotonic() - start,
                 is_unknown=False,
             )
@@ -843,16 +899,99 @@ class Agent:
             is_unknown=False,
         )
 
-
     async def _execute_batch_parallel(
         self, calls: list[ToolCallComplete]
-    ) -> list[_ToolExecResult]:
-        tasks = [self._execute_single_tool_direct(tc) for tc in calls]
-        return list(await asyncio.gather(*tasks))
+    ) -> AsyncIterator[HookEvent | PermissionRequest | _ToolExecResult]:
+        """并行批次执行，与串行路径同等地经过 pre hooks、权限门禁与 post hooks。
+
+        批次启动前对每个 call 过 pre hooks + 门禁；触发 ask 的调用移出批次，
+        在 gather 之后逐个走串行 _execute_tool（只有它能 yield PermissionRequest）。
+        结果按 tool_use 在 assistant 消息中的顺序归位。
+        """
+        terminal: dict[int, _ToolExecResult] = {}
+        interactive: list[int] = []
+        runnable: list[tuple[int, ToolCallComplete]] = []
+
+        for i, tc in enumerate(calls):
+            rejection, hook_events = await self._run_pre_tool_hooks(tc)
+            for he in hook_events:
+                yield he
+            if rejection is not None:
+                terminal[i] = _ToolExecResult(
+                    tool_id=tc.tool_id,
+                    tool_name=tc.tool_name,
+                    result=rejection,
+                    elapsed=0.0,
+                    is_unknown=False,
+                )
+                continue
+
+            gate = self._gate_tool_call(tc)
+            if gate is not None:
+                terminal[i] = gate
+                continue
+
+            if self.permission_checker:
+                tool = self.registry.get(tc.tool_name)
+                decision = self.permission_checker.check(tool, tc.arguments)
+                if decision.effect == "ask":
+                    interactive.append(i)
+                    continue
+
+            runnable.append((i, tc))
+
+        results: dict[int, _ToolExecResult] = {}
+        if runnable:
+            gathered = await asyncio.gather(
+                *(self._execute_raw_tool(tc) for _, tc in runnable),
+                return_exceptions=True,
+            )
+            for (i, tc), r in zip(runnable, gathered):
+                if isinstance(r, BaseException):
+                    results[i] = _ToolExecResult(
+                        tool_id=tc.tool_id,
+                        tool_name=tc.tool_name,
+                        result=ToolResult(output=f"Tool execution error: {r}", is_error=True),
+                        elapsed=0.0,
+                        is_unknown=False,
+                    )
+                else:
+                    results[i] = r
+
+        for i in interactive:
+            tc = calls[i]
+            async for item in self._execute_tool(tc):
+                if isinstance(item, PermissionRequest):
+                    yield item
+                else:
+                    result, elapsed, is_unknown = item
+                    results[i] = _ToolExecResult(
+                        tool_id=tc.tool_id,
+                        tool_name=tc.tool_name,
+                        result=result,
+                        elapsed=elapsed,
+                        is_unknown=is_unknown,
+                    )
+            if i not in results:
+                results[i] = _ToolExecResult(
+                    tool_id=tc.tool_id,
+                    tool_name=tc.tool_name,
+                    result=ToolResult(output="Error: no result from tool", is_error=True),
+                    elapsed=0.0,
+                    is_unknown=False,
+                )
+
+        for i in range(len(calls)):
+            br = terminal.get(i) or results.get(i)
+            if br is None:
+                continue
+            async for he in self._run_post_tool_hooks(calls[i]):
+                yield he
+            yield br
 
     async def _execute_tool(
         self, tc: ToolCallComplete
-    ) -> AsyncIterator[tuple[ToolResult, float, bool]]:
+    ) -> AsyncIterator[tuple[ToolResult, float, bool] | PermissionRequest]:
         tool = self.registry.get(tc.tool_name)
         start = time.monotonic()
         is_unknown = False
