@@ -251,3 +251,63 @@ async def test_parallel_batch_exception_isolation(tmp_path: Path):
     assert "t2" in results
     assert results["t2"].is_error
     assert "Tool execution error" in results["t2"].output
+
+
+# ---------------------------------------------------------------------------
+# F1.2 权限管线重排：危险检测前移 + 白名单清理 + 禁用字符表
+# ---------------------------------------------------------------------------
+
+class TestSafeCommandWhitelist:
+    """审查报告绕过示例：白名单里的可写/可执行命令必须不再自动放行。"""
+
+    @pytest.mark.parametrize("command", [
+        'find . -name "*.py" -delete',
+        "sed -i 's/x/y/' C:/Users/x/f.txt",
+        "npx some-pkg",
+        'awk \'BEGIN{system("evil")}\'',
+    ])
+    def test_writey_commands_not_safe(self, command: str):
+        from mewcode.permissions.dangerous import is_safe_command
+        assert not is_safe_command(command), command
+
+    @pytest.mark.parametrize("command", [
+        "echo hi\nrm -rf ~",
+        "ls & rm -rf x",
+        "cat /etc/passwd",
+        "cat ~/.ssh/id_rsa",
+        "cat C:/Users/x/.ssh/id_rsa",
+    ])
+    def test_injection_and_absolute_path_not_safe(self, command: str):
+        from mewcode.permissions.dangerous import is_safe_command
+        assert not is_safe_command(command), command
+
+    @pytest.mark.parametrize("command", [
+        "ls",
+        "pwd",
+        "git status",
+        "git log --oneline",
+        "cat README.md",
+        "python --version",
+    ])
+    def test_benign_commands_still_safe(self, command: str):
+        from mewcode.permissions.dangerous import is_safe_command
+        assert is_safe_command(command), command
+
+
+@pytest.mark.asyncio
+async def test_dangerous_check_precedes_safe_allow(tmp_path: Path):
+    """Layer 1b（危险黑名单）必须先于 Layer 1（安全白名单）生效。
+
+    用 extra_patterns 让 ls 命中黑名单：旧顺序下白名单先 return，黑名单不可达。
+    """
+    from mewcode.tools.bash import Bash
+
+    detector = DangerousCommandDetector(extra_patterns=[(r"^ls", "unit-test deny")])
+    checker = PermissionChecker(
+        detector=detector,
+        sandbox=PathSandbox(str(tmp_path)),
+        rule_engine=RuleEngine(),
+        mode=PermissionMode.DEFAULT,
+    )
+    d = checker.check(Bash(), {"command": "ls"})
+    assert d.effect == "deny"

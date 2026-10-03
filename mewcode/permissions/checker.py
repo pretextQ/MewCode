@@ -47,15 +47,15 @@ class PermissionChecker:
                 if self._is_plan_file(content):
                     return Decision(effect="allow", reason="Plan mode: plan file write")
 
-        # Layer 1: 安全的只读命令（自动放行）
-        if tool.category == "command" and is_safe_command(content or ""):
-            return Decision(effect="allow", reason="Safe read-only command")
-
-        # Layer 1b: 危险命令黑名单（仅 Bash）
+        # Layer 1b: 危险命令黑名单（仅 Bash）——先于白名单，保证黑名单可达
         if tool.category == "command":
             hit, reason = self.detector.detect(content)
             if hit:
                 return Decision(effect="deny", reason=f"危险命令拦截: {reason}")
+
+        # Layer 1: 安全的只读命令（自动放行）
+        if tool.category == "command" and is_safe_command(content or ""):
+            return Decision(effect="allow", reason="Safe read-only command")
 
         # Layer 2: 路径沙箱（仅文件类工具）
         if tool.category in ("read", "write") and content:
