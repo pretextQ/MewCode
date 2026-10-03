@@ -73,6 +73,19 @@ COORDINATOR_MODE_ALLOWED_TOOLS: frozenset[str] = frozenset({
     "TeamDelete",
 })
 
+# PLAN 父模式下子代理额外放行的非读类工具（协作/记事类，无文件系统副作用）
+PLAN_READONLY_EXTRA_TOOLS: frozenset[str] = frozenset({
+    "ToolSearch",
+    "TodoWrite",
+    "SyntheticOutput",
+    "TaskCreate",
+    "TaskGet",
+    "TaskList",
+    "TaskUpdate",
+    "SendMessage",
+    "AskUserQuestion",
+})
+
 
 def _is_mcp_tool(name: str) -> bool:
     return name.startswith("mcp__")
@@ -183,6 +196,20 @@ def build_teammate_tools(
         registry.register(tool)
 
     return registry
+
+
+def apply_plan_readonly_filter(registry: ToolRegistry) -> ToolRegistry:
+    """PLAN 父模式的子代理只保留只读工具（剔除 Bash/WriteFile/EditFile 等全部写类工具）。
+
+    MCP 工具类别未知，一并剔除，避免借 PLAN 穿透执行写操作。
+    """
+    filtered = ToolRegistry()
+    for tool in registry.list_tools():
+        if _is_mcp_tool(tool.name):
+            continue
+        if tool.is_read_only or tool.name in PLAN_READONLY_EXTRA_TOOLS:
+            filtered.register(tool)
+    return filtered
 
 
 def apply_coordinator_filter(registry: ToolRegistry) -> ToolRegistry:

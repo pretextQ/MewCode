@@ -41,7 +41,94 @@ PERMISSION_MODE_MAP = {
     "default": "DEFAULT",
     "acceptEdits": "ACCEPT_EDITS",
     "dontAsk": "DONT_ASK",
+    "plan": "PLAN",
+    "bypassPermissions": "BYPASS",
 }
+
+# 严格度序：BYPASS(0) < DONT_ASK(1) < ACCEPT_EDITS/DEFAULT(2) < PLAN(3)
+_MODE_STRICTNESS: dict[str, int] = {
+    "BYPASS": 0,
+    "DONT_ASK": 1,
+    "ACCEPT_EDITS": 2,
+    "DEFAULT": 2,
+    "PLAN": 3,
+}
+
+
+def resolve_permission_mode(pm_str: str) -> "PermissionMode":
+    """定义声明的 permission_mode → 枚举；未知值告警并降级 DEFAULT。"""
+    from mewcode.permissions import PermissionMode
+
+    mapped = PERMISSION_MODE_MAP.get((pm_str or "").strip())
+    if mapped is None:
+        if pm_str:
+            log.warning(
+                "Unknown permission_mode '%s' in agent definition, "
+                "falling back to DEFAULT",
+                pm_str,
+            )
+        return PermissionMode.DEFAULT
+    return PermissionMode[mapped]
+
+
+def resolve_effective_mode(
+    parent_mode: "PermissionMode",
+    defined_mode: "PermissionMode",
+    is_background: bool,
+) -> "PermissionMode":
+    """子代理生效模式：交互式取 max(父, 定义)（严格度优先）；
+    非交互后台任务无法弹确认，固定 DONT_ASK（不低于它，即不会拿到 BYPASS）；
+    父模式为 PLAN 时一律 PLAN，杜绝 PLAN 只读保护被子代理穿透。"""
+    from mewcode.permissions import PermissionMode
+
+    if parent_mode == PermissionMode.PLAN:
+        return PermissionMode.PLAN
+    if is_background:
+        return PermissionMode.DONT_ASK
+    return max(
+        (parent_mode, defined_mode),
+        key=lambda m: _MODE_STRICTNESS[m.name],
+    )
+
+
+def build_subagent_checker(
+    parent_agent: "Agent",
+    sandbox_root: str,
+    defined_mode: str,
+    is_background: bool,
+) -> tuple["PermissionChecker", "PermissionMode"]:
+    """子代理 PermissionChecker：继承父 RuleEngine 与沙箱（同根时复用实例），
+    生效模式按 resolve_effective_mode 计算。"""
+    from mewcode.permissions import (
+        DangerousCommandDetector,
+        PathSandbox,
+        PermissionChecker,
+        PermissionMode,
+        RuleEngine,
+    )
+
+    parent_checker = parent_agent.permission_checker
+    parent_mode = parent_checker.mode if parent_checker else PermissionMode.DEFAULT
+    defined = resolve_permission_mode(defined_mode)
+    effective = resolve_effective_mode(parent_mode, defined, is_background)
+
+    if parent_checker is not None:
+        rule_engine = parent_checker.rule_engine
+        if sandbox_root == parent_agent.work_dir:
+            sandbox = parent_checker.sandbox
+        else:
+            sandbox = PathSandbox(sandbox_root)
+    else:
+        rule_engine = RuleEngine()
+        sandbox = PathSandbox(sandbox_root)
+
+    checker = PermissionChecker(
+        detector=DangerousCommandDetector(),
+        sandbox=sandbox,
+        rule_engine=rule_engine,
+        mode=effective,
+    )
+    return checker, effective
 
 
 TEAMMATE_ADDENDUM = (
@@ -89,6 +176,16 @@ class AgentTool(Tool):
         self._provider_config = provider_config
         self._worktree_manager = worktree_manager
         self._team_manager = team_manager
+
+    def _apply_plan_guard(self, registry: Any) -> Any:
+        """父模式为 PLAN 时，把子代理工具集强制过滤为只读（PLAN 穿透封堵）。"""
+        from mewcode.agents.tool_filter import apply_plan_readonly_filter
+        from mewcode.permissions import PermissionMode
+
+        parent_checker = self._parent_agent.permission_checker
+        if parent_checker is not None and parent_checker.mode == PermissionMode.PLAN:
+            return apply_plan_readonly_filter(registry)
+        return registry
 
     async def execute(self, params: BaseModel) -> ToolResult:
         p: AgentToolParams = params  # type: ignore[assignment]
@@ -174,19 +271,14 @@ class AgentTool(Tool):
             _base_registry, definition, is_background
         )
 
-        # 为子 agent 创建权限检查器
-        pm_str = definition.permission_mode
-        pm_enum = getattr(
-            PermissionMode,
-            PERMISSION_MODE_MAP.get(pm_str, "DEFAULT"),
-            PermissionMode.DEFAULT,
+        # 为子 agent 创建权限检查器（继承父 RuleEngine / 沙箱，模式按严格度取大）
+        checker, _ = build_subagent_checker(
+            self._parent_agent,
+            self._parent_agent.work_dir,
+            definition.permission_mode,
+            is_background,
         )
-        checker = PermissionChecker(
-            detector=DangerousCommandDetector(),
-            sandbox=PathSandbox(self._parent_agent.work_dir),
-            rule_engine=RuleEngine(),
-            mode=pm_enum,
-        )
+        filtered_registry = self._apply_plan_guard(filtered_registry)
 
         # 创建子 agent
         sub_agent = AgentClass(
@@ -377,12 +469,13 @@ class AgentTool(Tool):
         # 6. 创建子 agent 并附加队友专属指令
         instructions = (definition.system_prompt or "") + TEAMMATE_ADDENDUM
 
-        checker = PermissionChecker(
-            detector=DangerousCommandDetector(),
-            sandbox=PathSandbox(wt.path),
-            rule_engine=RuleEngine(),
-            mode=PermissionMode.DONT_ASK,
+        checker, _ = build_subagent_checker(
+            self._parent_agent,
+            wt.path,
+            definition.permission_mode,
+            is_background=True,
         )
+        teammate_registry = self._apply_plan_guard(teammate_registry)
 
         sub_agent = AgentClass(
             client=client,
@@ -574,18 +667,13 @@ class AgentTool(Tool):
             _base_registry, definition, False
         )
 
-        pm_str = definition.permission_mode
-        pm_enum = getattr(
-            PermissionMode,
-            PERMISSION_MODE_MAP.get(pm_str, "DEFAULT"),
-            PermissionMode.DEFAULT,
+        checker, _ = build_subagent_checker(
+            self._parent_agent,
+            wt.path,
+            definition.permission_mode,
+            is_background=True,
         )
-        checker = PermissionChecker(
-            detector=DangerousCommandDetector(),
-            sandbox=PathSandbox(wt.path),
-            rule_engine=RuleEngine(),
-            mode=pm_enum,
-        )
+        filtered_registry = self._apply_plan_guard(filtered_registry)
 
         sub_agent = AgentClass(
             client=client,

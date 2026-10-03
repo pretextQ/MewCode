@@ -420,3 +420,131 @@ class TestPlanFileWrite:
         target = tmp_path / ".mewcode" / "plans" / "ad-hoc.md"
         d = checker.check(WriteFile(), {"file_path": str(target), "content": "hi"})
         assert d.effect == "ask"
+
+
+# ---------------------------------------------------------------------------
+# F1.4 子代理权限收敛
+# ---------------------------------------------------------------------------
+
+class _FakeParent:
+    def __init__(self, checker: PermissionChecker | None, work_dir: str) -> None:
+        self.permission_checker = checker
+        self.work_dir = work_dir
+
+
+class TestSubagentModeResolution:
+    def test_mode_map_completed(self):
+        """定义声明 plan / bypassPermissions 不再静默降级为 DEFAULT。"""
+        from mewcode.tools.agent_tool import resolve_permission_mode
+
+        assert resolve_permission_mode("plan") is PermissionMode.PLAN
+        assert resolve_permission_mode("bypassPermissions") is PermissionMode.BYPASS
+        assert resolve_permission_mode("dontAsk") is PermissionMode.DONT_ASK
+        assert resolve_permission_mode("default") is PermissionMode.DEFAULT
+
+    def test_unknown_mode_warns_and_defaults(self):
+        from mewcode.tools.agent_tool import resolve_permission_mode
+
+        assert resolve_permission_mode("yolo-mode") is PermissionMode.DEFAULT
+
+    def test_stricter_parent_wins_for_interactive(self):
+        """父 DEFAULT + 子定义 dontAsk → 生效 DEFAULT（写操作会 ask）。"""
+        from mewcode.tools.agent_tool import resolve_effective_mode
+
+        assert (
+            resolve_effective_mode(
+                PermissionMode.DEFAULT, PermissionMode.DONT_ASK, is_background=False
+            )
+            is PermissionMode.DEFAULT
+        )
+
+    def test_background_keeps_dont_ask_floor(self):
+        from mewcode.tools.agent_tool import resolve_effective_mode
+
+        assert (
+            resolve_effective_mode(
+                PermissionMode.DONT_ASK, PermissionMode.DONT_ASK, is_background=True
+            )
+            is PermissionMode.DONT_ASK
+        )
+
+    def test_background_never_gets_bypass(self):
+        from mewcode.tools.agent_tool import resolve_effective_mode
+
+        assert (
+            resolve_effective_mode(
+                PermissionMode.BYPASS, PermissionMode.BYPASS, is_background=True
+            )
+            is PermissionMode.DONT_ASK
+        )
+
+    def test_parent_plan_overrides_background(self):
+        from mewcode.tools.agent_tool import resolve_effective_mode
+
+        assert (
+            resolve_effective_mode(
+                PermissionMode.PLAN, PermissionMode.DONT_ASK, is_background=True
+            )
+            is PermissionMode.PLAN
+        )
+
+
+@pytest.mark.asyncio
+async def test_subagent_checker_inherits_parent_rule_engine(tmp_path: Path):
+    """绕过示例：子代理用无参 RuleEngine()，用户 deny 规则失效（§3.4）。"""
+    from mewcode.tools.agent_tool import build_subagent_checker
+    from mewcode.tools.bash import Bash
+
+    rules = tmp_path / "local_rules.yaml"
+    rules.write_text(
+        "- rule: 'Bash(git push*)'\n  effect: deny\n", encoding="utf-8"
+    )
+    parent_checker = PermissionChecker(
+        detector=DangerousCommandDetector(),
+        sandbox=PathSandbox(str(tmp_path)),
+        rule_engine=RuleEngine(local_rules_path=rules),
+        mode=PermissionMode.DEFAULT,
+    )
+    parent = _FakeParent(parent_checker, str(tmp_path))
+
+    checker, effective = build_subagent_checker(
+        parent, str(tmp_path), "dontAsk", is_background=False
+    )
+    assert checker.rule_engine is parent_checker.rule_engine
+    assert effective == PermissionMode.DEFAULT
+    d = checker.check(Bash(), {"command": "git push origin master"})
+    assert d.effect == "deny"
+
+
+def test_plan_parent_filters_child_tools_to_readonly():
+    """绕过示例：PLAN 父模式的子代理持完整工具集，可借 dontAsk 定义穿透（§3.4）。"""
+    from mewcode.agents.tool_filter import apply_plan_readonly_filter
+    from mewcode.tools import ToolRegistry
+    from mewcode.tools.base import Tool
+
+    class Dummy(Tool):
+        params_model = None  # type: ignore[assignment]
+
+        def __init__(self, name: str, category: str) -> None:
+            self.name = name
+            self.description = f"dummy {name}"
+            self.category = category  # type: ignore[assignment]
+
+        def get_schema(self):
+            return {"name": self.name, "description": "", "input_schema": {}}
+
+        async def execute(self, params):
+            return ToolResult(output="ok")
+
+    reg = ToolRegistry()
+    for name, cat in [
+        ("ReadFile", "read"), ("Grep", "read"), ("Glob", "read"),
+        ("Bash", "command"), ("WriteFile", "write"), ("EditFile", "write"),
+        ("TaskCreate", "write"), ("SendMessage", "command"),
+    ]:
+        reg.register(Dummy(name, cat))
+
+    filtered = apply_plan_readonly_filter(reg)
+    names = {t.name for t in filtered.list_tools()}
+    assert {"Bash", "WriteFile", "EditFile"} & names == set()
+    assert {"ReadFile", "Grep", "Glob"} <= names
