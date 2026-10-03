@@ -12,3 +12,4 @@ build/
 !.mewcode/skills/
 .claude/
 CLAUDE.md
+docs/
