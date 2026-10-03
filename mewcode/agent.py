@@ -745,6 +745,19 @@ class Agent:
                         )
 
             if consecutive_unknown >= 3:
+                # break 前补齐孤立 tool_use 的 tool_result：assistant 消息已在
+                # 历史中，缺配对 result 会让下一次 API 调用被 400 拒绝
+                responded_ids = {tr.tool_use_id for tr in tool_results}
+                for tc in response.tool_calls:
+                    if tc.tool_id not in responded_ids:
+                        tool_results.append(
+                            ToolResultBlock(
+                                tool_use_id=tc.tool_id,
+                                content="Aborted: too many unknown tool calls",
+                                is_error=True,
+                            )
+                        )
+                conversation.add_tool_results_message(tool_results)
                 yield ErrorEvent(
                     message="Agent terminated: too many consecutive unknown tool calls"
                 )

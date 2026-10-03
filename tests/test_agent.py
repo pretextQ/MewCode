@@ -571,3 +571,51 @@ async def test_max_tokens_escalation_doubles_from_initial():
     assert client.max_output_tokens == 32000, (
         f"escalation should double 16000, got {client.max_output_tokens}"
     )
+
+
+# ---------------------------------------------------------------------------
+# F2.3 孤立 tool_use：break 前补齐 tool_result 回填
+# ---------------------------------------------------------------------------
+
+def _collect_pairs(msgs: list[dict]) -> tuple[set, set]:
+    tool_use_ids: set = set()
+    tool_result_ids: set = set()
+    for m in msgs:
+        if isinstance(m["content"], list):
+            for block in m["content"]:
+                if block.get("type") == "tool_use":
+                    tool_use_ids.add(block["id"])
+                elif block.get("type") == "tool_result":
+                    tool_result_ids.add(block["tool_use_id"])
+    return tool_use_ids, tool_result_ids
+
+
+@pytest.mark.asyncio
+async def test_consecutive_unknown_tools_leave_paired_history():
+    """连续未知工具触发 break 时，历史中不得留下无配对的 tool_use。"""
+    client = MockLLMClient([
+        [
+            ToolCallComplete("t1", "NoSuchTool", {}),
+            ToolCallComplete("t2", "NoSuchTool", {}),
+            ToolCallComplete("t3", "NoSuchTool", {}),
+            StreamEnd("end_turn", input_tokens=10, output_tokens=10),
+        ],
+    ])
+    agent = Agent(client, create_default_registry(), "anthropic")
+    conv = ConversationManager()
+    conv.add_user_message("go")
+
+    events = []
+    async for e in agent.run(conv):
+        events.append(e)
+
+    c = _collect(events)
+    assert len(c["error"]) == 1
+    assert "unknown" in c["error"][0].message or "unknown tool" in c["error"][0].message
+
+    msgs = build_anthropic_messages(conv.get_messages())
+    tool_use_ids, tool_result_ids = _collect_pairs(msgs)
+    assert tool_use_ids == {"t1", "t2", "t3"}
+    assert tool_use_ids == tool_result_ids, (
+        "orphan tool_use in history would get the next API call rejected with 400"
+    )
