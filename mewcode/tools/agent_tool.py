@@ -279,6 +279,8 @@ class AgentTool(Tool):
             is_background,
         )
         filtered_registry = self._apply_plan_guard(filtered_registry)
+        # 相对路径/子进程 cwd 与沙箱统一以子代理 work_dir 为基准
+        filtered_registry = filtered_registry.bind_work_dir(self._parent_agent.work_dir)
 
         # 创建子 agent
         sub_agent = AgentClass(
@@ -476,6 +478,8 @@ class AgentTool(Tool):
             is_background=True,
         )
         teammate_registry = self._apply_plan_guard(teammate_registry)
+        # 相对路径/子进程 cwd 与沙箱统一以 worktree 为基准
+        teammate_registry = teammate_registry.bind_work_dir(wt.path)
 
         sub_agent = AgentClass(
             client=client,
@@ -674,6 +678,8 @@ class AgentTool(Tool):
             is_background=True,
         )
         filtered_registry = self._apply_plan_guard(filtered_registry)
+        # 相对路径/子进程 cwd 与沙箱统一以 worktree 为基准
+        filtered_registry = filtered_registry.bind_work_dir(wt.path)
 
         sub_agent = AgentClass(
             client=client,
