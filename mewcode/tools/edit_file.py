@@ -37,9 +37,6 @@ class EditFile(Tool):
 
     async def execute(self, params: Params) -> ToolResult:
         target = self._resolve_work_path(params.file_path)
-        if self.file_history is not None:
-            self.file_history.track_edit(target)
-
         path = Path(target)
         if not path.exists():
             return ToolResult(output=f"Error: file not found: {params.file_path}", is_error=True)
@@ -51,11 +48,19 @@ class EditFile(Tool):
                 return ToolResult(output=err_msg, is_error=True)
 
         try:
-            content = path.read_text(encoding="utf-8")
+            from mewcode.tools.base import read_text_preserve
+            content = read_text_preserve(path)
         except Exception as e:
             return ToolResult(output=f"Error reading file: {e}", is_error=True)
 
-        count = content.count(params.old_string)
+        # CRLF 文件：模型通常发送 LF 形式的 old_string，先归一化匹配，
+        # 替换后还原行尾，保证未触碰部分字节级不变
+        crlf_file = "\r\n" in content
+        if crlf_file and "\r\n" not in params.old_string:
+            normalized = content.replace("\r\n", "\n")
+            count = normalized.count(params.old_string)
+        else:
+            count = content.count(params.old_string)
         if count == 0:
             return ToolResult(output="Error: old_string not found in file", is_error=True)
         if count > 1:
@@ -64,9 +69,20 @@ class EditFile(Tool):
                 is_error=True,
             )
 
-        new_content = content.replace(params.old_string, params.new_string, 1)
+        if crlf_file and "\r\n" not in params.old_string:
+            new_content = normalized.replace(params.old_string, params.new_string, 1)
+            if "\r\n" not in new_content:
+                new_content = new_content.replace("\n", "\r\n")
+        else:
+            new_content = content.replace(params.old_string, params.new_string, 1)
+
+        # track_edit 在门禁与内容校验通过之后：被拒绝的编辑不应进入撤销历史
+        if self.file_history is not None:
+            self.file_history.track_edit(target)
+
         try:
-            path.write_text(new_content, encoding="utf-8")
+            from mewcode.tools.base import write_text_preserve
+            write_text_preserve(path, new_content)
             if self._cache:
                 self._cache.invalidate(str(path.resolve()))
             if self._state_cache:

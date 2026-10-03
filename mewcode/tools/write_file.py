@@ -36,9 +36,6 @@ class WriteFile(Tool):
 
     async def execute(self, params: Params) -> ToolResult:
         target = self._resolve_work_path(params.file_path)
-        if self.file_history is not None:
-            self.file_history.track_edit(target)
-
         path = Path(target)
 
         if self._state_cache and path.exists():
@@ -47,9 +44,14 @@ class WriteFile(Tool):
             if not ok:
                 return ToolResult(output=err_msg, is_error=True)
 
+        # track_edit 在门禁校验通过之后：被拒绝的写不应进入撤销历史
+        if self.file_history is not None:
+            self.file_history.track_edit(target)
+
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(params.content, encoding="utf-8")
+            from mewcode.tools.base import write_text_preserve
+            write_text_preserve(path, params.content)
             if self._cache:
                 self._cache.invalidate(str(path.resolve()))
             if self._state_cache:

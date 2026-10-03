@@ -15,8 +15,8 @@ if TYPE_CHECKING:
 
 class Params(BaseModel):
     file_path: str = Field(description="Absolute or relative path to the file to read")
-    offset: int = Field(default=0, description="Line offset to start reading from (0-based)")
-    limit: int = Field(default=2000, description="Maximum number of lines to read")
+    offset: int = Field(default=0, ge=0, description="Line offset to start reading from (0-based)")
+    limit: int = Field(default=2000, ge=0, description="Maximum number of lines to read")
 
 
 class ReadFile(Tool):
@@ -44,7 +44,8 @@ class ReadFile(Tool):
         try:
             text = self._cache.get(resolved) if self._cache else None
             if text is None:
-                text = path.read_text(encoding="utf-8")
+                from mewcode.tools.base import read_text_preserve
+                text = read_text_preserve(path)
                 if self._cache:
                     self._cache.put(resolved, text)
         except Exception as e:

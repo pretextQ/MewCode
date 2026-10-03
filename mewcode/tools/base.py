@@ -3,6 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 import copy
 from dataclasses import dataclass
+import locale
 from pathlib import Path
 from typing import Any, Literal
 
@@ -13,6 +14,74 @@ SKIP_DIRS = {".git", ".venv", "node_modules", "__pycache__", ".tox", ".mypy_cach
 MAX_OUTPUT_CHARS = 10000
 
 ToolCategory = Literal["read", "write", "command"]
+
+
+def detect_encoding(path: Path) -> str:
+    """编码探测：BOM → utf-8 → locale 编码 → win32 ANSI 代码页。
+
+    只嗅探前 64KB。UTF-8 模式下 locale.getpreferredencoding 也返回 utf-8，
+    因此 win32 额外尝试 mbcs（真实 ANSI 代码页，中文系统为 GBK）。
+    """
+    try:
+        with open(path, "rb") as fh:
+            raw = fh.read(65536)
+    except OSError:
+        return "utf-8"
+    if raw.startswith(b"\xef\xbb\xbf"):
+        return "utf-8-sig"
+    try:
+        raw.decode("utf-8")
+        return "utf-8"
+    except UnicodeDecodeError:
+        pass
+    import os
+
+    candidates = [locale.getpreferredencoding(False)]
+    if os.name == "nt":
+        candidates.append("mbcs")
+    for enc in candidates:
+        if not enc or enc.lower() == "utf-8":
+            continue
+        try:
+            raw.decode(enc)
+            return enc
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return "utf-8"
+
+
+def read_text_preserve(path: Path) -> str:
+    """读取文本：newline='' 保持行尾原样，编码走探测回退。
+
+    全部候选失败时按 utf-8 宽松解码兜底（不可解码字节→U+FFFD），
+    不让工具在混合编码文件上直接崩掉。
+    """
+    enc = detect_encoding(path)
+    try:
+        with open(path, "r", encoding=enc, newline="") as f:
+            return f.read()
+    except UnicodeDecodeError:
+        with open(path, "r", encoding="utf-8", errors="replace", newline="") as f:
+            return f.read()
+
+
+def read_text_preserve(path: Path) -> str:
+    """读取文本：newline='' 保持行尾原样，编码走探测回退。"""
+    enc = detect_encoding(path)
+    with open(path, "r", encoding=enc, newline="") as f:
+        return f.read()
+
+
+def write_text_preserve(path: Path, content: str) -> str:
+    """写入文本：newline='' 不做 \\n→os.linesep 转换，避免 LF 文件被
+    整体改写成 CRLF；已存在文件沿用其探测编码。
+
+    返回实际使用的编码名。
+    """
+    enc = detect_encoding(path) if path.exists() else "utf-8"
+    with open(path, "w", encoding=enc, newline="") as f:
+        f.write(content)
+    return enc
 
 
 @dataclass

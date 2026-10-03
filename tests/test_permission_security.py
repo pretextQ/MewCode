@@ -893,3 +893,86 @@ class TestWindowsDangerousCommands:
         detector = DangerousCommandDetector()
         hit, _ = detector.detect(command)
         assert hit, command
+
+
+# ---------------------------------------------------------------------------
+# F3.1 文件工具 Windows 兼容（行尾 / 编码 / track_edit 时序 / offset 校验）
+# ---------------------------------------------------------------------------
+
+class TestFileToolWindowsCompat:
+    def test_edit_preserves_lf_line_endings_byte_exact(self, tmp_path):
+        """LF-only 文件 Edit 后字节级行尾不变（win32 全文件 CRLF 化回归）。"""
+        import asyncio
+
+        from mewcode.tools.edit_file import EditFile, Params as EditParams
+
+        f = tmp_path / "lf.py"
+        f.write_bytes(b"a\nb\nc\n")
+        tool = EditFile()
+        r = asyncio.run(tool.execute(EditParams.model_validate({
+            "file_path": str(f), "old_string": "b", "new_string": "B",
+        })))
+        assert not r.is_error
+        assert f.read_bytes() == b"a\nB\nc\n", f.read_bytes()
+
+    def test_read_and_edit_gbk_file(self, tmp_path):
+        """GBK 编码文件可读可编辑（严格 utf-8 解码会 UnicodeDecodeError）。"""
+        import asyncio
+
+        from mewcode.tools.read_file import ReadFile, Params as ReadParams
+        from mewcode.tools.edit_file import EditFile, Params as EditParams
+
+        f = tmp_path / "gbk.txt"
+        f.write_bytes("中文内容第一行\n第二行\n".encode("gbk"))
+
+        r = asyncio.run(ReadFile().execute(ReadParams.model_validate({
+            "file_path": str(f),
+        })))
+        assert not r.is_error
+        assert "中文内容第一行" in r.output
+
+        r = asyncio.run(EditFile().execute(EditParams.model_validate({
+            "file_path": str(f), "old_string": "第二行", "new_string": "改好了",
+        })))
+        assert not r.is_error
+        assert "改好了".encode("gbk") in f.read_bytes()
+
+    def test_crlf_file_edit_keeps_crlf(self, tmp_path):
+        import asyncio
+
+        from mewcode.tools.edit_file import EditFile, Params as EditParams
+
+        f = tmp_path / "crlf.txt"
+        f.write_bytes(b"a\r\nb\r\nc\r\n")
+        tool = EditFile()
+        r = asyncio.run(tool.execute(EditParams.model_validate({
+            "file_path": str(f), "old_string": "b", "new_string": "B",
+        })))
+        assert not r.is_error
+        assert f.read_bytes() == b"a\r\nB\r\nc\r\n", f.read_bytes()
+
+    def test_rejected_write_not_tracked_in_history(self, tmp_path):
+        """被 read-before-write 门禁拒绝的写不得进入撤销历史。"""
+        import asyncio
+
+        from mewcode.filehistory import FileHistory
+        from mewcode.tools.file_state_cache import FileStateCache
+        from mewcode.tools.write_file import WriteFile, Params as WriteParams
+
+        f = tmp_path / "x.txt"
+        f.write_text("original")
+        history = FileHistory(str(tmp_path), session_id="t")
+        tool = WriteFile(file_history=history, file_state_cache=FileStateCache())
+
+        r = asyncio.run(tool.execute(WriteParams.model_validate({
+            "file_path": str(f), "content": "hacked",
+        })))
+        assert r.is_error
+        assert history._tracked == {}, history._tracked
+
+    def test_negative_offset_rejected_by_validation(self):
+        from mewcode.tools.read_file import Params as ReadParams
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            ReadParams.model_validate({"file_path": "x", "offset": -1})

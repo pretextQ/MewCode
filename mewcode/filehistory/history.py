@@ -48,7 +48,7 @@ class FileHistory:
                 data = Path(abs_path).read_bytes()
                 bp = self._session_dir / self._backup_name(abs_path, new_ver)
                 bp.write_bytes(data)
-            except FileNotFoundError:
+            except OSError:
                 pass
 
             self._tracked[abs_path] = new_ver
