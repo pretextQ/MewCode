@@ -690,3 +690,64 @@ class TestAutoCompactKeepRecent:
         assert result.boundary.summary == "PREFIX SUMMARY"
         # 保留的尾部与原样沿用下来的内容完全一致。
         assert result.boundary.keep == kept_before
+
+
+# ---------------------------------------------------------------------------
+# F2.8 compact 清理：引用的落盘文件与替换记录不删除
+# ---------------------------------------------------------------------------
+
+class TestCleanupToolResults:
+    def test_keeps_referenced_files_and_replacement_records(self, tmp_path):
+        from mewcode.context.manager import cleanup_tool_results
+
+        session = tmp_path / "session"
+        session.mkdir()
+        (session / "t1.txt").write_text("referenced")
+        (session / "t2.txt").write_text("stale")
+        (session / "replacement_records.jsonl").write_text('{"x": 1}\n', encoding="utf-8")
+
+        cleanup_tool_results(session, keep={str(session / "t1.txt")})
+
+        assert (session / "t1.txt").exists(), "keep_tail 引用的落盘文件不得删除"
+        assert not (session / "t2.txt").exists()
+        assert (session / "replacement_records.jsonl").exists(), (
+            "替换记录被删会导致 resume 后 token 全量回涨"
+        )
+
+    def test_collect_referenced_persisted_paths(self, tmp_path):
+        from mewcode.conversation import Message
+        from mewcode.context.manager import (
+            collect_referenced_persisted_paths,
+            make_persisted_preview,
+        )
+
+        session = tmp_path / "session"
+        session.mkdir()
+        f1 = session / "t1.txt"
+        f1.write_text("big content")
+
+        persisted = Message(role="user", content=make_persisted_preview("big" * 2000, f1))
+        plain = Message(role="user", content="no tag here")
+        assert collect_referenced_persisted_paths([persisted, plain], session) == {str(f1)}
+
+    def test_collect_scans_tool_result_blocks(self, tmp_path):
+        from mewcode.conversation import Message, ToolResultBlock
+        from mewcode.context.manager import (
+            collect_referenced_persisted_paths,
+            make_persisted_preview,
+        )
+
+        session = tmp_path / "session"
+        session.mkdir()
+        f1 = session / "t1.txt"
+        f1.write_text("big content")
+
+        msg = Message(
+            role="user",
+            content="",
+            tool_results=[ToolResultBlock(
+                tool_use_id="t1", content=make_persisted_preview("big" * 2000, f1),
+                is_error=False,
+            )],
+        )
+        assert collect_referenced_persisted_paths([msg], session) == {str(f1)}

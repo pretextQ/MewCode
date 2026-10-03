@@ -173,10 +173,44 @@ def ensure_session_dir(work_dir: str) -> Path:
     return session_dir
 
 
-def cleanup_tool_results(session_dir: Path) -> None:
-    if session_dir.exists():
-        shutil.rmtree(session_dir)
-        session_dir.mkdir(parents=True, exist_ok=True)
+def cleanup_tool_results(session_dir: Path, keep: set[str] | None = None) -> None:
+    """清理 session 目录中的落盘工具结果。
+
+    - keep 中的文件（compact 保留尾部仍引用的落盘文件）不删除，
+      否则模型按预览里"完整内容已保存到"的路径读取会 404；
+    - replacement_records.jsonl 不删除：跨进程 resume 依赖它重建
+      替换决策，删除后全量原文会重新计入 token。
+    """
+    if not session_dir.exists():
+        return
+    keep = keep or set()
+    protected = {REPLACEMENT_RECORDS_FILENAME} | {Path(p).name for p in keep}
+    for entry in session_dir.iterdir():
+        if entry.name in protected:
+            continue
+        if entry.is_dir():
+            shutil.rmtree(entry, ignore_errors=True)
+        else:
+            entry.unlink(missing_ok=True)
+
+
+def collect_referenced_persisted_paths(
+    messages: list[Message], session_dir: Path
+) -> set[str]:
+    """收集消息中 persisted 预览引用的落盘文件绝对路径。"""
+    referenced: set[str] = set()
+    prefix = str(session_dir)
+    for m in messages:
+        contents = [m.content or ""]
+        contents.extend(tr.content for tr in m.tool_results)
+        for content in contents:
+            if PERSISTED_TAG not in content:
+                continue
+            for line in content.splitlines():
+                line = line.strip()
+                if line.startswith(prefix) and line.endswith(".txt"):
+                    referenced.add(line)
+    return referenced
 
 
 # ---------------------------------------------------------------------------
@@ -836,7 +870,7 @@ async def auto_compact(
     # 不清零会导致 current_tokens() 对增量的估算出错。
     # 下一次 API 响应会基于重建后的 history 重新锚定。
     conversation.replace_history(new_messages)
-    cleanup_tool_results(session_dir)
+    cleanup_tool_results(session_dir, keep=collect_referenced_persisted_paths(keep_tail, session_dir))
 
     if breaker is not None:
         breaker.record_success()
