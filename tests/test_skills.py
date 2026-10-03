@@ -506,7 +506,8 @@ class TestLoadSkillTool:
 
         tool = LoadSkill()
         assert tool.is_system_tool is True
-        assert tool.category == "read"
+        # F1.5: 目录型技能注册即执行代码，LoadSkill 不得按 read 自动放行
+        assert tool.category == "command"
 
 # ---------------------------------------------------------------------------
 # Agent 集成

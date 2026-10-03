@@ -50,10 +50,6 @@ class PermissionChecker:
             if hit:
                 return Decision(effect="deny", reason=f"危险命令拦截: {reason}")
 
-        # Layer 1: 安全的只读命令（自动放行）
-        if tool.category == "command" and is_safe_command(content or ""):
-            return Decision(effect="allow", reason="Safe read-only command")
-
         # Layer 2: 路径沙箱——检查实际指向文件系统的参数（Glob/Grep 的 path、
         # 文件三件套的 file_path）；无路径参数的读/写工具回退到内容字段兜底
         if tool.category in ("read", "write"):
@@ -74,12 +70,17 @@ class PermissionChecker:
         ):
             return Decision(effect="allow", reason="Plan mode: plan file write")
 
-        # Layer 3: 规则引擎匹配
+        # Layer 3: 规则引擎匹配——必须先于安全白名单（Layer 1），
+        # 否则白名单命令（echo/ls/cat...）会绕过用户显式 deny 规则
         rule_result = self.rule_engine.evaluate(tool.name, content)
         if rule_result == "allow":
             return Decision(effect="allow", reason="权限规则放行")
         if rule_result == "deny":
             return Decision(effect="deny", reason="权限规则拒绝")
+
+        # Layer 1: 安全的只读命令（自动放行）
+        if tool.category == "command" and is_safe_command(content or ""):
+            return Decision(effect="allow", reason="Safe read-only command")
 
         # Layer 4: 权限模式兜底判定
         effect = mode_decide(self.mode, tool.category)

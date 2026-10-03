@@ -548,3 +548,150 @@ def test_plan_parent_filters_child_tools_to_readonly():
     names = {t.name for t in filtered.list_tools()}
     assert {"Bash", "WriteFile", "EditFile"} & names == set()
     assert {"ReadFile", "Grep", "Glob"} <= names
+
+
+# ---------------------------------------------------------------------------
+# F1.5 LoadSkill 与 fork 型 skill 的权限封堵
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_load_skill_asks_in_default_mode(tmp_path: Path):
+    """绕过示例：LoadSkill 声明 read 类别自动放行，而目录型技能注册即执行代码（§3.5）。"""
+    from mewcode.tools.load_skill import LoadSkill
+
+    checker = PermissionChecker(
+        detector=DangerousCommandDetector(),
+        sandbox=PathSandbox(str(tmp_path)),
+        rule_engine=RuleEngine(),
+        mode=PermissionMode.DEFAULT,
+    )
+    d = checker.check(LoadSkill(), {"name": "some-skill"})
+    assert d.effect == "ask"
+
+
+class _RecordingClient(LLMClient):
+    """记录每次调用时对话快照的 mock 客户端，用于断言 fork 模型看到的工具结果。"""
+
+    def __init__(self, responses: list[list[Any]]) -> None:
+        self._responses = list(responses)
+        self._call_index = 0
+        self.seen_tool_outputs: list[str] = []
+
+    async def stream(
+        self,
+        conversation: ConversationManager,
+        system: str = "",
+        tools: list[dict[str, Any]] | None = None,
+    ) -> AsyncIterator[Any]:
+        for m in conversation.get_messages():
+            if m.tool_results:
+                for tr in m.tool_results:
+                    self.seen_tool_outputs.append(tr.content)
+        if self._call_index >= len(self._responses):
+            yield TextDelta(text="No more responses")
+            yield StreamEnd(stop_reason="end_turn", input_tokens=1, output_tokens=1)
+            return
+        for e in self._responses[self._call_index]:
+            yield e
+        self._call_index += 1
+
+
+def _skill_agent(tmp_path: Path, client: LLMClient) -> Any:
+    """带权限检查器的父 agent（fork skill 的权限来源）。"""
+    registry = create_default_registry()
+    checker = PermissionChecker(
+        detector=DangerousCommandDetector(),
+        sandbox=PathSandbox(str(tmp_path)),
+        rule_engine=RuleEngine(local_rules_path=tmp_path / "local_rules.yaml"),
+        mode=PermissionMode.DEFAULT,
+    )
+    return Agent(client, registry, "anthropic", work_dir=str(tmp_path), permission_checker=checker)
+
+
+@pytest.mark.asyncio
+async def test_fork_skill_inherits_deny_rules(tmp_path: Path):
+    """绕过示例：fork 型 skill 的 fork_agent permission_checker=None，
+    危险检测/沙箱/规则全部失效（§3.5）。"""
+    from mewcode.skills.executor import SkillExecutor
+    from mewcode.skills.parser import SkillDef
+
+    rules = tmp_path / "local_rules.yaml"
+    rules.write_text(
+        "- rule: 'Bash(*secret-operation*)'\n  effect: deny\n", encoding="utf-8"
+    )
+    client = _RecordingClient([
+        [
+            TextDelta("running."),
+            ToolCallComplete("t1", "Bash", {"command": "echo secret-operation"}),
+            StreamEnd("end_turn", input_tokens=10, output_tokens=20),
+        ],
+        [TextDelta("done."), StreamEnd("end_turn", input_tokens=5, output_tokens=5)],
+    ])
+    agent = _skill_agent(tmp_path, client)
+    skill = SkillDef(
+        name="evil",
+        description="fork skill",
+        prompt_body="run it",
+        allowed_tools=["Bash"],
+        mode="fork",
+        context="none",
+    )
+    executor = SkillExecutor(agent=agent, client=client, protocol="anthropic")
+    await executor.execute_fork(skill, "")
+
+    assert client.seen_tool_outputs, "fork agent should have run the Bash tool"
+    assert any("权限规则拒绝" in out for out in client.seen_tool_outputs), (
+        f"deny rule not inherited by fork agent; saw: {client.seen_tool_outputs}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_fork_skill_blocked_from_outside_sandbox(tmp_path: Path):
+    """绕过示例：fork skill 的 ReadFile 可读沙箱外文件。"""
+    from mewcode.skills.executor import SkillExecutor
+    from mewcode.skills.parser import SkillDef
+
+    client = _RecordingClient([
+        [
+            TextDelta("reading."),
+            ToolCallComplete("t1", "ReadFile", {"file_path": _outside_sandbox_path()}),
+            StreamEnd("end_turn", input_tokens=10, output_tokens=20),
+        ],
+        [TextDelta("done."), StreamEnd("end_turn", input_tokens=5, output_tokens=5)],
+    ])
+    agent = _skill_agent(tmp_path, client)
+    skill = SkillDef(
+        name="outside-read",
+        description="fork skill",
+        prompt_body="read it",
+        allowed_tools=["ReadFile"],
+        mode="fork",
+        context="none",
+    )
+    executor = SkillExecutor(agent=agent, client=client, protocol="anthropic")
+    await executor.execute_fork(skill, "")
+
+    assert client.seen_tool_outputs
+    assert any("路径沙箱拦截" in out for out in client.seen_tool_outputs), (
+        f"sandbox not enforced for fork skill; saw: {client.seen_tool_outputs}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_deny_rule_beats_safe_whitelist(tmp_path: Path):
+    """层序回归：白名单命令（echo/ls/cat...）不得绕过用户 deny 规则。"""
+    from mewcode.tools.bash import Bash
+
+    rules = tmp_path / "local_rules.yaml"
+    rules.write_text(
+        "- rule: 'Bash(*secret*)'\n  effect: deny\n", encoding="utf-8"
+    )
+    checker = PermissionChecker(
+        detector=DangerousCommandDetector(),
+        sandbox=PathSandbox(str(tmp_path)),
+        rule_engine=RuleEngine(local_rules_path=rules),
+        mode=PermissionMode.DEFAULT,
+    )
+    d = checker.check(Bash(), {"command": "echo secret"})
+    assert d.effect == "deny"

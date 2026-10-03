@@ -24,7 +24,9 @@ class LoadSkill(Tool):
         "and any specialized tools will be registered."
     )
     params_model = LoadSkillParams
-    category = "read"
+    # 目录型技能的注册流程会 importlib 执行 references/<tool>.py 的顶层代码，
+    # 不能按 read 自动放行；command 类别使 DEFAULT 模式触发 ask
+    category = "command"
     is_concurrency_safe = False
     is_system_tool = True
 

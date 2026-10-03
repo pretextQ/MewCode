@@ -92,7 +92,21 @@ class SkillExecutor:
         except SkillDependencyError as e:
             return f"Skill execution failed: {e}"
 
-        from mewcode.agent import Agent as AgentClass, StreamText, LoopComplete, ErrorEvent
+        from mewcode.agent import (
+            Agent as AgentClass,
+            ErrorEvent,
+            LoopComplete,
+            PermissionRequest,
+            PermissionResponse,
+            StreamText,
+        )
+        from mewcode.tools.agent_tool import build_subagent_checker
+
+        # fork 型 skill 非交互运行，无法弹窗确认：模式取 DONT_ASK 下限，
+        # 但必须继承父级的 RuleEngine 与沙箱（危险检测/规则/沙箱仍然生效）
+        checker, _ = build_subagent_checker(
+            self.agent, self.agent.work_dir, "dontAsk", is_background=True
+        )
 
         fork_agent = AgentClass(
             client=self.client,
@@ -100,13 +114,16 @@ class SkillExecutor:
             protocol=self.protocol,
             work_dir=self.agent.work_dir,
             max_iterations=self.agent.max_iterations,
-            permission_checker=None,
+            permission_checker=checker,
             context_window=self.agent.context_window,
         )
 
         result_parts: list[str] = []
         async for event in fork_agent.run(fork_conv):
-            if isinstance(event, StreamText):
+            if isinstance(event, PermissionRequest):
+                # fork skill 无 UI：ask 一律拒绝，避免 future 悬挂死锁
+                event.future.set_result(PermissionResponse.DENY)
+            elif isinstance(event, StreamText):
                 result_parts.append(event.text)
             elif isinstance(event, ErrorEvent):
                 result_parts.append(f"\n[Error: {event.message}]")
