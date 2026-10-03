@@ -83,7 +83,7 @@ class EditFile(Tool):
         try:
             from mewcode.tools.base import write_text_preserve
             write_text_preserve(path, new_content)
-            if self._cache:
+            if self._cache is not None:
                 self._cache.invalidate(str(path.resolve()))
             if self._state_cache:
                 self._state_cache.update(str(path.resolve()))

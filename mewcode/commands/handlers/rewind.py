@@ -50,8 +50,26 @@ async def _handle_rewind(ctx) -> None:
 
     snap = snapshots[idx]
 
+    def _invalidate_cache(changed_files: list[str]) -> None:
+        """rewind 恢复了磁盘内容：文件缓存不失效的话，agent 会继续
+        基于回滚前的旧内容编辑（FileCache 无 TTL / mtime 校验）。"""
+        cache = getattr(ctx.agent, "file_cache", None)
+        if cache is None:
+            return
+        if len(changed_files) > 20:
+            cache.clear()
+            return
+        for path in changed_files:
+            try:
+                from pathlib import Path as _P
+                cache.invalidate(str(_P(path).resolve()))
+            except Exception:
+                cache.clear()
+                return
+
     if option == 1:
         changed = fh.rewind(idx)
+        _invalidate_cache(changed)
         ctx.conversation.replace_history(ctx.conversation.history[: snap.message_index])
         ctx.ui.add_system_message(
             f"⟲ Rewound to checkpoint {idx + 1}. Restored {len(changed)} file(s) and conversation."
@@ -63,6 +81,7 @@ async def _handle_rewind(ctx) -> None:
         )
     elif option == 3:
         changed = fh.rewind(idx)
+        _invalidate_cache(changed)
         ctx.ui.add_system_message(
             f"⟲ Restored {len(changed)} file(s) to checkpoint {idx + 1}. Conversation unchanged."
         )

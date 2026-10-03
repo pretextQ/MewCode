@@ -42,13 +42,13 @@ class ReadFile(Tool):
         resolved = str(path.resolve())
 
         try:
-            text = self._cache.get(resolved) if self._cache else None
+            text = self._cache.get(resolved) if self._cache is not None else None
             if text is None:
                 import asyncio
 
                 from mewcode.tools.base import read_text_preserve
                 text = await asyncio.to_thread(read_text_preserve, path)
-                if self._cache:
+                if self._cache is not None:
                     self._cache.put(resolved, text)
         except Exception as e:
             return ToolResult(output=f"Error reading file: {e}", is_error=True)

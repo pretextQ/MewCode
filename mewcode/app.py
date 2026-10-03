@@ -729,6 +729,7 @@ class MewCodeApp(App):
             hook_engine=self.hook_engine,
         )
         self.agent.file_history = self.file_history
+        self.agent.file_cache = self.file_cache
         self.agent.session_id = self.session.session_id
 
         self._exit_plan_tool._is_plan_mode = lambda: self.agent.plan_mode
