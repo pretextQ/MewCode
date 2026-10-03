@@ -740,3 +740,99 @@ class TestAgentExtensions:
         agent = Agent(client=client, registry=registry, protocol="anthropic")
         agent.set_agent_catalog("## Agents\n- Explore")
         assert agent._agent_catalog == "## Agents\n- Explore"
+
+
+# ---------------------------------------------------------------------------
+# F3.4 后台任务状态机
+# ---------------------------------------------------------------------------
+
+class _FakeMailbox:
+    def write(self, to_agent, msg):
+        pass
+
+    def consume(self, agent_id):
+        return []
+
+
+class _FakeTeamManager:
+    def get_mailbox(self, name):
+        return _FakeMailbox()
+
+
+class _FakeBgAgent:
+    team_name = "team1"
+    agent_id = "a1"
+    _team_manager = _FakeTeamManager()
+    total_input_tokens = 0
+    total_output_tokens = 0
+
+    async def run_to_completion(self, prompt, conversation=None):
+        await asyncio.sleep(0.01)
+        return "done"
+
+
+class TestTaskManagerStateMachine:
+    @pytest.mark.asyncio
+    async def test_completion_notification_immediate(self):
+        """团队任务的完成通知在主循环结束即入队，不被邮箱监听推迟。"""
+        from mewcode.agents.task_manager import TaskManager
+
+        tm = TaskManager()
+        task_id = tm.launch(_FakeBgAgent(), "do it")
+
+        async def _wait_notify():
+            while tm._notify_queue.empty():
+                await asyncio.sleep(0.01)
+
+        await asyncio.wait_for(_wait_notify(), timeout=1.0)
+
+    @pytest.mark.asyncio
+    async def test_listening_task_cancellable(self):
+        """listening 期（邮箱等待）任务可被取消。"""
+        from mewcode.agents.task_manager import TaskManager
+
+        tm = TaskManager()
+        task_id = tm.launch(_FakeBgAgent(), "do it")
+        bg = tm.get(task_id)
+
+        async def _wait_status():
+            while bg.status != "listening":
+                await asyncio.sleep(0.01)
+
+        await asyncio.wait_for(_wait_status(), timeout=2.0)
+        assert tm.cancel(task_id) is True
+
+        async def _wait_cancelled():
+            while bg.status != "cancelled":
+                await asyncio.sleep(0.01)
+
+        await asyncio.wait_for(_wait_cancelled(), timeout=2.0)
+
+    @pytest.mark.asyncio
+    async def test_poll_completed_removes_tasks(self):
+        """poll_completed 消费后任务从 _tasks 移除，不无界增长。"""
+        from mewcode.agents.task_manager import TaskManager
+
+        tm = TaskManager()
+        task_id = tm.launch(_FakeBgAgent(), "do it")
+
+        async def _wait_notify():
+            while tm._notify_queue.empty():
+                await asyncio.sleep(0.01)
+
+        await asyncio.wait_for(_wait_notify(), timeout=3.0)
+        completed = tm.poll_completed()
+        assert len(completed) == 1
+        assert task_id not in tm._tasks
+
+    @pytest.mark.asyncio
+    async def test_task_id_length(self):
+        """任务 id 用 12 位 hex，降低碰撞概率。"""
+        from mewcode.agents.task_manager import TaskManager
+
+        tm = TaskManager()
+        task_id = tm.launch(_FakeBgAgent(), "t")
+        assert len(task_id) == 12
+        bg = tm._tasks[task_id]
+        tm._tasks.pop(task_id, None)
+        bg.cancel()

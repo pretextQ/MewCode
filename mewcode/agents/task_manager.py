@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
 import time
-import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -51,7 +51,7 @@ class TaskManager:
         name: str = "",
         fork_conversation: Any = None,
     ) -> str:
-        task_id = uuid.uuid4().hex[:8]
+        task_id = secrets.token_hex(6)
         bg = BackgroundTask(
             id=task_id,
             name=name or task_id,
@@ -76,6 +76,7 @@ class TaskManager:
         if bg is None:
             return
 
+        notified = False
         try:
             if fork_conversation is not None:
                 result = await bg.agent.run_to_completion("", fork_conversation)
@@ -83,6 +84,11 @@ class TaskManager:
                 result = await bg.agent.run_to_completion(bg.task)
             bg.result = result
             bg.status = "completed"
+
+            # 完成通知立即入队，与后续的邮箱监听解耦——
+            # 否则团队任务的完成消息会被推迟最多 60s
+            await self._notify_queue.put(task_id)
+            notified = True
 
             if bg.agent.team_name and bg.agent._team_manager:
                 mailbox = bg.agent._team_manager.get_mailbox(bg.agent.team_name)
@@ -96,6 +102,8 @@ class TaskManager:
                     )
                     mailbox.write("lead", msg)
 
+                    # listening：主循环已结束，等待邮箱消息触发后续轮次
+                    bg.status = "listening"
                     for _ in range(60):
                         await asyncio.sleep(1)
                         msgs = mailbox.consume(bg.agent.agent_id)
@@ -104,8 +112,10 @@ class TaskManager:
                         prompt = "\n\n".join(
                             f"[Message from {m.from_agent}] {m.content}" for m in msgs
                         )
+                        bg.status = "running"
                         result = await bg.agent.run_to_completion(prompt)
                         bg.result = result
+                        bg.status = "listening"
                         msg = create_message(
                             from_agent=bg.name,
                             to_agent="lead",
@@ -113,10 +123,12 @@ class TaskManager:
                             summary=f"{bg.name} idle",
                         )
                         mailbox.write("lead", msg)
+                        await self._notify_queue.put(task_id)
 
         except asyncio.CancelledError:
             bg.status = "cancelled"
             bg.result = "Task was cancelled"
+            raise
         except Exception as e:
             log.error("Background task %s failed: %s", task_id, e)
             bg.status = "failed"
@@ -126,7 +138,8 @@ class TaskManager:
             bg.progress.input_tokens = bg.agent.total_input_tokens
             bg.progress.output_tokens = bg.agent.total_output_tokens
             self._async_tasks.pop(task_id, None)
-            await self._notify_queue.put(task_id)
+            if not notified:
+                await self._notify_queue.put(task_id)
 
 
     def adopt_running(
@@ -136,7 +149,7 @@ class TaskManager:
         partial_result: str = "",
         name: str = "",
     ) -> str:
-        task_id = uuid.uuid4().hex[:8]
+        task_id = secrets.token_hex(6)
         bg = BackgroundTask(
             id=task_id,
             name=name or task_id,
@@ -163,6 +176,8 @@ class TaskManager:
             bg.status = "completed"
         except asyncio.CancelledError:
             bg.status = "cancelled"
+            bg.result = "Task was cancelled"
+            raise
         except Exception as e:
             log.error("Background task %s failed: %s", task_id, e)
             bg.status = "failed"
@@ -182,7 +197,7 @@ class TaskManager:
 
     def cancel(self, task_id: str) -> bool:
         bg = self._tasks.get(task_id)
-        if bg is None or bg.status != "running":
+        if bg is None or bg.status not in ("running", "listening"):
             return False
         async_task = self._async_tasks.get(task_id)
         if async_task and not async_task.done():
@@ -195,7 +210,7 @@ class TaskManager:
         while not self._notify_queue.empty():
             try:
                 task_id = self._notify_queue.get_nowait()
-                bg = self._tasks.get(task_id)
+                bg = self._tasks.pop(task_id, None)
                 if bg is not None:
                     completed.append(bg)
             except asyncio.QueueEmpty:
