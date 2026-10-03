@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Any, AsyncIterator
 
@@ -311,3 +312,111 @@ async def test_dangerous_check_precedes_safe_allow(tmp_path: Path):
     )
     d = checker.check(Bash(), {"command": "ls"})
     assert d.effect == "deny"
+
+
+# ---------------------------------------------------------------------------
+# F1.3 路径沙箱补全：Glob/Grep path 入沙箱 + plan 文件判定收紧
+# ---------------------------------------------------------------------------
+
+def _outside_sandbox_path() -> str:
+    return "C:/Windows" if sys.platform == "win32" else "/etc"
+
+
+@pytest.mark.asyncio
+async def test_grep_glob_path_outside_sandbox_denied(tmp_path: Path):
+    """绕过示例：Grep/Glob 的 path 参数不进沙箱，可扫描任意目录（§3.2）。"""
+    from mewcode.tools.glob import Glob
+    from mewcode.tools.grep import Grep
+
+    checker = PermissionChecker(
+        detector=DangerousCommandDetector(),
+        sandbox=PathSandbox(str(tmp_path)),
+        rule_engine=RuleEngine(),
+        mode=PermissionMode.DEFAULT,
+    )
+    outside = _outside_sandbox_path()
+    d = checker.check(Grep(), {"pattern": "KEY", "path": outside})
+    assert d.effect == "deny", "Grep path outside sandbox must be denied"
+    d = checker.check(Glob(), {"pattern": "*.pem", "path": outside})
+    assert d.effect == "deny", "Glob path outside sandbox must be denied"
+
+
+@pytest.mark.asyncio
+async def test_grep_glob_relative_path_still_allowed(tmp_path: Path):
+    """默认行为不回归：相对路径 path="." 正常放行。"""
+    from mewcode.tools.grep import Grep
+
+    checker = PermissionChecker(
+        detector=DangerousCommandDetector(),
+        sandbox=PathSandbox(str(tmp_path)),
+        rule_engine=RuleEngine(),
+        mode=PermissionMode.DEFAULT,
+    )
+    d = checker.check(Grep(), {"pattern": "foo", "path": "."})
+    assert d.effect == "allow"
+
+
+class TestPlanFileWrite:
+    """绕过示例：PLAN 模式借 plan 例外写沙箱外任意路径（§3.2）。"""
+
+    def _checker(self, tmp_path: Path, plan_file: Path) -> PermissionChecker:
+        checker = PermissionChecker(
+            detector=DangerousCommandDetector(),
+            sandbox=PathSandbox(str(tmp_path)),
+            rule_engine=RuleEngine(),
+            mode=PermissionMode.PLAN,
+        )
+        checker.plan_file_path = str(plan_file)
+        return checker
+
+    def test_real_plan_file_allowed(self, tmp_path: Path):
+        from mewcode.tools.write_file import WriteFile
+
+        plan = tmp_path / ".mewcode" / "plans" / "a.md"
+        checker = self._checker(tmp_path, plan)
+        d = checker.check(WriteFile(), {"file_path": str(plan), "content": "hi"})
+        assert d.effect == "allow"
+
+    def test_other_project_path_asks(self, tmp_path: Path):
+        from mewcode.tools.write_file import WriteFile
+
+        plan = tmp_path / ".mewcode" / "plans" / "a.md"
+        checker = self._checker(tmp_path, plan)
+        d = checker.check(
+            WriteFile(), {"file_path": str(tmp_path / "src" / "a.py"), "content": "x"}
+        )
+        assert d.effect == "ask"
+
+    def test_bare_substring_bypass_denied(self, tmp_path: Path):
+        """路径含 ".mewcode/plans/" 子串但指向别处 → 不得借 plan 例外放行。"""
+        from mewcode.tools.write_file import WriteFile
+
+        plan = tmp_path / ".mewcode" / "plans" / "a.md"
+        checker = self._checker(tmp_path, plan)
+        evil = f"{_outside_sandbox_path()}/Temp/x/.mewcode/plans/evil.md"
+        d = checker.check(WriteFile(), {"file_path": evil, "content": "hi"})
+        assert d.effect != "allow"
+
+    def test_same_basename_elsewhere_denied(self, tmp_path: Path):
+        """同名 basename 的其它目录文件 → 不得借 plan 例外放行。"""
+        from mewcode.tools.write_file import WriteFile
+
+        plan = tmp_path / ".mewcode" / "plans" / "a.md"
+        checker = self._checker(tmp_path, plan)
+        twin = tmp_path / "docs" / "a.md"
+        d = checker.check(WriteFile(), {"file_path": str(twin), "content": "hi"})
+        assert d.effect == "ask"
+
+    def test_empty_plan_path_no_exception(self, tmp_path: Path):
+        """plan_file_path 为空时 plan 例外不再放行（走正常 ask）。"""
+        from mewcode.tools.write_file import WriteFile
+
+        checker = PermissionChecker(
+            detector=DangerousCommandDetector(),
+            sandbox=PathSandbox(str(tmp_path)),
+            rule_engine=RuleEngine(),
+            mode=PermissionMode.PLAN,
+        )
+        target = tmp_path / ".mewcode" / "plans" / "ad-hoc.md"
+        d = checker.check(WriteFile(), {"file_path": str(target), "content": "hi"})
+        assert d.effect == "ask"

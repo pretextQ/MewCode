@@ -21,6 +21,15 @@ _CONTENT_FIELDS: dict[str, str] = {
     "Grep": "pattern",
 }
 
+# 实际指向文件系统位置的参数，供沙箱检查；与 _CONTENT_FIELDS（规则文本匹配）分工
+_PATH_FIELDS: dict[str, tuple[str, ...]] = {
+    "ReadFile": ("file_path",),
+    "WriteFile": ("file_path",),
+    "EditFile": ("file_path",),
+    "Glob": ("path",),
+    "Grep": ("path",),
+}
+
 
 @dataclass(frozen=True)
 class Rule:
@@ -47,6 +56,17 @@ def extract_content(tool_name: str, arguments: dict[str, Any]) -> str:
     if field is None:
         return ""
     return str(arguments.get(field, ""))
+
+
+def extract_paths(tool_name: str, arguments: dict[str, Any]) -> list[str]:
+    """返回该工具参数中实际指向文件系统的路径（跳过空值与默认 "."）。"""
+    fields = _PATH_FIELDS.get(tool_name, ())
+    values: list[str] = []
+    for field in fields:
+        value = arguments.get(field, "")
+        if isinstance(value, str) and value and value != ".":
+            values.append(value)
+    return values
 
 
 def _load_rules_file(path: Path) -> list[Rule]:
