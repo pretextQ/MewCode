@@ -298,6 +298,9 @@ class ChatInput(TextArea):
 
 COLLAPSIBLE_TOOLS = {"ReadFile", "Glob", "Grep", "ToolSearch"}
 
+# 流式进行中禁止的状态变更命令（会替换 conversation/session 或压缩历史）
+_STATEFUL_COMMANDS = {"clear", "session", "compact"}
+
 
 def _is_subagent_tool(tool_name: str) -> bool:
     return tool_name == "Agent"
@@ -1035,6 +1038,15 @@ class MewCodeApp(App):
             self._show_system_message(f"未知命令：/{name}，输入 /help 查看可用命令")
             return
 
+        # 流式进行中禁止改状态命令：/clear 或 /session 会在运行中的
+        # _send_message 持有旧 conversation/session 引用时直接替换它们，
+        # 导致状态永久分裂
+        if self._streaming and name in _STATEFUL_COMMANDS:
+            self._show_system_message(
+                f"/{name} 在回复进行中不可用，先按 Esc 打断"
+            )
+            return
+
         if not args and cmd.arg_prompt:
             self._show_system_message(cmd.arg_prompt)
             return
@@ -1254,11 +1266,20 @@ class MewCodeApp(App):
     async def _send_message(self, text: str, is_notification: bool = False) -> None:
         assert self.agent is not None
 
+        # 先同步置位再 await：三个入口（提交/命令/通知）若在 MCP await
+        # 期间再次启动，会并行运行两个 agent 循环并互相覆盖 _agent_task
+        if self._streaming:
+            self._show_system_message("(已有回复进行中，忽略重复请求)")
+            return
+        self._streaming = True
+
         if self._mcp_init_task and not self._mcp_init_task.done():
             self._show_system_message("Waiting for MCP servers to connect...")
-            await self._mcp_init_task
+            try:
+                await self._mcp_init_task
+            except Exception as e:
+                self._show_error(f"MCP 初始化失败: {e}")
 
-        self._streaming = True
         chat = self.query_one("#chat-area", VerticalScroll)
         input_widget = self.query_one("#chat-input", ChatInput)
 
@@ -1336,7 +1357,12 @@ class MewCodeApp(App):
                     self.call_after_refresh(chat.scroll_end, animate=False)
 
                 elif isinstance(event, StreamText):
-                    if streaming_label is not None and not accumulated_text:
+                    if streaming_label is None:
+                        # tool_use / TurnComplete 之后 label 会被置 None；
+                        # max_tokens 重试等路径下新一轮文本到达时需就地重建
+                        streaming_label = Static("", classes="message ai-message")
+                        await ai_row.mount(streaming_label)
+                    elif not accumulated_text:
                         await streaming_label.remove()
                         streaming_label = Static("", classes="message ai-message")
                         await ai_row.mount(streaming_label)
@@ -1507,6 +1533,10 @@ class MewCodeApp(App):
             self._show_system_message("Operation cancelled")
         except LLMError as e:
             self._show_error(str(e))
+        except Exception as e:
+            # 意外异常不再让裸 create_task 无声死掉
+            log.exception("Unexpected error in _send_message")
+            self._show_error(f"Unexpected error: {e}")
         finally:
             self._finish_streaming()
             input_widget.focus()
@@ -1529,6 +1559,8 @@ class MewCodeApp(App):
             if hasattr(self, 'team_manager'):
                 self.team_manager.on_teammate_completed(task.agent.agent_id)
 
+        if self._streaming or (self._agent_task and not self._agent_task.done()):
+            return
         self._agent_task = asyncio.create_task(
             self._send_message("", is_notification=True)
         )
@@ -1550,6 +1582,8 @@ class MewCodeApp(App):
             return
         for note in notes:
             self.conversation.add_system_reminder(note)
+        if self._streaming or (self._agent_task and not self._agent_task.done()):
+            return
         self._agent_task = asyncio.create_task(
             self._send_message("", is_notification=True)
         )
