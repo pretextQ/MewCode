@@ -219,12 +219,18 @@ class InlineAskUserWidget(Vertical, can_focus=True):
             self._selected[self._q_idx][cursor] = not self._selected[self._q_idx].get(cursor, False)
             self._refresh()
 
+    @staticmethod
+    def _answers_key(q: dict, idx: int) -> str:
+        """answers 的键用问题标识 name；message 只是显示文本，
+        不能作为键（工具侧按 q.name 取答案）。"""
+        return q.get("name", q.get("message", f"q{idx}"))
+
     def action_select(self) -> None:
         if self._on_submit:
             if self._submit_idx == 0:
                 answers = {}
                 for i, q in enumerate(self._questions):
-                    key = q.get("question", q.get("message", f"q{i}"))
+                    key = self._answers_key(q, i)
                     answers[key] = self._answered.get(i, "")
                 self.post_message(self.Responded(answers))
             else:
@@ -232,10 +238,9 @@ class InlineAskUserWidget(Vertical, can_focus=True):
         else:
             self._save_current_answer()
             if len(self._questions) == 1:
-                answers = {}
                 q = self._questions[0]
-                key = q.get("question", q.get("message", "q0"))
-                answers[key] = self._answered.get(0, "")
+                key = self._answers_key(q, 0)
+                answers = {key: self._answered.get(0, "")}
                 self.post_message(self.Responded(answers))
             elif self._q_idx < len(self._questions) - 1:
                 self._q_idx += 1

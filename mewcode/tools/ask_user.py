@@ -53,16 +53,32 @@ class AskUserTool(Tool):
     def __init__(self) -> None:
         self._pending_event: AskUserEvent | None = None
 
+    def current_question(self) -> AskUserEvent | None:
+        """当前等待用户回答的事件（供 UI 挂弹窗，替代私有字段直读）。"""
+        return self._pending_event
+
+    def prepare(self, questions_data: list[dict[str, Any]]) -> AskUserEvent:
+        """在工具执行前预创建等待事件。
+
+        await future 期间 agent 不产出任何事件，UI 必须在 ToolUseEvent
+        阶段就拿到事件挂弹窗，否则永远轮询不到。
+        """
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[dict[str, str]] = loop.create_future()
+        event = AskUserEvent(questions=questions_data, future=future)
+        self._pending_event = event
+        return event
+
     async def execute(self, params: AskUserParams) -> ToolResult:
         questions_data = [q.model_dump() for q in params.questions]
 
-        loop = asyncio.get_running_loop()
-        future: asyncio.Future[dict[str, str]] = loop.create_future()
-
-        self._pending_event = AskUserEvent(questions=questions_data, future=future)
+        if self._pending_event is None:
+            # 无 UI 预创建（非交互路径）时的兜底
+            self.prepare(questions_data)
+        event = self._pending_event
 
         try:
-            answers = await asyncio.wait_for(future, timeout=300)
+            answers = await asyncio.wait_for(event.future, timeout=300)
         except asyncio.TimeoutError:
             return ToolResult(
                 output="User did not respond within 5 minutes", is_error=True

@@ -1107,6 +1107,12 @@ class MewCodeApp(App):
         input_widget.focus()
 
     def action_cycle_mode(self) -> None:
+        from mewcode.plan_dialog import InlinePlanWidget
+
+        dialog = self._focused_dialog(self.focused)
+        if isinstance(dialog, InlinePlanWidget):
+            dialog.action_approve_with_feedback()
+            return
         if self.agent is None:
             return
         current = self.agent.permission_mode
@@ -1142,7 +1148,32 @@ class MewCodeApp(App):
                 block._collapsed = not block._collapsed
                 block._render_done()
 
+    @staticmethod
+    def _focused_dialog(focused) -> object | None:
+        """App 级 priority 绑定先于聚焦组件命中；弹窗聚焦时把 Esc /
+        shift+tab 转发给弹窗自身，而不是吞掉（否则 Esc 会取消整个
+        agent 运行、plan 弹窗的 shift+tab 成为死绑定）。"""
+        if focused is None:
+            return None
+        from mewcode.askuser_dialog import InlineAskUserWidget
+        from mewcode.plan_dialog import InlinePlanWidget
+        from mewcode.permission_dialog import InlinePermissionWidget
+
+        for cls in (InlineAskUserWidget, InlinePlanWidget, InlinePermissionWidget):
+            if isinstance(focused, cls):
+                return focused
+        return None
+
     def action_cancel(self) -> None:
+        from mewcode.permission_dialog import InlinePermissionWidget
+
+        dialog = self._focused_dialog(self.focused)
+        if dialog is not None:
+            if isinstance(dialog, InlinePermissionWidget):
+                dialog.action_deny()
+            else:
+                dialog.action_cancel()
+            return
         popup = self.query_one(CompletionPopup)
         if popup.is_visible:
             popup.hide()
@@ -1335,6 +1366,17 @@ class MewCodeApp(App):
                     tool_blocks[event.tool_id] = block
                     self.call_after_refresh(chat.scroll_end, animate=False)
 
+                    # AskUserQuestion 在 await 用户输入期间不产出事件，
+                    # 必须在 tool_use 阶段就预创建事件并挂弹窗，
+                    # 否则 UI 永远轮询不到（工具 300s 超时）
+                    if event.tool_name == "AskUserQuestion":
+                        ask_tool = self.registry.get("AskUserQuestion")
+                        if isinstance(ask_tool, AskUserTool):
+                            ask_event = ask_tool.prepare(
+                                event.arguments.get("questions", [])
+                            )
+                            await self._handle_askuser(ask_event)
+
                 elif isinstance(event, PermissionRequest):
                     await self._handle_permission_request(event)
 
@@ -1345,8 +1387,12 @@ class MewCodeApp(App):
                     self.call_after_refresh(chat.scroll_end, animate=False)
 
                     ask_tool = self.registry.get("AskUserQuestion")
-                    if ask_tool and isinstance(ask_tool, AskUserTool) and ask_tool._pending_event:
-                        await self._handle_askuser(ask_tool._pending_event)
+                    if (
+                        isinstance(ask_tool, AskUserTool)
+                        and ask_tool.current_question() is not None
+                    ):
+                        # 兜底：工具已完成但事件仍挂起（异步完成场景）
+                        await self._handle_askuser(ask_tool.current_question())
 
                 elif isinstance(event, TurnComplete):
                     if self.session:
