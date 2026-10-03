@@ -487,6 +487,8 @@ class Agent:
                     boundary=compact_result.boundary,
                 )
                 conversation.inject_environment(env_context)
+                if self.memory_manager is not None:
+                    self.memory_manager.reset_extraction_cursor()
                 mem = self.memory_manager.load() if self.memory_manager else ""
                 conversation.inject_long_term_memory(
                     self.instructions_content, mem
@@ -1279,6 +1281,8 @@ class Agent:
             )
             if isinstance(compact_result, CompactEvent):
                 conversation.inject_environment(env_context)
+                if self.memory_manager is not None:
+                    self.memory_manager.reset_extraction_cursor()
                 # replace_history 复位了 env/ltm 标志，项目指令需随环境一同
                 # 重注入，与 run() 的压缩分支保持一致
                 mem = self.memory_manager.load() if self.memory_manager else ""

@@ -91,6 +91,11 @@ class MemoryManager:
 
         return "\n\n".join(sections)
 
+    def reset_extraction_cursor(self) -> None:
+        """auto_compact 整体替换 history 后调用：旧的消息计数已失义
+        （计数器可能大于新 history 长度导致提取永久停摆），重置为 0。"""
+        self._last_extraction_msg_count = 0
+
     async def extract(
         self,
         client: Any,

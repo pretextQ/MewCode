@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import copy
 import json
+import os
 import random
 import string
 from dataclasses import dataclass, field
@@ -424,8 +426,26 @@ async def generate_session_summary(
     from mewcode.tools.base import StreamEnd, TextDelta
 
     recent = conversation.history[-10:]
+    # 起点对齐：不能从 tool_result 型消息开始（其 tool_use 在切片之外）
+    while recent and recent[0].tool_results:
+        recent = recent[1:]
     if not recent:
         return ""
+
+    # 终点补齐：在副本上为切片内未配对的 tool_use 构造占位 tool_result，
+    # 避免序列化后 API 400（异常被吞、摘要恒空）
+    recent = [copy.deepcopy(m) for m in recent]
+    responded_ids = {tr.tool_use_id for m in recent for tr in m.tool_results}
+    for m in recent:
+        for tu in m.tool_uses:
+            if tu.tool_use_id not in responded_ids:
+                m.tool_results.append(
+                    ToolResultBlock(
+                        tool_use_id=tu.tool_use_id,
+                        content="(no recorded result)",
+                        is_error=False,
+                    )
+                )
 
     summary_conv = ConversationManager()
     summary_conv.history = [Message(role="user", content=SESSION_SUMMARY_PROMPT)]
@@ -526,6 +546,15 @@ class SessionManager:
         valid_count = validate_message_chain(records)
         records = records[:valid_count]
         messages = records_to_messages(records)
+
+        # 上次崩溃可能留下无换行结尾的残行；append 前补换行，
+        # 否则新记录会永久拼接在残行上，之后所有读取都解析失败
+        if jsonl_path.stat().st_size > 0:
+            with open(jsonl_path, "rb") as fh:
+                fh.seek(-1, os.SEEK_END)
+                if fh.read(1) != b"\n":
+                    with open(jsonl_path, "a", encoding="utf-8") as fix:
+                        fix.write("\n")
 
         file = open(jsonl_path, "a", encoding="utf-8")  # noqa: SIM115
         session = Session(

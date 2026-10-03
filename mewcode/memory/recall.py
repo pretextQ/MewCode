@@ -220,7 +220,9 @@ def format_memory_manifest(memories: list[MemoryHeader]) -> str:
         ts = datetime.fromtimestamp(
             m.mtime_ms / 1000, tz=timezone.utc
         ).strftime("%Y-%m-%dT%H:%M:%S.") + f"{m.mtime_ms % 1000:03d}Z"
-        path = m.file_path if m.file_path else m.filename
+        # 给 selector 看的是 filename（selector 回显它作为选择键）；
+        # 绝对路径对选择没有信息量，还曾导致回显值全部被白名单丢弃
+        path = m.filename or m.file_path
         if m.description:
             lines.append(f"- {scope_tag}{type_tag}{path} ({ts}): {m.description}")
         else:
@@ -283,7 +285,12 @@ async def _select_relevant_memories(
     selector: SelectorFn,
 ) -> list[str]:
     """Format manifest, call selector, parse JSON, return valid filenames."""
-    valid_filenames = {m.filename for m in memories}
+    # 同时接受 filename 与 file_path 两种回显键
+    valid_keys: set[str] = set()
+    for m in memories:
+        valid_keys.add(m.filename)
+        if m.file_path:
+            valid_keys.add(m.file_path)
 
     manifest = format_memory_manifest(memories)
 
@@ -307,7 +314,7 @@ async def _select_relevant_memories(
         arr = parsed.get("selected_memories", [])
         if not isinstance(arr, list):
             return []
-        return [f for f in arr if isinstance(f, str) and f in valid_filenames]
+        return [f for f in arr if isinstance(f, str) and f in valid_keys]
     except (json.JSONDecodeError, AttributeError):
         return []
 

@@ -716,3 +716,96 @@ class TestMemoryExtraction:
         assert "项目知识" in MEMORY_EXTRACTION_PROMPT
         assert "参考资料" in MEMORY_EXTRACTION_PROMPT
         assert "不要重复添加" in MEMORY_EXTRACTION_PROMPT
+
+
+# ---------------------------------------------------------------------------
+# F3.3 记忆系统修复
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_selector_absolute_path_echo_still_matches():
+    """selector 回显绝对路径也不得被白名单丢弃（旧实现召回恒空）。"""
+    from mewcode.memory.recall import MemoryHeader, _select_relevant_memories
+
+    hdr = MemoryHeader(
+        filename="proj/auth-flow.md",
+        file_path="C:/memories/proj/auth-flow.md",
+        scope="project",
+        mtime_ms=0,
+        description="auth flow notes",
+        type="fact",
+    )
+
+    async def selector(system: str, user: str) -> str:
+        # 模拟 selector 照抄 manifest 里的绝对路径
+        return '{"selected_memories": ["C:/memories/proj/auth-flow.md"]}'
+
+    result = await _select_relevant_memories("auth", [hdr], None, selector)
+    assert result == ["C:/memories/proj/auth-flow.md"]
+
+
+def test_resume_repairs_dangling_last_line(tmp_path):
+    """崩溃残行（无结尾换行）在 resume 后追加记录仍可解析。"""
+    import json as _json
+
+    from mewcode.conversation import Message
+    from mewcode.memory.session import SessionManager
+
+    sm = SessionManager(str(tmp_path))
+    session = sm.create()
+    session.append(Message(role="user", content="hello"))
+    sid = session.meta.id
+    session.close()
+
+    jsonl = sm._sessions_dir / f"{sid}.jsonl"
+    # 模拟崩溃残行：截掉结尾换行
+    data = jsonl.read_bytes()
+    if data.endswith(b"\n"):
+        data = data[:-1]
+    jsonl.write_bytes(data)
+
+    resumed = sm.resume(sid)
+    assert resumed is not None
+    resumed.session.append(Message(role="user", content="after crash"))
+
+    # 追加后整个文件必须逐行可解析
+    for line in jsonl.read_text(encoding="utf-8").splitlines():
+        assert line.strip() == "" or _json.loads(line)
+
+
+def test_reset_extraction_cursor_restores_extraction():
+    """compact 后重置计数器，新的 history 增量可继续进入提取窗口。"""
+    from mewcode.memory.auto_memory import MemoryManager
+
+    mm = MemoryManager(project_root=str(Path("/tmp/nonexistent-mem")))
+    mm._last_extraction_msg_count = 100  # compact 前的旧计数
+    mm.reset_extraction_cursor()
+    assert mm._last_extraction_msg_count == 0
+
+
+def test_generate_session_summary_survives_truncated_tool_pair():
+    """切片切断 tool_use 配对时不得产生非法消息序列（400 → 摘要恒空）。"""
+    import asyncio
+
+    from mewcode.conversation import ConversationManager, Message, ToolResultBlock, ToolUseBlock
+    from mewcode.memory.session import generate_session_summary
+
+    conv = ConversationManager()
+    conv.add_user_message("seed")
+    # 尾部恰好把配对切断：assistant(tool_use) 在倒数第 9 条，tool_result 被切掉
+    conv.add_assistant_message("", tool_uses=[
+        ToolUseBlock(tool_use_id="t1", tool_name="ReadFile", arguments={}),
+    ])
+
+    class _Client:
+        async def stream(self, conversation, system="", tools=None):
+            texts = []
+            for m in conversation.get_messages():
+                texts.append(m.role)
+            yield _TD("summary ok")
+            from mewcode.tools.base import StreamEnd
+            yield StreamEnd("end_turn", input_tokens=1, output_tokens=1)
+
+    from mewcode.tools.base import TextDelta as _TD
+    result = asyncio.run(generate_session_summary(_Client(), conv, "anthropic"))
+    assert result == "summary ok"
