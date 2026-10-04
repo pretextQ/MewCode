@@ -68,11 +68,17 @@ class SandboxRunResult:
 
 
 def sandbox_user(config: SandboxConfig) -> str:
-    """非 root 运行身份：POSIX 上跟宿主 uid 对齐（挂载目录才不会写不进去）。"""
+    """非 root 运行身份：POSIX 上跟宿主 uid 对齐（挂载目录才不会写不进去）。
+
+    宿主 uid 为 0（容器化部署、root 起服务）时**不能**跟着用 0——那等于把
+    提权面重新打开；此时回落到镜像内置的 1000:1000。
+    """
     if config.user:
         return config.user
     if sys.platform != "win32" and hasattr(os, "getuid"):
-        return f"{os.getuid()}:{os.getgid()}"
+        uid = os.getuid()
+        if uid != 0:
+            return f"{uid}:{os.getgid()}"
     return "1000:1000"
 
 
@@ -121,6 +127,10 @@ class DockerSandbox:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
                 stdin=asyncio.subprocess.DEVNULL,
+                # POSIX 必须把子进程放进独立会话/进程组：否则超时收尾时
+                # os.killpg 会把**调用方自己的进程组**（pytest / 服务进程）
+                # 一起 SIGKILL（Linux CI 上实测把测试进程打死）。
+                start_new_session=(sys.platform != "win32"),
             )
         except (OSError, ValueError) as e:
             return 1, f"(cannot spawn {argv[0]}: {e})"

@@ -513,3 +513,26 @@ class TestSandboxTestRunner:
         runner = SandboxTestRunner(sandbox, repo_name="demo")
         outcome = await runner.run(str(tmp_path), f'"{sys.executable}" -c "print(42)"', 30)
         assert outcome.exit_code == 0 and "42" in outcome.output   # 宿主直跑兜底
+
+
+class TestNeverRootByDefault:
+    """宿主以 root 跑服务时（容器化部署常见），沙箱也不能跟着用 0。"""
+
+    def test_root_host_falls_back_to_unprivileged(self, monkeypatch):
+        import mewcode.service.sandbox as sbx
+
+        monkeypatch.setattr(sbx.sys, "platform", "linux")
+        monkeypatch.setattr(sbx.os, "getuid", lambda: 0, raising=False)
+        monkeypatch.setattr(sbx.os, "getgid", lambda: 0, raising=False)
+        assert sbx.sandbox_user(SandboxConfig()) == "1000:1000"
+
+    def test_non_root_host_matches_host_uid(self, monkeypatch):
+        import mewcode.service.sandbox as sbx
+
+        monkeypatch.setattr(sbx.sys, "platform", "linux")
+        monkeypatch.setattr(sbx.os, "getuid", lambda: 4242, raising=False)
+        monkeypatch.setattr(sbx.os, "getgid", lambda: 4242, raising=False)
+        assert sbx.sandbox_user(SandboxConfig()) == "4242:4242"
+
+    def test_windows_defaults_unprivileged(self):
+        assert sandbox_user(SandboxConfig()) not in ("0", "0:0")
