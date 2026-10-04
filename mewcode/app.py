@@ -5,7 +5,7 @@ import os
 import random
 import time as _time
 from pathlib import Path
-from typing import Any
+from typing import Any, Coroutine
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -623,6 +623,8 @@ class MewCodeApp(App):
         self._notification_check_task: asyncio.Task[None] | None = None
         self.worktree_manager: WorktreeManager | None = None
         self._stale_cleanup_task: asyncio.Task[None] | None = None
+        # fire-and-forget 后台任务的强引用（事件循环只持弱引用）。
+        self._bg_tasks: set[asyncio.Task] = set()
         self._current_streaming_label: Static | None = None
         self._current_ai_row: Vertical | None = None
         self._current_accumulated_text: str = ""
@@ -883,9 +885,11 @@ class MewCodeApp(App):
         self.agent._team_manager = self.team_manager
 
         if self.hook_engine:
-            asyncio.ensure_future(
+            self._spawn_background(
                 self.hook_engine.run_hooks(
-                    "startup", HookContext(event_name="startup")
+                    "startup",
+                    HookContext(event_name="startup"),
+                    owner=self.agent.agent_id,
                 )
             )
 
@@ -1503,13 +1507,9 @@ class MewCodeApp(App):
                             self.agent.total_input_tokens
                             + self.agent.total_output_tokens
                         )
-                        asyncio.ensure_future(
-                            self._update_session_summary()
-                        )
+                        self._spawn_background(self._update_session_summary())
                     if self.agent.plan_mode:
-                        asyncio.ensure_future(
-                            self._show_plan_approval()
-                        )
+                        self._spawn_background(self._show_plan_approval())
 
             # 收尾：渲染剩余的累积文本
             if accumulated_text and streaming_label is not None:
@@ -1903,6 +1903,13 @@ class MewCodeApp(App):
             await self.mcp_manager.shutdown()
             self.mcp_manager = None
 
+    def _spawn_background(self, coro: Coroutine[Any, Any, Any]) -> asyncio.Task:
+        """ensure_future 并强引用保存，防止任务被 GC 中途回收。"""
+        task = asyncio.ensure_future(coro)
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
+        return task
+
     # -----------------------------------------------------------------
     # 退出
     # -----------------------------------------------------------------
@@ -1929,14 +1936,25 @@ class MewCodeApp(App):
         async def _cleanup() -> None:
             tasks: list[asyncio.Task] = []
 
+            # 统一取消仍在跑的 fire-and-forget 后台任务，避免与下面的
+            # 收尾提取/关闭流程并发写同一状态。
+            for t in list(self._bg_tasks):
+                t.cancel()
+            if self.agent is not None:
+                await self.agent.cancel_background_tasks()
+            if self.hook_engine is not None:
+                await self.hook_engine.cancel_background()
+
             if self.agent and self.agent.memory_manager:
                 tasks.append(asyncio.create_task(
                     self.agent._extract_memories(self.conversation)
                 ))
-            if self.hook_engine:
+            if self.hook_engine and self.agent is not None:
                 tasks.append(asyncio.create_task(
                     self.hook_engine.run_hooks(
-                        "shutdown", HookContext(event_name="shutdown")
+                        "shutdown",
+                        HookContext(event_name="shutdown"),
+                        owner=self.agent.agent_id,
                     )
                 ))
             tasks.append(asyncio.create_task(self._shutdown_mcp()))

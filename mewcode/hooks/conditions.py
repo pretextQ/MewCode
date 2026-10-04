@@ -58,16 +58,22 @@ _OPERATORS = ("==", "!=", "=~", "~=")
 
 def _parse_single(expr: str) -> Condition:
     expr = expr.strip()
+    # 取最早出现的运算符：值里可能含其他运算符（如 `args.text ~= a==b`），
+    # 按枚举顺序找会把 == 误当分隔符错拆。
+    best_op: str | None = None
+    best_idx = len(expr)
     for op in _OPERATORS:
         idx = expr.find(op)
-        if idx == -1:
-            continue
-        field_part = expr[:idx].strip()
-        value_part = expr[idx + len(op):].strip()
-        if value_part.startswith('"') and value_part.endswith('"'):
-            value_part = value_part[1:-1]
-        return Condition(field=field_part, operator=op, value=value_part)
-    raise ConditionParseError(f"No valid operator found in condition: '{expr}'")
+        if idx != -1 and idx < best_idx:
+            best_idx = idx
+            best_op = op
+    if best_op is None:
+        raise ConditionParseError(f"No valid operator found in condition: '{expr}'")
+    field_part = expr[:best_idx].strip()
+    value_part = expr[best_idx + len(best_op):].strip()
+    if value_part.startswith('"') and value_part.endswith('"'):
+        value_part = value_part[1:-1]
+    return Condition(field=field_part, operator=best_op, value=value_part)
 
 
 def parse_condition(expr: str) -> ConditionGroup | None:

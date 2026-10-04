@@ -7,7 +7,7 @@ import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, AsyncIterator, Callable
+from typing import Any, AsyncIterator, Callable, Coroutine
 
 from pydantic import ValidationError
 
@@ -345,6 +345,12 @@ class Agent:
         self.agent_id: str = uuid.uuid4().hex[:12]
         self.parent_id: str | None = None
         self.trace_id: str | None = None
+        # 子代理与父代理共享同一个 HookEngine；按自身 agent_id 取 owner
+        # 视图，通知队列与 prompt 输出互不串扰。
+        if hook_engine is not None:
+            self.hook_engine = hook_engine.for_owner(self.agent_id)
+        # 事件循环只持弱引用——fire-and-forget 任务需要强引用防 GC 回收。
+        self._bg_tasks: set[asyncio.Task] = set()
         self.coordinator_mode: bool = False
         self.team_name: str = ""
         self._team_manager: Any = None
@@ -413,6 +419,21 @@ class Agent:
 
     def _infer_file_path(self, args: dict) -> str:
         return str(args.get("file_path", args.get("path", "")))
+
+    def _spawn_background(self, coro: Coroutine[Any, Any, Any]) -> asyncio.Task:
+        """ensure_future 并强引用保存：事件循环只持弱引用，裸 ensure_future
+        的任务可能被 GC 中途回收。完成后自动从集合移除。"""
+        task = asyncio.ensure_future(coro)
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
+        return task
+
+    async def cancel_background_tasks(self) -> None:
+        tasks = list(self._bg_tasks)
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     def _drain_hook_events(self) -> list[HookEvent]:
         if not self.hook_engine:
@@ -619,7 +640,7 @@ class Agent:
                     self._loop_count % MEMORY_EXTRACTION_INTERVAL == 0
                     and self.memory_manager
                 ):
-                    asyncio.ensure_future(self._extract_memories(conversation))
+                    self._spawn_background(self._extract_memories(conversation))
                 if self.hook_engine:
                     ctx = self._build_hook_context("turn_end")
                     await self.hook_engine.run_hooks("turn_end", ctx)
