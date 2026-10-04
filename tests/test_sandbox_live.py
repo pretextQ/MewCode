@@ -244,11 +244,10 @@ async def test_agent_runs_in_container_with_mcp_tools(
     """
     import json
 
-    from mewcode.config import MCPServerConfig, ProviderConfig
-
-
     from helpers.fake_backends import DEFAULT_LOG_LINE, make_loki
     from helpers.fake_llm import FakeLLM
+
+    from mewcode.config import MCPServerConfig, ProviderConfig
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")  # 容器里的 key 只走环境变量
 

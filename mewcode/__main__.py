@@ -420,7 +420,8 @@ async def _run_prompt(config, permission_mode, hook_engine, prompt: str, output_
             # **先出结果，再收尾**：收尾（MCP stdio 子进程）万一出问题，也不能把
             # 已经做完的活丢掉——真机踩到过：容器里 agent 干完活了，收尾异常让
             # 进程 exit 1 且没有任何输出，服务只能 escalate。
-            print(json.dumps(_summary_payload(agent, last_result, counters, mcp_tools_used), ensure_ascii=False), flush=True)
+            payload = _summary_payload(agent, last_result, counters, mcp_tools_used)
+            print(json.dumps(payload, ensure_ascii=False), flush=True)
     finally:
         # 显式收尾 MCP stdio 子进程：不能依赖进程退出兜底（仓库已知坑）
         await close_mcp(mcp_result)

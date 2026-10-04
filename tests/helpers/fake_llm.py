@@ -14,7 +14,7 @@ import argparse
 import json
 import threading
 import time
-from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 DEFAULT_FINAL_TEXT = (
     "ROOT CAUSE: the service crashed because TIMEOUT_SECONDS was 0\n"
@@ -88,14 +88,12 @@ class _ChatHandler(BaseHTTPRequestHandler):
         step = script[min(turn, len(script) - 1)]
 
         if "tool_calls" in step:
-            index = 0
             chunks: list[bytes] = []
-            for name, arguments in step["tool_calls"]:
+            for index, (name, arguments) in enumerate(step["tool_calls"]):
                 chunks.append(_chunk({"tool_calls": [{
                     "index": index, "id": f"call_{index}", "type": "function",
                     "function": {"name": name, "arguments": arguments},
                 }]}, finish_reason=None))
-                index += 1
             chunks.append(_chunk({}, finish_reason="tool_calls", usage={
                 "prompt_tokens": 120, "completion_tokens": 20, "total_tokens": 140,
             }))

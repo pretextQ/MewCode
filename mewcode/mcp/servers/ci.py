@@ -77,7 +77,8 @@ async def list_workflow_runs(repo: str, branch: str = "", limit: int = 10) -> st
     ]
     for run in runs:
         lines.append(
-            "- #{number} {name} | {branch} | {event} | status={status} conclusion={conclusion} | {created} | {url}".format(
+            "- #{number} {name} | {branch} | {event} | status={status} "
+            "conclusion={conclusion} | {created} | {url}".format(
                 number=run.get("run_number", "?"),
                 name=run.get("name", "?"),
                 branch=run.get("head_branch", "?"),

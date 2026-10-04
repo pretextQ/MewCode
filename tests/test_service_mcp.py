@@ -9,13 +9,20 @@ from __future__ import annotations
 import subprocess
 import sys
 import textwrap
-from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from mewcode.config import ConfigError, MCPServerConfig, ProviderConfig, RepoConfig, SandboxConfig, ServiceConfig, load_config
+from mewcode.config import (
+    ConfigError,
+    MCPServerConfig,
+    ProviderConfig,
+    RepoConfig,
+    SandboxConfig,
+    ServiceConfig,
+    load_config,
+)
 from mewcode.service.execution import AgentRunOutcome, ExecutionChain, HeadlessAgentRunner
 from mewcode.service.jobs import JobStore
 from mewcode.service.sandbox import DockerSandbox, mcp_env_passthrough
@@ -228,7 +235,6 @@ class _FakeAgent:
     """带真实注册表的假 agent：MCP 注册发生在它身上（其余行为不需要 LLM）。"""
 
     def __init__(self, work_dir: str, events: list[dict] | None = None) -> None:
-        from mewcode.tools import ToolRegistry
 
         self.registry = ToolRegistry()
         self.work_dir = work_dir
