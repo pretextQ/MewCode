@@ -115,6 +115,9 @@ def validate_permission_mode(mode: str) -> str:
     return mode
 
 
+VALID_MCP_TRANSPORTS = ("stdio", "http")
+
+
 def validate_mcp_servers(raw_mcp: list | None) -> list[dict]:
     """校验 mcp_servers 配置段，返回清洗后的 server 配置字典列表。"""
     if raw_mcp is None:
@@ -140,6 +143,23 @@ def validate_mcp_servers(raw_mcp: list | None) -> list[dict]:
             raise ConfigError(
                 f"MCP server '{name}': must have either 'command' or 'url'"
             )
+        transport = entry.get("transport")
+        if transport is None:
+            # 未显式声明时按连接字段推断，保持旧配置的语义。
+            transport = "stdio" if has_command else "http"
+        elif transport not in VALID_MCP_TRANSPORTS:
+            raise ConfigError(
+                f"MCP server '{name}': invalid transport '{transport}' "
+                f"(expected one of {', '.join(VALID_MCP_TRANSPORTS)})"
+            )
+        if transport == "http" and not has_url:
+            raise ConfigError(
+                f"MCP server '{name}': transport 'http' requires 'url'"
+            )
+        if transport == "stdio" and not has_command:
+            raise ConfigError(
+                f"MCP server '{name}': transport 'stdio' requires 'command'"
+            )
         servers.append(
             {
                 "name": name,
@@ -148,6 +168,7 @@ def validate_mcp_servers(raw_mcp: list | None) -> list[dict]:
                 "url": entry.get("url"),
                 "headers": entry.get("headers", {}),
                 "env": entry.get("env", {}),
+                "transport": transport,
             }
         )
 

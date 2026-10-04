@@ -33,7 +33,8 @@ class ProviderConfig:
     protocol: str
     base_url: str
     model: str
-    api_key: str = ""
+    # repr=False：traceback / 日志里不得出现明文 key。
+    api_key: str = field(default="", repr=False)
     thinking: bool = False
     # 0 表示"未设置" — get_context_window() 通过四层 fallback 解析真实窗口大小。
     # 正数表示配置文件里显式指定的覆盖值。
@@ -46,7 +47,11 @@ class ProviderConfig:
 
     def resolve_api_key(self) -> str:
         if self.api_key:
-            return self.api_key
+            resolved = resolve_env_vars(self.api_key)
+            # 未命中的 ${VAR} 占位符会原样保留——视为未配置，回退到
+            # 协议对应的环境变量，避免把字面量占位符发给 provider。
+            if resolved and not _ENV_VAR_RE.search(resolved):
+                return resolved
         env_var = _ENV_KEY_MAP.get(self.protocol, "")
         return os.environ.get(env_var, "")
 
@@ -92,11 +97,31 @@ def resolve_env_vars(value: str) -> str:
     return _ENV_VAR_RE.sub(lambda m: os.environ.get(m.group(1), m.group(0)), value)
 
 
+# MCP stdio 子进程按白名单继承主机环境变量：Windows 上缺 SystemRoot /
+# COMSPEC / TEMP 会导致 npx 等 stdio server 起不来；白名单之外（如
+# *_API_KEY）不泄漏给子进程。
+_CHILD_ENV_ALLOWLIST = (
+    "PATH",
+    "SystemRoot",
+    "COMSPEC",
+    "TEMP",
+    "TMP",
+    "HOME",
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "PROGRAMFILES",
+    "LANG",
+    "LC_ALL",
+)
+
+
 def build_child_env(declared_env: dict[str, str] | None) -> dict[str, str]:
     env: dict[str, str] = {}
-    path = os.environ.get("PATH", "")
-    if path:
-        env["PATH"] = path
+    for key in _CHILD_ENV_ALLOWLIST:
+        value = os.environ.get(key)
+        if value:
+            env[key] = value
     for key, value in (declared_env or {}).items():
         env[key] = resolve_env_vars(value)
     return env
@@ -110,11 +135,12 @@ class MCPServerConfig:
     url: str | None = None
     headers: dict[str, str] = field(default_factory=dict)
     env: dict[str, str] = field(default_factory=dict)
+    transport: str = "stdio"
 
 
     @property
     def is_stdio(self) -> bool:
-        return self.command is not None
+        return self.transport == "stdio"
 
 
 @dataclass
@@ -167,6 +193,7 @@ def _load_single_file(path: Path) -> AppConfig:
             url=s["url"],
             headers=s["headers"],
             env=s["env"],
+            transport=s["transport"],
         )
         for s in validated["mcp_servers"]
     ]

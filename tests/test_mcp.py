@@ -50,6 +50,50 @@ class TestResolveEnvVars:
         assert resolve_env_vars("${EXISTS}/${NOPE}") == "yes/${NOPE}"
 
 # ===========================================================================
+# ProviderConfig.resolve_api_key（F3.11）
+# ===========================================================================
+
+class TestResolveApiKey:
+    def _provider(self, api_key: str = "", protocol: str = "anthropic"):
+        from mewcode.config import ProviderConfig
+
+        return ProviderConfig(
+            name="test",
+            protocol=protocol,
+            base_url="http://localhost",
+            model="test-model",
+            api_key=api_key,
+        )
+
+    def test_expands_env_placeholder(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MY_CFG_KEY", "expanded-value")
+        provider = self._provider(api_key="${MY_CFG_KEY}")
+        assert provider.resolve_api_key() == "expanded-value"
+
+    def test_literal_key_wins(self) -> None:
+        provider = self._provider(api_key="literal-key")
+        assert provider.resolve_api_key() == "literal-key"
+
+    def test_unresolved_placeholder_falls_back_to_env(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # ${VAR} 未命中时回退协议环境变量，而不是把字面占位符发给 provider。
+        monkeypatch.delenv("MISSING_CFG_KEY", raising=False)
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "env-fallback-value")
+        provider = self._provider(api_key="${MISSING_CFG_KEY}")
+        assert provider.resolve_api_key() == "env-fallback-value"
+
+    def test_empty_key_uses_env_map(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "env-only-value")
+        provider = self._provider(api_key="")
+        assert provider.resolve_api_key() == "env-only-value"
+
+    def test_repr_hides_api_key(self) -> None:
+        provider = self._provider(api_key="super-secret-value")
+        assert "super-secret-value" not in repr(provider)
+
+
+# ===========================================================================
 # build_child_env
 # ===========================================================================
 
@@ -70,10 +114,36 @@ class TestBuildChildEnv:
         assert "ANTHROPIC_API_KEY" not in env
         assert env["FOO"] == "bar"
 
-    def test_empty_declared_env(self) -> None:
-        env = build_child_env({})
-        assert "PATH" in env
-        assert len(env) == 1
+    def test_empty_declared_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # F3.11: 白名单继承。清空白名单变量后只剩声明的 env。
+        for key in ("PATH", "SystemRoot", "COMSPEC", "TEMP", "TMP", "HOME",
+                    "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PROGRAMFILES",
+                    "LANG", "LC_ALL"):
+            monkeypatch.delenv(key, raising=False)
+        env = build_child_env({"FOO": "bar"})
+        assert env == {"FOO": "bar"}
+
+    def test_inherits_windows_essentials(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # F3.11: Windows 上缺 SystemRoot/COMSPEC/TEMP 会让 npx 等
+        # stdio server 起不来，白名单变量必须继承。
+        monkeypatch.setenv("SystemRoot", r"C:\WINDOWS")
+        monkeypatch.setenv("COMSPEC", r"C:\WINDOWS\system32\cmd.exe")
+        monkeypatch.setenv("TEMP", r"C:\Temp")
+        env = build_child_env(None)
+        assert env["SystemRoot"] == r"C:\WINDOWS"
+        assert env["COMSPEC"] == r"C:\WINDOWS\system32\cmd.exe"
+        assert env["TEMP"] == r"C:\Temp"
+
+    def test_does_not_leak_non_allowlisted_vars(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SOME_HOST_SECRET", "leak-me")
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "host-secret-value")
+        env = build_child_env(None)
+        assert "SOME_HOST_SECRET" not in env
+        assert "DEEPSEEK_API_KEY" not in env
 
 # ===========================================================================
 # load_config：解析 mcp_servers
@@ -136,6 +206,90 @@ class TestLoadConfigMCP:
         assert srv.name == "remote"
         assert srv.url == "https://api.example.com/mcp"
         assert srv.is_stdio is False
+        # F3.11: 未显式声明 transport 时按 url 推断为 http。
+        assert srv.transport == "http"
+
+    def test_stdio_server_infers_stdio_transport(self, tmp_path: Path) -> None:
+        # F3.11: command-only 配置推断为 stdio（旧行为兼容）。
+        path = self._write_config(tmp_path, """\
+            providers:
+              - name: test
+                protocol: openai
+                base_url: http://localhost
+                model: gpt-4o
+            mcp_servers:
+              - name: local
+                command: npx
+                args: ["-y", "@modelcontextprotocol/server-github"]
+        """)
+        config = load_config(path)
+        srv = config.mcp_servers[0]
+        assert srv.transport == "stdio"
+        assert srv.is_stdio is True
+
+    def test_explicit_http_transport(self, tmp_path: Path) -> None:
+        path = self._write_config(tmp_path, """\
+            providers:
+              - name: test
+                protocol: openai
+                base_url: http://localhost
+                model: gpt-4o
+            mcp_servers:
+              - name: remote
+                url: "https://api.example.com/mcp"
+                transport: http
+        """)
+        config = load_config(path)
+        srv = config.mcp_servers[0]
+        assert srv.transport == "http"
+        assert srv.is_stdio is False
+
+    def test_invalid_transport_errors(self, tmp_path: Path) -> None:
+        path = self._write_config(tmp_path, """\
+            providers:
+              - name: test
+                protocol: openai
+                base_url: http://localhost
+                model: gpt-4o
+            mcp_servers:
+              - name: remote
+                url: "https://api.example.com/mcp"
+                transport: websocket
+        """)
+        with pytest.raises(ConfigError, match="invalid transport 'websocket'"):
+            load_config(path)
+
+    def test_http_transport_requires_url(self, tmp_path: Path) -> None:
+        path = self._write_config(tmp_path, """\
+            providers:
+              - name: test
+                protocol: openai
+                base_url: http://localhost
+                model: gpt-4o
+            mcp_servers:
+              - name: remote
+                command: npx
+                transport: http
+        """)
+        with pytest.raises(ConfigError, match="transport 'http' requires 'url'"):
+            load_config(path)
+
+    def test_stdio_transport_requires_command(self, tmp_path: Path) -> None:
+        path = self._write_config(tmp_path, """\
+            providers:
+              - name: test
+                protocol: openai
+                base_url: http://localhost
+                model: gpt-4o
+            mcp_servers:
+              - name: remote
+                url: "https://api.example.com/mcp"
+                transport: stdio
+        """)
+        with pytest.raises(
+            ConfigError, match="transport 'stdio' requires 'command'"
+        ):
+            load_config(path)
 
     def test_both_command_and_url_errors(self, tmp_path: Path) -> None:
         path = self._write_config(tmp_path, """\
