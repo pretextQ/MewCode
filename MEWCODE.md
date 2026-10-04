@@ -1,7 +1,7 @@
 # MewCode 项目
 
 ## 技术栈
-- Python 3.12+
+- Python 3.11+
 - TUI 框架：Textual
 - 异步：asyncio
 
