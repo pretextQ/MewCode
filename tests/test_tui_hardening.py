@@ -94,7 +94,12 @@ async def test_send_message_reentrancy_guard(app_factory):
         app.agent = agent
 
         t1 = asyncio.create_task(app._send_message("hello"))
-        await asyncio.sleep(0.1)
+        # 等条件而不是等固定时长：CI（尤其 ubuntu）上 0.1s 可能不够第一轮跑到
+        # 流式位，固定 sleep 会周期性假失败（a6434e5 在 ubuntu 上就是这么挂的）。
+        for _ in range(200):
+            if app._streaming is True:
+                break
+            await asyncio.sleep(0.05)
         # 第一个在跑（流式位已置）
         assert app._streaming is True
         seen: list[str] = []
