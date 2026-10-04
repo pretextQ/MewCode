@@ -235,6 +235,7 @@ def validate_teammate_mode(mode: object) -> str:
 
 
 VALID_NOTIFY_TYPES = ("none", "slack", "dingtalk", "wecom")
+VALID_SANDBOX_NETWORKS = ("bridge", "none")
 VALID_VCS_PROVIDERS = ("github", "none")
 
 
@@ -250,6 +251,53 @@ def _optional_str(value: object, field_name: str) -> str:
     if not isinstance(value, str):
         raise ConfigError(f"'{field_name}' must be a string")
     return value
+
+
+def _validate_sandbox(raw: dict | None) -> dict:
+    """校验 ``service.sandbox`` 段（M2 W1 Docker 沙箱执行器）。"""
+    defaults: dict = {
+        "enabled": True,
+        "runtime": "docker",
+        "base_image": "python:3.12-slim",
+        "image_prefix": "mewcode-sandbox",
+        "workdir": "/workspace",
+        "user": "",
+        "network": "bridge",
+        "cpus": 2.0,
+        "memory": "4g",
+        "pids_limit": 512,
+        "tmpfs_size": "512m",
+        "env_passthrough": ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY"],
+        "keep_containers": False,
+    }
+    if raw is None:
+        return defaults
+    if not isinstance(raw, dict):
+        raise ConfigError("'service.sandbox' must be a mapping")
+    merged = {**defaults, **raw}
+
+    merged["enabled"] = validate_bool_field(merged["enabled"], "service.sandbox.enabled")
+    merged["keep_containers"] = validate_bool_field(
+        merged["keep_containers"], "service.sandbox.keep_containers"
+    )
+    for key in ("runtime", "base_image", "image_prefix", "workdir", "user", "memory", "tmpfs_size"):
+        merged[key] = _optional_str(merged[key], f"service.sandbox.{key}")
+    for key in ("runtime", "base_image", "image_prefix", "workdir", "memory", "tmpfs_size"):
+        if not merged[key]:
+            raise ConfigError(f"'service.sandbox.{key}' must not be empty")
+    if merged["network"] not in VALID_SANDBOX_NETWORKS:
+        raise ConfigError(
+            f"'service.sandbox.network' must be one of: {', '.join(VALID_SANDBOX_NETWORKS)}"
+        )
+    cpus = merged["cpus"]
+    if not isinstance(cpus, (int, float)) or isinstance(cpus, bool) or cpus <= 0:
+        raise ConfigError("'service.sandbox.cpus' must be a positive number")
+    merged["cpus"] = float(cpus)
+    merged["pids_limit"] = _positive_int(merged["pids_limit"], "service.sandbox.pids_limit")
+    env = merged["env_passthrough"]
+    if not isinstance(env, list) or not all(isinstance(x, str) for x in env):
+        raise ConfigError("'service.sandbox.env_passthrough' must be a list of strings")
+    return merged
 
 
 def validate_service(raw_service: dict | None) -> dict:
@@ -270,6 +318,8 @@ def validate_service(raw_service: dict | None) -> dict:
         "repo_label": "repository",
         "token_budget": 0,
         "notify": {"type": "none", "webhook_url": "", "timeout_seconds": 10},
+        # 沙箱默认值同样走校验器：两条返回路径（有/无 service 段）必须给出同一份默认值
+        "sandbox": _validate_sandbox(None),
         "vcs": {
             "provider": "github",
             "token": "",
@@ -287,7 +337,10 @@ def validate_service(raw_service: dict | None) -> dict:
     if not isinstance(raw_service, dict):
         raise ConfigError("'service' must be a mapping")
 
-    merged = {**defaults, **{k: v for k, v in raw_service.items() if k not in ("notify", "vcs", "repos")}}
+    merged = {
+        **defaults,
+        **{k: v for k, v in raw_service.items() if k not in ("notify", "vcs", "repos", "sandbox")},
+    }
 
     host = _optional_str(merged["host"], "service.host")
     port = _positive_int(merged["port"], "service.port")
@@ -361,6 +414,7 @@ def validate_service(raw_service: dict | None) -> dict:
         "notify": notify,
         "vcs": vcs,
         "repos": repos,
+        "sandbox": _validate_sandbox(raw_service.get("sandbox")),
     }
 
 

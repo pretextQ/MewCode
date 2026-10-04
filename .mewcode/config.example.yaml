@@ -42,3 +42,41 @@ mcp_servers:
   #   transport: http
   #   headers:
   #     Authorization: "Bearer ${MY_TOKEN}"
+
+# ---------------------------------------------------------------------------
+# 无头服务（`mewcode serve`，M1）与 Docker 沙箱（M2）
+# ---------------------------------------------------------------------------
+# service:
+#   host: 127.0.0.1            # 非回环监听必须配 webhook_token，否则拒绝启动
+#   port: 8321
+#   concurrency: 3             # 同时在跑的 job 数
+#   job_timeout_seconds: 1800
+#   drain_timeout_seconds: 60  # 优雅退出等待在途 job 的上限
+#   webhook_token: "${MEWCODE_WEBHOOK_TOKEN}"
+#   dedup_window_seconds: 1800 # 同指纹告警去重窗口
+#   data_dir: .mewcode/service # jobs.db 等运行时状态
+#   token_budget: 0            # 单 job token 预算，0 = 不限
+#   repo_label: repository     # 告警里承载仓库名的 label
+#   notify:
+#     type: none               # none | slack | dingtalk | wecom
+#     webhook_url: ""
+#   vcs:
+#     provider: github         # github | none
+#     token: "${GITHUB_TOKEN}"  # 留空则读 git credential helper
+#     base_branch: master      # PR 目标分支（硬编码来源，payload 无法改写）
+#   repos:                     # 告警 label -> 本地 checkout 路由表
+#     demo:
+#       path: /srv/demo
+#       url: https://github.com/acme/demo.git
+#       base_branch: main
+#       test_command: "python test_app.py"
+#   sandbox:                   # M2：每 job 一容器；无 docker 时自动回退直跑
+#     enabled: true
+#     runtime: docker          # docker | podman
+#     base_image: python:3.12-slim
+#     network: bridge          # bridge（agent 需访问 LLM API）| none（完全隔离）
+#     cpus: 2
+#     memory: 4g
+#     pids_limit: 512
+#     user: ""                 # 空 = POSIX 用宿主 uid:gid，其他平台 1000:1000
+#     env_passthrough: ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY"]

@@ -180,6 +180,32 @@ class RepoConfig:
 
 
 @dataclass
+class SandboxConfig:
+    """Docker 沙箱执行器配置（M2 W1）。"""
+
+    enabled: bool = True
+    #: 容器运行时（docker / podman 均可，命令结构一致）
+    runtime: str = "docker"
+    base_image: str = "python:3.12-slim"
+    image_prefix: str = "mewcode-sandbox"
+    workdir: str = "/workspace"
+    #: 非 root 运行；空 = 自动（POSIX 用宿主 uid:gid，其他平台用 1000:1000）
+    user: str = ""
+    #: 网络策略：bridge（能出网，agent 需要访问 LLM API）| none（完全隔离）
+    network: str = "bridge"
+    cpus: float = 2.0
+    memory: str = "4g"
+    pids_limit: int = 512
+    tmpfs_size: str = "512m"
+    #: 沙箱不包含任何密钥：LLM key 只在容器环境变量里，运行时注入
+    env_passthrough: list[str] = field(
+        default_factory=lambda: ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY"]
+    )
+    #: 保留容器用于排障（默认 --rm）
+    keep_containers: bool = False
+
+
+@dataclass
 class ServiceConfig:
     host: str = "127.0.0.1"
     port: int = 8321
@@ -197,6 +223,7 @@ class ServiceConfig:
     notify: NotifyConfig = field(default_factory=NotifyConfig)
     vcs: VCSConfig = field(default_factory=VCSConfig)
     repos: dict[str, RepoConfig] = field(default_factory=dict)
+    sandbox: SandboxConfig = field(default_factory=SandboxConfig)
 
 
 @dataclass
@@ -256,6 +283,7 @@ def _load_single_file(path: Path) -> AppConfig:
     )
 
     svc = validated["service"]
+    sbx = svc["sandbox"]
     service_cfg = ServiceConfig(
         host=svc["host"],
         port=svc["port"],
@@ -281,6 +309,21 @@ def _load_single_file(path: Path) -> AppConfig:
             ci_poll_interval_seconds=svc["vcs"]["ci_poll_interval_seconds"],
             ci_timeout_seconds=svc["vcs"]["ci_timeout_seconds"],
             ci_none_grace_seconds=svc["vcs"]["ci_none_grace_seconds"],
+        ),
+        sandbox=SandboxConfig(
+            enabled=sbx["enabled"],
+            runtime=sbx["runtime"],
+            base_image=sbx["base_image"],
+            image_prefix=sbx["image_prefix"],
+            workdir=sbx["workdir"],
+            user=sbx["user"],
+            network=sbx["network"],
+            cpus=sbx["cpus"],
+            memory=sbx["memory"],
+            pids_limit=sbx["pids_limit"],
+            tmpfs_size=sbx["tmpfs_size"],
+            env_passthrough=list(sbx["env_passthrough"]),
+            keep_containers=sbx["keep_containers"],
         ),
         repos={
             name: RepoConfig(

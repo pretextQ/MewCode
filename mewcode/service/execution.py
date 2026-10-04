@@ -198,6 +198,40 @@ class TestRunner:
             )
 
 
+class SandboxTestRunner:
+    """在容器里跑仓库测试命令（M2：验证阶段也隔离——它执行的是仓库代码）。
+
+    容器不可用时回退宿主直跑（M1 行为），并在事件里留下降级记录。
+    """
+
+    def __init__(self, sandbox: Any, *, repo_name: str = "job", fallback: TestRunner | None = None) -> None:
+        self.sandbox = sandbox
+        self.repo_name = repo_name
+        self.fallback = fallback or TestRunner()
+
+    async def run(self, work_dir: str, command: str, timeout: float) -> TestOutcome:
+        if not command:
+            raise ValueError("empty test command")
+        try:
+            available = await self.sandbox.available()
+        except Exception as e:  # pragma: no cover - 探测异常按不可用处理
+            log.warning("sandbox probe failed (%s); running tests on the host", e)
+            available = False
+        if not available:
+            log.warning("sandbox unavailable; running `%s` on the host", command)
+            return await self.fallback.run(work_dir, command, timeout)
+
+        result = await self.sandbox.run_command(
+            self.repo_name, work_dir, command, repo_name=self.repo_name, timeout=timeout
+        )
+        return TestOutcome(
+            command=command,
+            exit_code=result.exit_code,
+            output=result.stdout,
+            timed_out=result.timed_out,
+        )
+
+
 # ---------------------------------------------------------------------------
 # 真实 agent 运行器
 # ---------------------------------------------------------------------------
@@ -206,17 +240,45 @@ class TestRunner:
 class HeadlessAgentRunner:
     """构造并运行 agent 内核（服务模式的权限语义在这里落地）。
 
-    权限语义（架构文档决策 4）：
+    两种执行模式：
+    - **沙箱模式（M2）**：agent 在容器内跑（``mewcode -p --output-format json``），
+      OS 级隔离覆盖文件/进程/网络；容器不可用时**自动回退**直跑并记 warning
+      （M2 验收标准 4）。
+    - **直跑模式（M1）**：在宿主进程内跑 agent 内核。
+
+    权限语义（架构文档决策 4，两种模式一致）：
     - ``PermissionMode.DONT_ASK``：无人值守下没有"询问"的语义，ask 一律视为允许；
     - 沙箱根 = worktree 路径：越界读写被拒；
     - 危险命令检测器照常生效（deny 优先于白名单）；
     - 仓库自己的 ``.mewcode/permissions.yaml`` 作为 per-repo 策略文件参与判定。
     """
 
-    def __init__(self, config: ServiceConfig, provider: Any, hook_engine: Any = None) -> None:
+    def __init__(
+        self,
+        config: ServiceConfig,
+        provider: Any,
+        hook_engine: Any = None,
+        sandbox: Any = None,
+    ) -> None:
         self.config = config
         self.provider = provider
         self.hook_engine = hook_engine
+        self.sandbox = sandbox
+        self._sandbox_decision: bool | None = None
+
+    async def _use_sandbox(self) -> bool:
+        """是否走沙箱（探测一次并缓存；不可用只警告一次，不阻塞作业）。"""
+        if self.sandbox is None or not self.config.sandbox.enabled:
+            return False
+        if self._sandbox_decision is None:
+            available = await self.sandbox.available()
+            self._sandbox_decision = available
+            if not available:
+                log.warning(
+                    "sandbox enabled but the container runtime is unavailable; "
+                    "falling back to direct execution (M1 mode)"
+                )
+        return bool(self._sandbox_decision)
 
     def _build_agent(self, work_dir: str):
         from mewcode.agent import Agent
@@ -257,6 +319,46 @@ class HeadlessAgentRunner:
         )
 
     async def run(
+        self, job: Job, work_dir: str, prompt: str, on_event: Callable[[dict[str, Any]], None]
+    ) -> AgentRunOutcome:
+        if await self._use_sandbox():
+            return await self._run_in_sandbox(job, work_dir, prompt, on_event)
+        return await self._run_direct(job, work_dir, prompt, on_event)
+
+    async def _run_in_sandbox(
+        self, job: Job, work_dir: str, prompt: str, on_event: Callable[[dict[str, Any]], None]
+    ) -> AgentRunOutcome:
+        """容器内跑 agent；容器输出即结构化摘要，直接回读。"""
+        on_event({"type": "sandbox", "detail": f"running agent in sandbox for {job.id}"})
+        # 容器自己设一个比 worker 超时略早的止损点：这样超时是"容器被停"而不是
+        # 整个 job 被 wait_for 取消——前者能留下容器日志与明确的超时原因。
+        timeout = max(60.0, float(self.config.job_timeout_seconds) - 30.0)
+        try:
+            result = await self.sandbox.run_agent(
+                job.id, work_dir, prompt, self.provider,
+                repo_name=job.repo, timeout=timeout,
+            )
+        except Exception as e:  # 沙箱自身故障：记事件并冒泡（执行链会 escalate）
+            on_event({"type": "sandbox_error", "detail": f"{type(e).__name__}: {e}"})
+            raise
+
+        on_event({
+            "type": "usage",
+            "usage": {"inputTokens": result.input_tokens, "outputTokens": result.output_tokens},
+        })
+        if result.timed_out:
+            raise TimeoutError(f"sandbox agent run timed out after {timeout:.0f}s")
+        if result.exit_code != 0 and not result.result_text:
+            tail = (result.stderr or result.stdout or "").strip()[-1500:]
+            raise RuntimeError(f"sandbox agent exited with {result.exit_code}: {tail}")
+        return AgentRunOutcome(
+            final_text=result.result_text,
+            tool_calls=result.tool_calls,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+        )
+
+    async def _run_direct(
         self, job: Job, work_dir: str, prompt: str, on_event: Callable[[dict[str, Any]], None]
     ) -> AgentRunOutcome:
         from mewcode.conversation import ConversationManager

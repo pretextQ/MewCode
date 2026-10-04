@@ -60,11 +60,12 @@ async def _serve(service, host: str, port: int, recover: bool = True) -> None:
     from aiohttp import web
 
     from mewcode.service.api import create_app
-    from mewcode.service.execution import ExecutionChain, HeadlessAgentRunner
+    from mewcode.service.execution import ExecutionChain, HeadlessAgentRunner, SandboxTestRunner
     from mewcode.service.jobs import JobStore
     from mewcode.service.notify import build_notifier
     from mewcode.service.publisher import GitHubCIGate, PullRequestPublisher
     from mewcode.service.runtime import ServiceRuntime
+    from mewcode.service.sandbox import DockerSandbox
     from mewcode.service.triggers import build_adapters
     from mewcode.service.vcs import GitHubVCS
 
@@ -85,12 +86,23 @@ async def _serve(service, host: str, port: int, recover: bool = True) -> None:
     await store.connect()
 
     notifier = build_notifier(service.notify, store)
-    runner = HeadlessAgentRunner(service, provider, hook_engine=HookEngine(hooks) if hooks else None)
+    # 沙箱（M2 W1）：容器不可用时 HeadlessAgentRunner / SandboxTestRunner 自动回退直跑
+    sandbox = None
+    if service.sandbox.enabled:
+        mewcode_src = str(Path(__file__).resolve().parent.parent)
+        sandbox = DockerSandbox(
+            service.sandbox, mewcode_src=mewcode_src, work_root=str(Path(service.data_dir) / "sandbox")
+        )
+    runner = HeadlessAgentRunner(
+        service, provider, hook_engine=HookEngine(hooks) if hooks else None, sandbox=sandbox
+    )
     vcs = GitHubVCS(service.vcs) if service.vcs.provider == "github" else None
+    default_repo = next(iter(service.repos), "job")
     chain = ExecutionChain(
         service,
         store,
         runner,
+        test_runner=SandboxTestRunner(sandbox, repo_name=default_repo) if sandbox else None,
         publisher=PullRequestPublisher(vcs, store, service) if vcs else None,
         ci_gate=GitHubCIGate(vcs) if vcs else None,
         notifier=notifier,

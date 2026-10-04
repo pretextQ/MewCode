@@ -148,3 +148,60 @@ class TestCredentialHygiene:
         text = repr(cfg.service) + repr(cfg.service.vcs)
         assert "wh-secret-123" not in text
         assert "ghp_secret_456" not in text
+
+
+class TestSandboxConfig:
+    """M2 W1：沙箱配置段的加载与校验。"""
+
+    def test_defaults_when_absent(self):
+        svc = validate_service(None)
+        assert svc["sandbox"]["enabled"] is True
+        assert svc["sandbox"]["runtime"] == "docker"
+        assert svc["sandbox"]["network"] == "bridge"
+        assert svc["sandbox"]["cpus"] == 2.0
+        assert svc["sandbox"]["pids_limit"] == 512
+
+    def test_service_absent_returns_validated_sandbox(self, tmp_path: Path):
+        """没有 service 段时（early return 路径）沙箱默认值必须同样可用。"""
+        cfg = load_config(write_config(tmp_path))
+        assert cfg.service.sandbox.enabled is True
+        assert cfg.service.sandbox.base_image
+
+    def test_section_loads(self, tmp_path: Path):
+        cfg = load_config(write_config(tmp_path, (
+            "service:\n"
+            "  sandbox:\n"
+            "    runtime: podman\n"
+            "    network: none\n"
+            "    cpus: 1.5\n"
+            "    memory: 2g\n"
+            "    pids_limit: 128\n"
+            "    user: '4242:4242'\n"
+            "    env_passthrough: [MY_KEY]\n"
+        )))
+        sbx = cfg.service.sandbox
+        assert sbx.runtime == "podman" and sbx.network == "none"
+        assert sbx.cpus == 1.5 and sbx.memory == "2g" and sbx.pids_limit == 128
+        assert sbx.user == "4242:4242" and sbx.env_passthrough == ["MY_KEY"]
+
+    def test_invalid_network_rejected(self):
+        with pytest.raises(ConfigError, match="sandbox.network"):
+            validate_service({"sandbox": {"network": "host"}})
+
+    def test_invalid_cpus_rejected(self):
+        with pytest.raises(ConfigError, match="sandbox.cpus"):
+            validate_service({"sandbox": {"cpus": 0}})
+        with pytest.raises(ConfigError, match="sandbox.cpus"):
+            validate_service({"sandbox": {"cpus": "two"}})
+
+    def test_invalid_pids_rejected(self):
+        with pytest.raises(ConfigError, match="sandbox.pids_limit"):
+            validate_service({"sandbox": {"pids_limit": -1}})
+
+    def test_empty_required_fields_rejected(self):
+        with pytest.raises(ConfigError, match="sandbox.base_image"):
+            validate_service({"sandbox": {"base_image": ""}})
+
+    def test_env_passthrough_must_be_strings(self):
+        with pytest.raises(ConfigError, match="env_passthrough"):
+            validate_service({"sandbox": {"env_passthrough": [1, 2]}})
