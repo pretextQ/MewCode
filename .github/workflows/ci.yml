@@ -30,3 +30,19 @@ jobs:
 
       - name: Run tests
         run: uv run pytest -q --maxfail=10
+
+  security:
+    # 高危告警通道：权限安全回归套件独立跑，失败即阻塞合并。
+    name: security regression
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Sync dependencies
+        run: uv sync
+
+      - name: Permission security regression
+        run: uv run pytest tests/test_permission_security.py -q --maxfail=1

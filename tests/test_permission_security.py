@@ -2,6 +2,20 @@
 
 阶段 1 起逐项累积，覆盖审查报告 §3.1–3.8 的全部绕过示例（F4.4 汇总挂 CI）。
 执行纪律：先写"绕过复现"测试（红），修复后转绿。
+
+审查报告章节 ↔ 测试用例映射（F4.4 收口维护）：
+
+| 审查报告章节 | 绕过示例 | 测试用例 |
+|---|---|---|
+| §3.1 并行批次绕过权限/hooks | 并行读类工具不经检查 | test_parallel_batch_respects_deny_rule / test_parallel_batch_ask_escalates_permission_request / test_parallel_batch_pre_hook_reject / test_parallel_batch_exception_isolation |
+| §3.2 白名单先于黑名单且含副作用命令 | find -delete / sed -i / tee / npx / awk system | TestSafeCommandWhitelist::test_writey_commands_not_safe / test_dangerous_check_precedes_safe_allow / test_deny_rule_beats_safe_whitelist |
+| §3.3 禁用字符表缺 \\n、& | echo hi\\nrm -rf ~；ls & rm | TestSafeCommandWhitelist::test_injection_and_absolute_path_not_safe |
+| §3.4 Glob/Grep path 绕过沙箱 | Grep path=C:/Users/x/.ssh | test_grep_glob_path_outside_sandbox_denied / test_grep_glob_relative_path_still_allowed |
+| §3.5 LoadSkill read 类放行 | 加载即执行任意 Python | test_load_skill_asks_in_default_mode |
+| §3.6 子代理固定 dontAsk + 空规则引擎 + PLAN 穿透 | fork 永不询问 / deny 对子代理失效 | TestSubagentModeResolution / test_subagent_checker_inherits_parent_rule_engine / test_plan_parent_filters_child_tools_to_readonly / test_fork_skill_inherits_deny_rules / test_fork_skill_blocked_from_outside_sandbox |
+| §3.7 plan 文件判定过宽 | 裸子串 / basename 命中即放行 | TestPlanFileWrite（4 用例） |
+| §3.8 hook 命令注入 | $FILE_PATH 直接插值 | test_hook_command_injection_blocked_via_stdin_json |
+| 端到端红线（完整 Agent.run 装配） | 各章节代表序列 | TestEndToEndBypassRedLines |
 """
 from __future__ import annotations
 
@@ -1171,3 +1185,132 @@ def _write_params(file_path: str, content: str):
     from mewcode.tools.write_file import WriteFile
 
     return WriteFile.params_model(file_path=file_path, content=content)
+
+# ---------------------------------------------------------------------------
+# F4.4: 端到端红线——完整 Agent.run 走真实权限管线装配
+# ---------------------------------------------------------------------------
+
+class TestEndToEndBypassRedLines:
+    """MockLLM 驱动完整 Agent.run，把审查报告的代表绕过序列发给真实管线。
+
+    防止"单测过了但管线装配漏了"的集成盲区：任何一条被拦失败都说明
+    权限层没有被正确装配进执行路径。
+    """
+
+    @staticmethod
+    def _collect(agent: Agent, conv: ConversationManager, response: str = "DENY"):
+        results: dict[str, ToolResultEvent] = {}
+        requests: list[PermissionRequest] = []
+
+        async def _run() -> None:
+            async for e in agent.run(conv):
+                if isinstance(e, PermissionRequest):
+                    requests.append(e)
+                    e.future.set_result(
+                        PermissionResponse.DENY if response == "DENY"
+                        else PermissionResponse.ALLOW
+                    )
+                elif isinstance(e, ToolResultEvent):
+                    results[e.tool_id] = e
+
+        asyncio.run(_run())
+        return results, requests
+
+    def test_parallel_read_with_deny_and_find_delete(self, tmp_path: Path) -> None:
+        """§3.1 + §3.2：并行批次 [deny 的 ReadFile, find -delete] 全部被拦。"""
+        (tmp_path / "keep.py").write_text("keep", encoding="utf-8")
+        (tmp_path / "secret.env").write_text("KEY=hidden", encoding="utf-8")
+        (tmp_path / "local_rules.yaml").write_text(
+            "- rule: 'ReadFile(*secret.env)'\n  effect: deny\n",
+            encoding="utf-8",
+        )
+
+        client = MockLLMClient([
+            [
+                _read_call("t1", tmp_path / "secret.env"),
+                ToolCallComplete("t2", "Bash", {"command": 'find . -name "*.py" -delete'}),
+                StreamEnd("end_turn", input_tokens=10, output_tokens=20),
+            ],
+            [TextDelta("done."), StreamEnd("end_turn", input_tokens=5, output_tokens=5)],
+        ])
+        agent = _make_agent(tmp_path, client)
+        results, _ = self._collect(
+            agent, ConversationManager().model_copy() if False else _conv("do it")
+        )
+
+        assert results["t1"].is_error
+        assert "KEY=hidden" not in results["t1"].output
+        assert results["t2"].is_error
+        assert (tmp_path / "keep.py").exists()
+
+    def test_shell_injection_via_newline_never_executes(
+        self, tmp_path: Path
+    ) -> None:
+        """§3.3：`echo hi
+rm -rf ...` 必须触发人工确认且默认拒绝后不执行。"""
+        canary = tmp_path / "canary.txt"
+        canary.write_text("still here", encoding="utf-8")
+
+        cmd = "echo hi\nrm -rf " + str(tmp_path).replace("\\", "/")
+        client = MockLLMClient([
+            [
+                ToolCallComplete("t1", "Bash", {"command": cmd}),
+                StreamEnd("end_turn", input_tokens=10, output_tokens=20),
+            ],
+            [TextDelta("done."), StreamEnd("end_turn", input_tokens=5, output_tokens=5)],
+        ])
+        agent = _make_agent(tmp_path, client)
+        results, requests = self._collect(agent, _conv("echo then rm"))
+
+        assert requests, "newline-injected command must require confirmation"
+        assert results["t1"].is_error
+        assert canary.exists()
+
+    def test_grep_dotssh_outside_sandbox_blocked(self, tmp_path: Path) -> None:
+        """§3.4：Grep 指向沙箱外的系统敏感目录必须被拒。"""
+
+        outside = "C:/Users" if sys.platform == "win32" else "/etc"
+        client = MockLLMClient([
+            [
+                ToolCallComplete(
+                    "t1", "Grep", {"pattern": "KEY", "path": outside}
+                ),
+                StreamEnd("end_turn", input_tokens=10, output_tokens=20),
+            ],
+            [TextDelta("done."), StreamEnd("end_turn", input_tokens=5, output_tokens=5)],
+        ])
+        agent = _make_agent(tmp_path, client)
+        tool = agent.registry.get("Grep")
+        assert tool is not None
+
+        results, _ = self._collect(agent, _conv("scan ssh keys"))
+
+        assert results["t1"].is_error
+
+    def test_plan_mode_cannot_write_fake_plan_path(self, tmp_path: Path) -> None:
+        """§3.7：PLAN 模式借裸子串 .mewcode/plans/ 写沙箱外被拦。"""
+        outside_dir = tmp_path.parent / "e2e-persist" / ".mewcode" / "plans"
+        target = outside_dir / "x.md"
+        client = MockLLMClient([
+            [
+                ToolCallComplete(
+                    "t1", "WriteFile",
+                    {"file_path": str(target), "content": "escaped"},
+                ),
+                StreamEnd("end_turn", input_tokens=10, output_tokens=20),
+            ],
+            [TextDelta("done."), StreamEnd("end_turn", input_tokens=5, output_tokens=5)],
+        ])
+        agent = _make_agent(tmp_path, client)
+        agent.permission_checker.mode = PermissionMode.PLAN
+
+        results, requests = self._collect(agent, _conv("save the plan"))
+
+        assert results["t1"].is_error
+        assert not target.exists()
+
+
+def _conv(text: str) -> ConversationManager:
+    conv = ConversationManager()
+    conv.add_user_message(text)
+    return conv
