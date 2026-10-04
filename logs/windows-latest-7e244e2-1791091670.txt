@@ -1,0 +1,42 @@
+........................................................................ [  9%]
+........................................................................ [ 18%]
+........................................................................ [ 28%]
+........................................................................ [ 37%]
+........................................................................ [ 47%]
+..............................F..............................s.......... [ 56%]
+........................................................s............... [ 66%]
+........................................................................ [ 75%]
+........................................................................ [ 85%]
+........................................................................ [ 94%]
+.........................................                                [100%]
+================================== FAILURES ===================================
+____________ TestFileToolWindowsCompat.test_read_and_edit_gbk_file ____________
+
+self = <test_permission_security.TestFileToolWindowsCompat object at 0x00000183202A1670>
+tmp_path = WindowsPath('C:/Users/runneradmin/AppData/Local/Temp/pytest-of-runneradmin/pytest-0/test_read_and_edit_gbk_file0')
+
+    @pytest.mark.skipif(sys.platform != "win32", reason="GBK/mbcs \u7f16\u7801\u63a2\u6d4b\u4ec5 Windows \u63d0\u4f9b")
+    def test_read_and_edit_gbk_file(self, tmp_path):
+        """GBK \u7f16\u7801\u6587\u4ef6\u53ef\u8bfb\u53ef\u7f16\u8f91\uff08\u4e25\u683c utf-8 \u89e3\u7801\u4f1a UnicodeDecodeError\uff09\u3002"""
+        import asyncio
+    
+        from mewcode.tools.edit_file import EditFile
+        from mewcode.tools.edit_file import Params as EditParams
+        from mewcode.tools.read_file import Params as ReadParams
+        from mewcode.tools.read_file import ReadFile
+    
+        f = tmp_path / "gbk.txt"
+        f.write_bytes("\u4e2d\u6587\u5185\u5bb9\u7b2c\u4e00\u884c\\n\u7b2c\u4e8c\u884c\\n".encode("gbk"))
+    
+        r = asyncio.run(ReadFile().execute(ReadParams.model_validate({
+            "file_path": str(f),
+        })))
+        assert not r.is_error
+>       assert "\u4e2d\u6587\u5185\u5bb9\u7b2c\u4e00\u884c" in r.output
+E       AssertionError: assert '\u4e2d\u6587\u5185\u5bb9\u7b2c\u4e00\u884c' in '1\\t\xd6\xd0\xce\xc4\xc4\xda\xc8\xdd\xb5\xda\xd2\xbb\xd0\xd0\\n2\\t\xb5\xda\xb6\xfe\xd0\xd0'
+E        +  where '1\t中文内容第一行\n2\t第二行' = ToolResult(output='1\t中文内容第一行\n2\t第二行', is_error=False).output
+
+tests\test_permission_security.py:955: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_permission_security.py::TestFileToolWindowsCompat::test_read_and_edit_gbk_file - AssertionError: assert '\u4e2d\u6587\u5185\u5bb9\u7b2c\u4e00\u884c' in '1\\t\xd6\xd0\xce\xc4\xc4\xda\xc8\xdd\xb5\xda\xd2\xbb\xd0\xd0\\n2\\t\xb5\xda\xb6\xfe\xd0\xd0'\n +  where '1\\t\xd6\xd0\xce\xc4\xc4\xda\xc8\xdd\xb5\xda\xd2\xbb\xd0\xd0\\n2\\t\xb5\xda\xb6\xfe\xd0\xd0' = ToolResult(output='1\\t\xd6\xd0\xce\xc4\xc4\xda\xc8\xdd\xb5\xda\xd2\xbb\xd0\xd0\\n2\\t\xb5\xda\xb6\xfe\xd0\xd0', is_error=False).output
+1 failed, 758 passed, 2 skipped in 45.63s
