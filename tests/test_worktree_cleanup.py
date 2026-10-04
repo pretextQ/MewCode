@@ -269,3 +269,18 @@ async def test_start_stale_cleanup_task_runs_periodically(
 
     assert len(calls) >= 2
 
+
+
+class TestServiceWorktreePatterns:
+    """M1 服务层 worktree（job-<12 hex>）必须纳入回收——24/7 服务磁盘只增不减会拖垮服务。"""
+
+    def test_service_job_worktree_is_ephemeral(self):
+        assert _is_ephemeral("job-0123456789ab")
+        assert _is_ephemeral("job-ffffffffffff")
+        assert _is_ephemeral("job-0a1b2c3d4e5f")
+
+    def test_service_job_pattern_rejects_other_shapes(self):
+        assert not _is_ephemeral("job-0123456789")      # 10 位
+        assert not _is_ephemeral("job-0123456789abcd")  # 14 位
+        assert not _is_ephemeral("job-ZZZZZZZZZZZZ")    # 非 hex
+        assert not _is_ephemeral("job-")

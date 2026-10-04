@@ -34,7 +34,7 @@ TRANSITIONS: dict[str, frozenset[str]] = {
     "received": frozenset({"triaging", "invalid", "escalate"}),
     "triaging": frozenset({"reproducing", "invalid", "escalate"}),
     "reproducing": frozenset({"fixing", "cant_repro", "escalate"}),
-    "fixing": frozenset({"verifying", "fix_failed", "escalate"}),
+    "fixing": frozenset({"verifying", "fix_failed", "cant_repro", "escalate"}),
     "verifying": frozenset({"pr_opened", "verify_failed", "escalate"}),
     "pr_opened": frozenset({"ci_gate", "escalate"}),
     "ci_gate": frozenset({"human_review", "ci_failed", "escalate"}),

@@ -1,0 +1,165 @@
+"""服务层提示词：M1 内置的通用"告警排查 SOP"。
+
+M2 会把这套 SOP 换成企业规范 Skill 包注入；M1 先内置一份最小可用的。
+这里只负责"给 agent 什么指令"，不负责拼 PR body（PR body 由服务层从
+job 记录结构化生成，见 W4 —— 不让 LLM 自由发挥）。
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from .jobs import Job
+
+#: 单次注入的日志/描述上限，防止把整个告警风暴塞进首轮上下文
+MAX_CONTEXT_CHARS = 6000
+
+
+def _truncate(text: str, limit: int = MAX_CONTEXT_CHARS) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit] + f"\n… (truncated, {len(text)} chars total)"
+
+
+def render_alert_context(job: Job) -> str:
+    """把 job.payload 渲染成人类可读的告警上下文（提示词与通知共用）。"""
+    payload: dict[str, Any] = job.payload or {}
+    source = payload.get("source", "unknown")
+    lines = [
+        f"- Alert source: {source}",
+        f"- Repository: {job.repo}",
+        f"- Severity: {job.severity}",
+    ]
+    if job.title:
+        lines.append(f"- Title: {job.title}")
+
+    if source == "alertmanager":
+        labels = payload.get("labels") or {}
+        annotations = payload.get("annotations") or {}
+        common_annotations = payload.get("common_annotations") or {}
+        if labels:
+            lines.append("- Labels: " + ", ".join(f"{k}={v}" for k, v in sorted(labels.items())))
+        for key in ("summary", "description", "runbook_url"):
+            value = annotations.get(key) or common_annotations.get(key)
+            if value:
+                lines.append(f"- {key}: {value}")
+        if payload.get("generator_url"):
+            lines.append(f"- Generator: {payload['generator_url']}")
+        if payload.get("starts_at"):
+            lines.append(f"- Started at: {payload['starts_at']}")
+    else:
+        summary = payload.get("summary") or ""
+        if summary:
+            lines.append(f"- Summary: {summary}")
+
+    return "\n".join(lines)
+
+
+def extract_logs(job: Job) -> str:
+    """从 payload 里取出最有价值的"证据文本"（日志/堆栈/描述）。"""
+    payload: dict[str, Any] = job.payload or {}
+    parts: list[str] = []
+    logs = payload.get("logs")
+    if isinstance(logs, str) and logs.strip():
+        parts.append(logs)
+    if payload.get("source") == "alertmanager":
+        annotations = payload.get("annotations") or {}
+        common = payload.get("common_annotations") or {}
+        for key in ("description", "summary"):
+            value = annotations.get(key) or common.get(key)
+            if isinstance(value, str) and value.strip() and value not in parts:
+                parts.append(value)
+    extra = payload.get("extra")
+    if isinstance(extra, dict) and extra:
+        import json
+
+        parts.append(json.dumps(extra, ensure_ascii=False, indent=2, sort_keys=True))
+    return _truncate("\n\n".join(parts))
+
+
+def has_actionable_context(job: Job) -> tuple[bool, str]:
+    """triaging 判据：告警信息不足以定位问题时不下手（M1 验收标准 2）。
+
+    返回 (是否可继续, 不可继续时的原因)。宁可在 triaging 阶段 escalate，
+    也不要让 agent 硬猜——猜出来的 PR 是垃圾 PR。
+    """
+    payload: dict[str, Any] = job.payload or {}
+    if not payload:
+        return False, "alert payload is empty"
+
+    evidence = extract_logs(job)
+    labels = payload.get("labels") or {}
+    has_labels = bool(labels)
+    has_title = bool(job.title.strip())
+
+    if not evidence.strip() and not has_title and not has_labels:
+        return False, (
+            "insufficient alert context: no logs, no title and no labels to locate the problem"
+        )
+    return True, ""
+
+
+def build_alert_prompt(
+    job: Job, repo_path: str, test_command: str = "", baseline: str = "", feedback: str = ""
+) -> str:
+    """组装交给 agent 的首轮指令（M1 通用 SOP）。
+
+    ``feedback`` 用于验证失败后的重试：把上一轮的测试输出交给 agent，
+    否则它会重复同样的修复思路（这正是有界重试存在的意义）。
+    """
+    context = render_alert_context(job)
+    logs = extract_logs(job)
+    sections = [
+        "You are an on-call engineer agent working unattended on a production alert.",
+        "",
+        "## Alert",
+        context,
+    ]
+    if logs:
+        sections += ["", "## Evidence (logs / annotations)", "```", logs, "```"]
+    if baseline:
+        sections += [
+            "",
+            "## Baseline test result (before any change)",
+            "```",
+            _truncate(baseline, 2000),
+            "```",
+        ]
+    if feedback:
+        sections += [
+            "",
+            "## Previous attempt failed verification",
+            "Your earlier fix did not pass the tests. Test output:",
+            "```",
+            feedback,
+            "```",
+            "Analyse why the previous attempt failed before changing anything again.",
+        ]
+
+    sections += [
+        "",
+        "## Your job",
+        f"1. Reproduce or localise the root cause in the repository at `{repo_path}`.",
+        "2. Fix it with the smallest correct change. Do not refactor unrelated code.",
+        "3. Verify your fix: re-run the failing test or command and check it passes.",
+        "",
+        "## Rules",
+        "- Work only inside the current working directory (an isolated git worktree).",
+        "- Never run `git push`, `git merge`, `git rebase` against remote branches, or any",
+        "  GitHub/PR command: publishing is done by the service, not by you. Local `git diff`,",
+        "  `git status` and running tests are fine.",
+        "- If you cannot determine the root cause from the evidence, stop and say so",
+        "  explicitly instead of guessing. A wrong fix is worse than no fix.",
+    ]
+    if test_command:
+        sections.append(f"- The repository's test command is: `{test_command}`")
+    sections += [
+        "",
+        "## Final message format",
+        "End with a short report containing exactly these headings:",
+        "- `ROOT CAUSE:` what actually broke and why",
+        "- `FIX:` what you changed (files and the essence of each change)",
+        "- `VERIFICATION:` the command(s) you ran and the observed result",
+        "If you did not fix anything, say why under `ROOT CAUSE:` and leave `FIX:` empty.",
+    ]
+    return "\n".join(sections)

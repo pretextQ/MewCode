@@ -169,6 +169,9 @@ class RepoConfig:
     path: str
     url: str = ""
     base_branch: str = ""
+    #: 验证命令（在 worktree 内执行）；空 = 跳过测试证据环节
+    test_command: str = ""
+    test_timeout_seconds: int = 300
 
 
 @dataclass
@@ -277,6 +280,8 @@ def _load_single_file(path: Path) -> AppConfig:
                 path=entry["path"],
                 url=entry["url"],
                 base_branch=entry["base_branch"],
+                test_command=entry["test_command"],
+                test_timeout_seconds=entry["test_timeout_seconds"],
             )
             for name, entry in svc["repos"].items()
         },

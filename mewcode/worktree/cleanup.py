@@ -20,6 +20,9 @@ EPHEMERAL_PATTERNS = [
     re.compile(r"^wf-\d+$"),
     re.compile(r"^bridge-[A-Za-z0-9_]+(-[A-Za-z0-9_]+)*$"),
     re.compile(r"^job-[a-zA-Z0-9._-]{1,55}-[0-9a-f]{8}$"),
+    # 服务层（M1）用 job id 原样命名 worktree：job-<12 位 hex>。
+    # 24/7 服务每来一个告警建一个 worktree，不纳入回收会直接拖垮磁盘。
+    re.compile(r"^job-[0-9a-f]{12}$"),
 ]
 
 

@@ -336,6 +336,10 @@ def validate_service(raw_service: dict | None) -> dict:
             "path": _optional_str(entry["path"], f"service.repos.{name}.path"),
             "url": _optional_str(entry.get("url"), f"service.repos.{name}.url"),
             "base_branch": _optional_str(entry.get("base_branch"), f"service.repos.{name}.base_branch"),
+            "test_command": _optional_str(entry.get("test_command"), f"service.repos.{name}.test_command"),
+            "test_timeout_seconds": _positive_int(
+                entry.get("test_timeout_seconds", 300), f"service.repos.{name}.test_timeout_seconds"
+            ),
         }
 
     return {

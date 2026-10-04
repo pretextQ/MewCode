@@ -56,6 +56,7 @@ class ServiceRuntime:
         handler: JobHandler,
         store: JobStore | None = None,
         repo_root: str | Path | None = None,
+        worktree_cleanup_cutoff_hours: int | None = 24,
     ) -> None:
         self.config = config
         self._handler = handler
@@ -68,12 +69,16 @@ class ServiceRuntime:
             job_timeout=config.job_timeout_seconds,
             drain_timeout=config.drain_timeout_seconds,
         )
+        self.worktree_cleanup_cutoff_hours = worktree_cleanup_cutoff_hours
+        self._data_dir = data_dir
 
     # -- 生命周期 ---------------------------------------------------------
 
     async def start(self, recover: bool = True) -> None:
         await self.store.connect()
         await self.pool.start()
+        if self.worktree_cleanup_cutoff_hours is not None:
+            await self._cleanup_worktrees()
         if recover:
             await self.pool.requeue_unfinished()
         log.info(
@@ -82,6 +87,25 @@ class ServiceRuntime:
             self.config.port,
             self.config.data_dir,
         )
+
+    async def _cleanup_worktrees(self) -> None:
+        """启动时顺带清一次陈旧 worktree（架构文档风险表：24/7 运行磁盘只增不减）。"""
+        from mewcode.worktree import WorktreeManager
+        from mewcode.worktree.cleanup import cleanup_stale_worktrees
+
+        for name, repo in self.config.repos.items():
+            path = Path(repo.path)
+            if not path.is_dir():
+                continue
+            try:
+                manager = WorktreeManager(repo_root=str(path), symlink_directories=[])
+                removed = await cleanup_stale_worktrees(
+                    manager, self.worktree_cleanup_cutoff_hours or 24
+                )
+                if removed:
+                    log.info("cleaned %d stale worktree(s) in %s", removed, name)
+            except Exception as e:  # 清理失败不能阻止服务启动
+                log.warning("worktree cleanup failed for %s: %s", name, e)
 
     async def stop(self) -> None:
         await self.pool.stop()

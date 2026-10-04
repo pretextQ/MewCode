@@ -59,17 +59,42 @@ async def _serve(service, host: str, port: int, recover: bool = True) -> None:
     from aiohttp import web
 
     from mewcode.service.api import create_app
-    from mewcode.service.runtime import ServiceRuntime, unconfigured_handler
+    from mewcode.service.execution import ExecutionChain, HeadlessAgentRunner
+    from mewcode.service.jobs import JobStore
+    from mewcode.service.runtime import ServiceRuntime
     from mewcode.service.triggers import build_adapters
 
-    runtime = ServiceRuntime(service, handler=unconfigured_handler)
+    try:
+        config = load_config()
+    except ConfigError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        hooks = load_hooks(config.raw_hooks)
+    except HookConfigError as e:
+        print(f"Hook config error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    provider = config.providers[0]
+    store = JobStore(Path(service.data_dir) / "jobs.db")
+    await store.connect()
+
+    runner = HeadlessAgentRunner(service, provider, hook_engine=HookEngine(hooks) if hooks else None)
+    chain = ExecutionChain(service, store, runner)
+    runtime = ServiceRuntime(
+        service,
+        handler=chain,
+        store=store,
+        worktree_cleanup_cutoff_hours=config.worktree.stale_cutoff_hours,
+    )
     await runtime.start(recover=recover)
 
     app = create_app(runtime, build_adapters(service))
 
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, host, port)
+    http_runner = web.AppRunner(app)
+    await http_runner.setup()
+    site = web.TCPSite(http_runner, host, port)
     await site.start()
     print(f"mewcode service listening on http://{host}:{port}", flush=True)
 
@@ -80,7 +105,7 @@ async def _serve(service, host: str, port: int, recover: bool = True) -> None:
     finally:
         print("shutting down: draining in-flight jobs...", flush=True)
         await runtime.stop()
-        await runner.cleanup()
+        await http_runner.cleanup()
 
 
 def _install_signal_handlers(stop: asyncio.Event) -> None:
