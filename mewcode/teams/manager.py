@@ -184,6 +184,7 @@ class TeamManager:
 
         for member in list(team.members):
             AgentNameRegistry.instance().unregister(member.name)
+            self._teammate_team_map.pop(member.agent_id, None)
 
             handle = self._inprocess_handles.pop(member.agent_id, None)
             if handle and not handle.done:

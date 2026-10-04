@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import sys
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -1071,3 +1072,102 @@ class TestGrepHardening:
             )
 
         asyncio.run(_run())
+
+# ---------------------------------------------------------------------------
+# F4.3: file_state_cache ↔ FileCache ↔ rewind 联动
+#       （read-before-write 门禁 + 回滚后缓存一致）
+# ---------------------------------------------------------------------------
+
+class TestFileStateCacheRewindLinkage:
+    def _write_tool(self, file_cache, state_cache):
+        from mewcode.tools.write_file import WriteFile
+
+        return WriteFile(file_cache=file_cache, file_state_cache=state_cache)
+
+    def test_write_requires_read_first(self, tmp_path: Path) -> None:
+        from mewcode.cache import FileCache
+        from mewcode.tools.file_state_cache import FileStateCache
+
+        target = tmp_path / "doc.txt"
+        target.write_text("hello", encoding="utf-8")
+        tool = self._write_tool(FileCache(), FileStateCache())
+        params = _write_params(file_path=str(target), content="new")
+
+        result = asyncio.run(tool.execute(params))
+
+        assert result.is_error is True
+        assert "read" in result.output.lower()
+
+    def test_rewind_stale_state_cache_blocks_write_until_reread(
+        self, tmp_path: Path
+    ) -> None:
+        # 回滚把文件内容换回旧版本（mtime 变化），read-before-write 门禁
+        # 基于过期快照的编辑必须被拒——防止 agent 拿回滚前的旧内容继续写。
+        from mewcode.cache import FileCache
+        from mewcode.filehistory.history import FileHistory
+        from mewcode.tools.file_state_cache import FileStateCache
+
+        target = tmp_path / "doc.txt"
+        target.write_text("old content", encoding="utf-8")
+
+        state_cache = FileStateCache()
+        file_cache = FileCache()
+        tool = self._write_tool(file_cache, state_cache)
+        params = _write_params(file_path=str(target), content="new content")
+
+        # 正常流程：读过 → 允许写
+        state_cache.record(str(target.resolve()), "old content",
+                           target.stat().st_mtime_ns)
+        result = asyncio.run(tool.execute(params))
+        assert result.is_error is False
+
+        # /rewind：FileHistory 把文件恢复为更早的内容（mtime 变化）
+        fh = FileHistory(str(tmp_path), "s1")
+        target.write_text("pre-rewind", encoding="utf-8")
+        fh.track_edit(str(target))
+        fh.make_snapshot(0, "checkpoint")
+        target.write_text("restored-by-rewind", encoding="utf-8")
+        fh.track_edit(str(target))
+        fh.rewind(0)
+        file_cache.invalidate(str(target.resolve()))
+
+        # 状态缓存还记着回滚前的快照 → 门禁必须拦截，直到重新 ReadFile
+        result = asyncio.run(tool.execute(params))
+        assert result.is_error is True
+
+    def test_reread_after_rewind_allows_write(self, tmp_path: Path) -> None:
+        from mewcode.cache import FileCache
+        from mewcode.filehistory.history import FileHistory
+        from mewcode.tools.file_state_cache import FileStateCache
+
+        target = tmp_path / "doc.txt"
+        target.write_text("v1", encoding="utf-8")
+
+        state_cache = FileStateCache()
+        tool = self._write_tool(FileCache(), state_cache)
+        params = _write_params(file_path=str(target), content="v2")
+
+        state_cache.record(str(target.resolve()), "v1", target.stat().st_mtime_ns)
+
+        # 回滚发生，缓存过期
+        fh = FileHistory(str(tmp_path), "s1")
+        fh.track_edit(str(target))
+        fh.make_snapshot(0, "cp")
+        target.write_text("v0", encoding="utf-8")
+        fh.track_edit(str(target))
+        fh.rewind(0)
+
+        assert asyncio.run(tool.execute(params)).is_error is True
+
+        # 重新读 → 记录新 mtime → 门禁放行
+        state_cache.record(str(target.resolve()), target.read_text(encoding="utf-8"),
+                           target.stat().st_mtime_ns)
+        result = asyncio.run(tool.execute(params))
+        assert result.is_error is False
+        assert target.read_text(encoding="utf-8") == "v2"
+
+
+def _write_params(file_path: str, content: str):
+    from mewcode.tools.write_file import WriteFile
+
+    return WriteFile.params_model(file_path=file_path, content=content)
