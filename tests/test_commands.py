@@ -169,20 +169,6 @@ class TestCommandRegistry:
         with pytest.raises(ValueError, match="conflicts"):
             registry.register_sync(_make_command("h"))
 
-    @pytest.mark.asyncio
-    async def test_async_register(self) -> None:
-        registry = CommandRegistry()
-        cmd = _make_command("test")
-        await registry.register(cmd)
-        assert registry.find("test") is cmd
-
-    @pytest.mark.asyncio
-    async def test_async_register_conflict(self) -> None:
-        registry = CommandRegistry()
-        await registry.register(_make_command("test"))
-        with pytest.raises(ValueError, match="conflicts"):
-            await registry.register(_make_command("test"))
-
 # ---------------------------------------------------------------------------
 # complete
 # ---------------------------------------------------------------------------

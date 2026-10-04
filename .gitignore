@@ -13,3 +13,4 @@ build/
 .claude/
 CLAUDE.md
 docs/
+.coverage

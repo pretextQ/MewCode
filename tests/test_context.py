@@ -25,7 +25,6 @@ from mewcode.context.manager import (
     extract_summary,
     make_persisted_preview,
     persist_tool_result,
-    should_auto_compact,
 )
 from mewcode.conversation import (
     _CHARS_PER_TOKEN,
@@ -182,21 +181,6 @@ class TestComputeCompactThreshold:
     def test_smaller_window(self) -> None:
         assert compute_compact_threshold(128_000) == 95_000
 
-# ---------------------------------------------------------------------------
-# should_auto_compact
-# ---------------------------------------------------------------------------
-
-class TestShouldAutoCompact:
-    def test_below_threshold(self) -> None:
-        assert not should_auto_compact(100_000, 200_000)
-
-    def test_at_threshold(self) -> None:
-        assert should_auto_compact(167_000, 200_000)
-
-    def test_above_threshold(self) -> None:
-        assert should_auto_compact(180_000, 200_000)
-
-# ---------------------------------------------------------------------------
 # extract_summary
 # ---------------------------------------------------------------------------
 

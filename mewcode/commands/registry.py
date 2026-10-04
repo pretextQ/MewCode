@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -62,22 +61,6 @@ class CommandRegistry:
     def __init__(self) -> None:
         self._commands: dict[str, Command] = {}
         self._alias_map: dict[str, str] = {}
-        self._lock = asyncio.Lock()
-
-    async def register(self, command: Command) -> None:
-        async with self._lock:
-            if command.name in self._commands or command.name in self._alias_map:
-                raise ValueError(
-                    f"Command name '{command.name}' conflicts with an existing command or alias"
-                )
-            for alias in command.aliases:
-                if alias in self._alias_map or alias in self._commands:
-                    raise ValueError(
-                        f"Alias '{alias}' conflicts with an existing command or alias"
-                    )
-            self._commands[command.name] = command
-            for alias in command.aliases:
-                self._alias_map[alias] = command.name
 
     def register_sync(self, command: Command) -> None:
         if command.name in self._commands or command.name in self._alias_map:

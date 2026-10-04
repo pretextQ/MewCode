@@ -614,7 +614,6 @@ class MewCodeApp(App):
         self._spinner_label: Static | None = None
         self._mcp_server_info: str = ""
         self._agent_task: asyncio.Task[None] | None = None
-        self._subagent_task: asyncio.Task[None] | None = None
         self._subagent_start_time: float | None = None
         self.session_manager: SessionManager | None = None
         self.session: Session | None = None
@@ -1219,15 +1218,6 @@ class MewCodeApp(App):
             self.query_one("#chat-input", ChatInput).focus()
             return
         if self._agent_task and not self._agent_task.done():
-            if self._subagent_task and not self._subagent_task.done():
-                task_id = self.task_manager.adopt_running(
-                    self._subagent_task, "background task"
-                ) if hasattr(self.task_manager, 'adopt_running') else None
-                if task_id:
-                    self._show_system_message(
-                        f"Task moved to background (id: {task_id})"
-                    )
-                    return
             self._agent_task.cancel()
 
     async def _prefetch_relevant_memories(self, query: str) -> str:
@@ -2033,5 +2023,3 @@ class MewCodeApp(App):
         except Exception:
             pass
 
-    def _update_token_label(self, input_tokens: int, output_tokens: int) -> None:
-        pass  # token 标签已从 UI 中移除

@@ -17,7 +17,6 @@ from mewcode.conversation import (
     ToolResultBlock,
     estimate_tokens,
 )
-from mewcode.serialization import build_messages
 
 # ---------------------------------------------------------------------------
 # 常量
@@ -429,10 +428,6 @@ def compute_compact_threshold(context_window: int, manual: bool = False) -> int:
     return effective - margin
 
 
-def should_auto_compact(last_input_tokens: int, context_window: int) -> bool:
-    return last_input_tokens >= compute_compact_threshold(context_window)
-
-
 SUMMARY_PROMPT = """\
 你是一个对话摘要助手。你只能输出纯文本，不能调用任何工具。
 
@@ -799,16 +794,6 @@ async def auto_compact(
     # （keep_start <= 0），要么摘要回收的 token 还不够摘要本身的开销。
     if keep_start <= 0 or _prefix_too_small_to_compact(to_summarize):
         return None
-
-    messages_for_summary = build_messages(list(to_summarize), protocol)
-
-    summary_messages: list[dict[str, Any]] = [
-        {"role": "user", "content": SUMMARY_PROMPT},
-    ]
-    summary_messages.extend(messages_for_summary)
-    summary_messages.append(
-        {"role": "user", "content": "请根据以上对话生成结构化摘要。记住：不要调用任何工具。"}
-    )
 
     summary_conv = ConversationManager()
     summary_conv.history = [

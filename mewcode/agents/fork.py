@@ -48,19 +48,9 @@ def build_forked_messages(
     if fork_conv.history:
         last = fork_conv.history[-1]
         if last.role == "assistant" and last.tool_uses:
-            existing_result_ids = set()
-            if len(fork_conv.history) >= 2:
-                candidate = fork_conv.history[-1]
-                if candidate.tool_results:
-                    existing_result_ids = {
-                        tr.tool_use_id for tr in candidate.tool_results
-                    }
-
-            pending = [
-                tu
-                for tu in last.tool_uses
-                if tu.tool_use_id not in existing_result_ids
-            ]
+            # 候选 result 与 last 是同一条消息，assistant 带 tool_uses 的
+            # 消息不会有 tool_results——过滤恒空，直接取全部待补占位。
+            pending = list(last.tool_uses)
             if pending:
                 placeholders = [
                     ToolResultBlock(

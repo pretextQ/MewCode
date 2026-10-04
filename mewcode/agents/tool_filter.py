@@ -19,16 +19,6 @@ ALL_AGENT_DISALLOWED_TOOLS: frozenset[str] = frozenset({
     "Workflow",
 })
 
-CUSTOM_AGENT_DISALLOWED_TOOLS: frozenset[str] = frozenset({
-    "TaskOutput",
-    "ExitPlanMode",
-    "EnterPlanMode",
-    "Agent",
-    "AskUserQuestion",
-    "TaskStop",
-    "Workflow",
-})
-
 ASYNC_AGENT_ALLOWED_TOOLS: frozenset[str] = frozenset({
     "ReadFile",
     "WebSearch",
@@ -108,7 +98,7 @@ def resolve_agent_tools(
 
     # 第 2 层：自定义 agent 额外限制
     if definition.source in ("project", "user", "plugin"):
-        for name in CUSTOM_AGENT_DISALLOWED_TOOLS:
+        for name in ALL_AGENT_DISALLOWED_TOOLS:
             all_tools.pop(name, None)
 
     # 第 3 层：后台任务白名单
