@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from mewcode.config import MCPServerConfig
@@ -16,6 +17,14 @@ class MCPManager:
     def __init__(self) -> None:
         self._configs: dict[str, MCPServerConfig] = {}
         self._clients: dict[str, MCPClient] = {}
+        self._locks: dict[str, asyncio.Lock] = {}
+
+    def _lock_for(self, name: str) -> asyncio.Lock:
+        lock = self._locks.get(name)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._locks[name] = lock
+        return lock
 
 
     def load_configs(self, configs: list[MCPServerConfig]) -> None:
@@ -46,24 +55,26 @@ class MCPManager:
 
 
     async def get_client(self, name: str) -> MCPClient | None:
-        client = self._clients.get(name)
-        if client is None:
-            config = self._configs.get(name)
-            if config is None:
-                return None
-            client = MCPClient(config)
-            await client.connect()
-            self._clients[name] = client
+        # Locking per server name keeps concurrent callers from building two
+        # clients for the same config; the re-entrant reconnect reuses the
+        # instance so wrappers holding a reference stay valid.
+        async with self._lock_for(name):
+            client = self._clients.get(name)
+            if client is None:
+                config = self._configs.get(name)
+                if config is None:
+                    return None
+                client = MCPClient(config)
+                await client.connect()
+                self._clients[name] = client
+                return client
+
+            if not client.is_alive:
+                logger.info("Reconnecting MCP server '%s'", name)
+                await client.close()
+                await client.connect()
+
             return client
-
-        if not client.is_alive:
-            logger.info("Reconnecting MCP server '%s'", name)
-            await client.close()
-            client = MCPClient(self._configs[name])
-            await client.connect()
-            self._clients[name] = client
-
-        return client
 
 
     async def shutdown(self) -> None:

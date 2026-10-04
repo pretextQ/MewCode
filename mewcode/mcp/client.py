@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from contextlib import AsyncExitStack
@@ -22,6 +23,9 @@ class MCPClient:
         self._session: ClientSession | None = None
         self._stack: AsyncExitStack | None = None
         self._alive = False
+        # Serializes connect/close: concurrent callers would each build an
+        # AsyncExitStack and the loser's stdio child process would leak.
+        self._lock = asyncio.Lock()
 
 
     @property
@@ -29,29 +33,35 @@ class MCPClient:
         return self._alive
 
 
+    def mark_unhealthy(self) -> None:
+        """Flag the connection as broken so the next call reconnects."""
+        self._alive = False
+
+
     async def connect(self) -> None:
-        if self._alive:
-            return
+        async with self._lock:
+            if self._alive:
+                return
 
-        self._stack = AsyncExitStack()
-        await self._stack.__aenter__()
+            self._stack = AsyncExitStack()
+            await self._stack.__aenter__()
 
-        try:
-            if self.config.is_stdio:
-                read, write = await self._connect_stdio()
-            else:
-                read, write = await self._connect_http()
+            try:
+                if self.config.is_stdio:
+                    read, write = await self._connect_stdio()
+                else:
+                    read, write = await self._connect_http()
 
-            session = await self._stack.enter_async_context(
-                ClientSession(read, write)
-            )
-            await session.initialize()
-            self._session = session
-            self._alive = True
-            logger.info("MCP server '%s' connected", self.name)
-        except Exception:
-            await self._cleanup_stack()
-            raise
+                session = await self._stack.enter_async_context(
+                    ClientSession(read, write)
+                )
+                await session.initialize()
+                self._session = session
+                self._alive = True
+                logger.info("MCP server '%s' connected", self.name)
+            except Exception:
+                await self._cleanup_stack()
+                raise
 
 
     async def _connect_stdio(self) -> tuple[Any, Any]:
@@ -103,9 +113,10 @@ class MCPClient:
         return await self._session.call_tool(name, arguments)
 
     async def close(self) -> None:
-        self._alive = False
-        self._session = None
-        await self._cleanup_stack()
+        async with self._lock:
+            self._alive = False
+            self._session = None
+            await self._cleanup_stack()
 
     async def _cleanup_stack(self) -> None:
         if self._stack is not None:

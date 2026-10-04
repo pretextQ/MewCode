@@ -101,7 +101,7 @@ class MCPToolWrapper(Tool):
                 self._tool_def.name, params.model_dump(exclude_none=True)
             )
         except Exception as e:
-            self._client._alive = False
+            self._client.mark_unhealthy()
             return ToolResult(
                 output=f"MCP tool call failed: {e}",
                 is_error=True,
