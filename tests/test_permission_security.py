@@ -918,6 +918,17 @@ class TestWindowsDangerousCommands:
 # F3.1 文件工具 Windows 兼容（行尾 / 编码 / track_edit 时序 / offset 校验）
 # ---------------------------------------------------------------------------
 
+def _host_prefers_gbk() -> bool:
+    """detect_encoding 的 locale 候选须落在 GBK 家族，GBK 用例才有意义。"""
+    import locale
+
+    try:
+        enc = locale.getpreferredencoding(False).lower().replace("-", "")
+    except Exception:
+        return False
+    return enc in {"gbk", "cp936", "gb2312", "gb18030", "ms936"}
+
+
 class TestFileToolWindowsCompat:
     def test_edit_preserves_lf_line_endings_byte_exact(self, tmp_path):
         """LF-only 文件 Edit 后字节级行尾不变（win32 全文件 CRLF 化回归）。"""
@@ -935,7 +946,10 @@ class TestFileToolWindowsCompat:
         assert not r.is_error
         assert f.read_bytes() == b"a\nB\nc\n", f.read_bytes()
 
-    @pytest.mark.skipif(sys.platform != "win32", reason="GBK/mbcs 编码探测仅 Windows 提供")
+    @pytest.mark.skipif(
+        not _host_prefers_gbk(),
+        reason="GBK 解码依赖中文 Windows 的 ANSI 代码页（cp936）；英文 Windows 的 mbcs=cp1252 无法解码 GBK",
+    )
     def test_read_and_edit_gbk_file(self, tmp_path):
         """GBK 编码文件可读可编辑（严格 utf-8 解码会 UnicodeDecodeError）。"""
         import asyncio
