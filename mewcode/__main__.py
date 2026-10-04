@@ -61,6 +61,7 @@ async def _serve(service, host: str, port: int, recover: bool = True) -> None:
     from mewcode.service.api import create_app
     from mewcode.service.execution import ExecutionChain, HeadlessAgentRunner
     from mewcode.service.jobs import JobStore
+    from mewcode.service.notify import build_notifier
     from mewcode.service.publisher import GitHubCIGate, PullRequestPublisher
     from mewcode.service.runtime import ServiceRuntime
     from mewcode.service.triggers import build_adapters
@@ -82,6 +83,7 @@ async def _serve(service, host: str, port: int, recover: bool = True) -> None:
     store = JobStore(Path(service.data_dir) / "jobs.db")
     await store.connect()
 
+    notifier = build_notifier(service.notify, store)
     runner = HeadlessAgentRunner(service, provider, hook_engine=HookEngine(hooks) if hooks else None)
     vcs = GitHubVCS(service.vcs) if service.vcs.provider == "github" else None
     chain = ExecutionChain(
@@ -90,12 +92,14 @@ async def _serve(service, host: str, port: int, recover: bool = True) -> None:
         runner,
         publisher=PullRequestPublisher(vcs, store, service) if vcs else None,
         ci_gate=GitHubCIGate(vcs) if vcs else None,
+        notifier=notifier,
     )
     runtime = ServiceRuntime(
         service,
         handler=chain,
         store=store,
         worktree_cleanup_cutoff_hours=config.worktree.stale_cutoff_hours,
+        notifier=notifier,
     )
     await runtime.start(recover=recover)
 

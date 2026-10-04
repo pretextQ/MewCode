@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from mewcode.config import ServiceConfig
 
@@ -57,11 +58,13 @@ class ServiceRuntime:
         store: JobStore | None = None,
         repo_root: str | Path | None = None,
         worktree_cleanup_cutoff_hours: int | None = 24,
+        notifier: Any = None,
     ) -> None:
         self.config = config
         self._handler = handler
         data_dir = Path(repo_root or ".") / config.data_dir
         self.store = store or JobStore(data_dir / "jobs.db")
+        self.notifier = notifier
         self.pool = WorkerPool(
             store=self.store,
             handler=handler,
@@ -144,4 +147,11 @@ class ServiceRuntime:
             if self.pool.running:
                 await self.pool.submit(job.id)
             result.accepted.append(job)
+            if self.notifier is not None:
+                try:
+                    await self.notifier.notify_job_event(
+                        job, "received", f"severity={job.severity} title={job.title or '(no title)'}"
+                    )
+                except Exception as e:  # 通知失败不影响受理
+                    log.warning("notify failed for %s: %s", job.id, e)
         return result
