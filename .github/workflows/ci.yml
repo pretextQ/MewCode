@@ -9,6 +9,7 @@ jobs:
   test:
     name: pytest (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -28,13 +29,19 @@ jobs:
       - name: Type check (mypy core packages)
         run: uv run mypy mewcode/tools mewcode/permissions mewcode/serialization.py
 
+      # 失败输出同步写入 job summary（匿名可通过 check-runs API 读取），
+      # 便于在无法拉取原始日志时定位失败测试。
       - name: Run tests
-        run: uv run pytest -q --maxfail=10
+        shell: bash
+        run: |
+          set -o pipefail
+          uv run pytest -q --maxfail=10 --timeout=120 2>&1 | tail -120 | tee "${GITHUB_STEP_SUMMARY:-/dev/null}"
 
   security:
     # 高危告警通道：权限安全回归套件独立跑，失败即阻塞合并。
     name: security regression
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -45,4 +52,7 @@ jobs:
         run: uv sync
 
       - name: Permission security regression
-        run: uv run pytest tests/test_permission_security.py -q --maxfail=1
+        shell: bash
+        run: |
+          set -o pipefail
+          uv run pytest tests/test_permission_security.py -q --maxfail=1 --timeout=120 -v 2>&1 | tail -120 | tee "${GITHUB_STEP_SUMMARY:-/dev/null}"
