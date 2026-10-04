@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from mewcode.config import RepoConfig, ServiceConfig
+from mewcode.config import MCPServerConfig, RepoConfig, ServiceConfig
 from mewcode.service import sop
 from mewcode.service.execution import (
     MAX_FEEDBACK_CHARS,
@@ -656,26 +656,32 @@ class TestHeadlessRunnerBudget:
 
     @pytest.mark.asyncio
     async def test_teardown_cancellation_is_absorbed_and_recorded(self, tmp_path: Path):
-        """MCP 收尾留下的"迟到取消"不能改写作业结果（真机踩到：它打死了执行链）。
+        """收尾窗口里漏出的取消被记录、不改写结果；调用方任务保持干净。
 
-        anyio 作用域在 MCP 收尾时取消宿主任务，投递点可能落在收尾之后的第一个
-        await 上——直跑模式下这条链直接打死 worker 消费者。收尾边界必须吃掉它
-        并留下审计记录。
+        真实形态见 test_service_mcp.py::TestDirectModeTeardownIsolation（隔离
+        掉整个 MCP 生命周期）；这里钉住收尾边界本身：取消必须被吞下并落成
+        `teardown_cancellation` 事件，作业结果不受影响。
         """
         from mewcode.config import ProviderConfig
         from mewcode.service.jobs import Job
 
-        config = ServiceConfig()
+        config = ServiceConfig(mcp_servers=[MCPServerConfig(name="x", command="noop")])
         provider = ProviderConfig(name="t", protocol="openai", base_url="http://x", model="m", api_key="k")
         runner = HeadlessAgentRunner(config, provider)
 
         class LeakyAgent:
+            def __init__(self) -> None:
+                from mewcode.tools import ToolRegistry
+
+                self.registry = ToolRegistry()  # 配了 MCP server 才会被接线（连不上只记事件）
+
             async def run_to_completion(self, prompt, conversation=None, event_callback=None):
                 return "ROOT CAUSE: x\nFIX: y"
 
             async def cancel_background_tasks(self):
-                # 模拟 anyio 作用域：取消投递落在收尾之后的第一个 await 上
+                # 模拟 anyio 作用域：取消投递落在收尾窗口的 await 上
                 asyncio.get_running_loop().call_soon(asyncio.current_task().cancel)
+                await asyncio.sleep(0)
 
         runner._build_agent = lambda work_dir: LeakyAgent()  # type: ignore[method-assign]
         events: list[dict] = []
@@ -685,6 +691,9 @@ class TestHeadlessRunnerBudget:
         assert outcome.final_text.startswith("ROOT CAUSE")  # 结果不被改写
         teardown = [e for e in events if e.get("type") == "teardown_cancellation"]
         assert teardown and "CancelledError" in teardown[0]["detail"]
+        # 调用方任务不被污染：继续 await 若干次都该正常
+        for _ in range(3):
+            await asyncio.sleep(0)
 
 
 # =========================================================================

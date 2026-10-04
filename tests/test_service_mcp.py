@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import subprocess
 import sys
 import textwrap
@@ -483,3 +484,71 @@ def _git_repo(tmp_path: Path) -> Path:
 
 def _test_command() -> str:
     return f'"{sys.executable}" test_calc.py'
+
+
+# =========================================================================
+# E. 直跑模式的收尾隔离：MCP 的 anyio 作用域不能踩坏调用方任务
+# =========================================================================
+
+class TestDirectModeTeardownIsolation:
+    """真机事故的回归：直跑模式下 MCP 收尾把宿主任务的每个 await 都变成取消。
+
+    anyio 的 stdio 传输在收尾时取消宿主任务，随后作用域自己退不干净
+    （`Attempted to exit a cancel scope ...`）——那份取消因此是**水平触发**：
+    宿主任务之后每一个 await 都被取消。真机上它顺着 CancelledError 打死执行链
+    与 worker 消费者（服务活着却不再消费任何 job）。快速复现（本用例即复现的
+    固化版）显示：不隔离时 runner 返回后的 30 次 await 全被取消，隔离后为 0。
+    """
+
+    @pytest.mark.asyncio
+    async def test_runner_keeps_the_calling_task_clean(self, tmp_path: Path):
+        from helpers.fake_backends import DEFAULT_LOG_LINE, make_loki
+        from helpers.fake_llm import FakeLLM
+
+        from mewcode.service.jobs import Job
+
+        llm = FakeLLM(
+            script=[
+                {"tool_calls": [("mcp_logs_query_logs", '{"query": "{app=\\"checkout\\"}"}')]},
+                {"text": "ROOT CAUSE: simulated\nFIX: none\nVERIFICATION: log query"},
+            ],
+            host="127.0.0.1",
+        ).start()
+        loki = make_loki([DEFAULT_LOG_LINE]).start()
+        try:
+            provider = ProviderConfig(
+                name="fake",
+                protocol="openai-compat",
+                base_url=f"http://127.0.0.1:{llm.port}/v1",
+                model="fake-model",
+                api_key="fake-key",
+            )
+            # 两个 server（各一个 anyio 作用域）：复现条件之一
+            servers = [
+                MCPServerConfig(
+                    name=name,
+                    command=sys.executable,
+                    args=["-m", "mewcode.mcp.servers.logs"],
+                    env={"MEWCODE_LOKI_URL": f"http://127.0.0.1:{loki.port}"},
+                )
+                for name in ("logs", "logs2")
+            ]
+            config = ServiceConfig(sandbox=SandboxConfig(enabled=False), mcp_servers=servers)
+            runner = HeadlessAgentRunner(config, provider)
+            work = tmp_path / "wt"
+            work.mkdir()
+            events: list[dict] = []
+            job = Job(id="job-mcp-iso", fingerprint="f", repo="demo", severity="w",
+                      status="fixing", payload={})
+
+            outcome = await runner.run(job, str(work), "Use the internal tools.", events.append)
+
+            assert "ROOT CAUSE" in outcome.final_text
+            assert outcome.mcp_tool_calls == 1
+            assert any(e.get("type") == "mcp_used" for e in events)
+            # 回归点：调用方任务在收尾之后必须还是干净的（不被"水平触发"的取消追着）
+            for _ in range(10):
+                await asyncio.sleep(0.01)  # 不抛，就是通过
+        finally:
+            llm.stop()
+            loki.stop()

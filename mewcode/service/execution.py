@@ -267,14 +267,13 @@ def _absorb_cancellation(exc: BaseException) -> str:
 async def shutdown_agent_resources(agent: Any, mcp_result: Any) -> list[str]:
     """显式收尾 agent 后台任务与 MCP 连接；返回收尾窗口里吞掉的取消摘要。
 
-    MCP 的 stdio 传输基于 anyio cancel scope：收尾时它会取消宿主任务，且**投递
-    点不确定**——真机实测（两个 server = 两个作用域）其中一次投递落在收尾之后的
-    第一个 await 上，顺着 CancelledError 把执行链和 worker 消费者一起打死
-    （服务活着却不再消费任何 job）。
+    MCP 的 stdio 收尾会踩坏"连接它的任务"：anyio 作用域在等待子进程退出时取消
+    宿主任务，随后作用域自己也退不干净（`Attempted to exit a cancel scope ...`），
+    于是宿主任务的**每一个** await 都会被取消（水平触发——真机与快速复现都确认，
+    吸收是吸不完的）。所以真正防炸的是调用侧的任务隔离（见 `_run_direct`）；
+    这里保证的是"收尾一定完成、顺手记下收尾窗口里的取消"，供审计。
 
-    收尾必须完成，所以收尾窗口里的取消一律记下来，不让它逃逸；调用方把摘要写进
-    审计。真取消（服务关停）由调用方的 finally 之后继续传播——worker 侧还有
-    队列哨兵兜底（worker.stop），吞掉一次不会把关停卡住。
+    ``close_mcp`` 契约"永不抛出"；这层保险不打折。
     """
     absorbed: list[str] = []
     try:
@@ -284,13 +283,8 @@ async def shutdown_agent_resources(agent: Any, mcp_result: Any) -> list[str]:
     try:
         from mewcode.mcp.bootstrap import close_mcp
 
-        await close_mcp(mcp_result)  # 契约"永不抛出"；这层保险不打折
+        await close_mcp(mcp_result)
     except asyncio.CancelledError as e:  # pragma: no cover - close_mcp 已吞过一层
-        absorbed.append(_absorb_cancellation(e))
-    # 收尾之后的第一个 await：迟到的投递在这里显形（真机实测点）
-    try:
-        await asyncio.sleep(0)
-    except asyncio.CancelledError as e:
         absorbed.append(_absorb_cancellation(e))
     return absorbed
 
@@ -397,6 +391,9 @@ class HeadlessAgentRunner:
         self.hook_engine = hook_engine
         self.sandbox = sandbox
         self._sandbox_decision: bool | None = None
+        #: 直跑模式下承载 MCP 生命周期的一次性子任务（强引用防 GC；
+        #: 见 _run_direct 的隔离说明）
+        self._isolated_tasks: set[asyncio.Task[Any]] = set()
 
     async def _use_sandbox(self) -> bool:
         """是否走沙箱（探测一次并缓存；不可用只警告一次，不阻塞作业）。"""
@@ -524,6 +521,36 @@ class HeadlessAgentRunner:
     async def _run_direct(
         self, job: Job, work_dir: str, prompt: str, on_event: Callable[[dict[str, Any]], None]
     ) -> AgentRunOutcome:
+        """直跑模式：有 MCP 时把整段跑进一次性子任务（任务隔离）。
+
+        **为什么必须隔离**：MCP 的 stdio 收尾会踩坏连接它的任务——anyio 作用域
+        在等子进程退出时取消宿主任务，随后自己又退不干净（`Attempted to exit a
+        cancel scope ...`），于是那份取消变成**水平触发**：宿主任务之后的每一个
+        await 都会被取消（快速复现：收尾后 20 次 await 全部被取消）。容器 `-p`
+        模式下这只是让进程非零退出，被"先输出结果再收尾"的契约吸收；进程内直跑
+        时它会打死执行链，再顺着 CancelledError 打死 worker 消费者（真机事故）。
+
+        对策是把"会被踩坏的东西"（MCP 的连接、使用与收尾）关进一个一次性子任务：
+        污染留在里面随任务结束，执行链与 worker 消费者在外面保持干净。
+        没配 MCP 时不隔离（零行为变化）。
+        """
+        if not self.config.mcp_servers:
+            return await self._run_direct_body(job, work_dir, prompt, on_event)
+
+        task = asyncio.ensure_future(self._run_direct_body(job, work_dir, prompt, on_event))
+        self._isolated_tasks.add(task)  # 强引用：事件循环只持弱引用
+        task.add_done_callback(self._isolated_tasks.discard)
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            # 真取消（服务关停）：把子任务也停掉——它自己的 finally 会显式收尾
+            # MCP 子进程；我们原样传播，不吞任何东西。
+            task.cancel()
+            raise
+
+    async def _run_direct_body(
+        self, job: Job, work_dir: str, prompt: str, on_event: Callable[[dict[str, Any]], None]
+    ) -> AgentRunOutcome:
         from mewcode.conversation import ConversationManager
 
         agent, mcp_result = await self._build_agent_with_tools(work_dir, on_event)
@@ -556,9 +583,7 @@ class HeadlessAgentRunner:
             )
         finally:
             # 显式收尾：agent 可能留下后台任务（子代理 / fire-and-forget），
-            # MCP 侧还挂着 stdio 子进程——都不能依赖进程退出兜底（仓库已知坑）。
-            # 收尾窗口里任何一次"取消"都记成事件（MCP 的作用域取消会漏到这里，
-            # 见 shutdown_agent_resources 的说明），不让它改写作业的结果语义。
+            # MCP 侧还挂着 stdio 子进程——都不能依赖进程退出兜底（仓库已知坑）
             absorbed = await shutdown_agent_resources(agent, mcp_result)
             if absorbed:
                 on_event({
