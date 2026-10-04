@@ -380,6 +380,24 @@ class TestPRBody:
         sections = parse_agent_report("### ROOT CAUSE: a\n### FIX: b")
         assert sections["ROOT CAUSE"] == "a" and sections["FIX"] == "b"
 
+    def test_parse_agent_report_with_bold_headings(self):
+        """加粗标题是模型最常见的写法；漏掉会让自查段落静默消失（真机踩到）。"""
+        text = (
+            "**ROOT CAUSE:** the call was unguarded\n\n"
+            "**FIX:** wrapped it in try/except\n\n"
+            "**VERIFICATION:** ran the test\n\n"
+            "**SELF-CHECK:**\n- [x] errors handled\n- [ ] not met: no new test\n"
+        )
+        sections = parse_agent_report(text)
+        assert sections["ROOT CAUSE"] == "the call was unguarded"
+        assert sections["FIX"] == "wrapped it in try/except"
+        assert sections["SELF-CHECK"].startswith("- [x] errors handled")
+
+    def test_parse_agent_report_with_mixed_decorations(self):
+        text = "ROOT CAUSE: a\n> **FIX:** b\n`VERIFICATION`: c"
+        sections = parse_agent_report(text)
+        assert sections == {"ROOT CAUSE": "a", "FIX": "b", "VERIFICATION": "c"}
+
     def test_title_includes_alert(self):
         assert build_pr_title(make_job_stub()).startswith("[MewCode]")
 

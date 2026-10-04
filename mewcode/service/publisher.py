@@ -23,9 +23,12 @@ from .vcs import CheckStatus, VCSError, VCSProvider
 log = logging.getLogger(__name__)
 
 _REPORT_KEYS = r"(?:ROOT CAUSE|FIX|VERIFICATION|SELF\-CHECK)"
+#: 报告标题的常见装饰：agent 天然会写成 `**FIX:**` / `### ROOT CAUSE:` / `> FIX:`。
+#: 只认行首裸标题的话，加粗写法会导致整段被静默丢掉——真机踩到过：
+#: `**SELF-CHECK:**` 没被识别，规范自查（M2 验收标准 2 的证据）没进 PR body。
+_HEADING = rf"^[#>*_`\s]*({_REPORT_KEYS})[*_`\s]*:[*_`\s]*"
 _SECTION_RE = re.compile(
-    r"^(?:#+\s*)?(ROOT CAUSE|FIX|VERIFICATION|SELF\-CHECK)\s*:\s*(?P<body>.*?)"
-    r"(?=^(?:#+\s*)?(?:ROOT CAUSE|FIX|VERIFICATION|SELF\-CHECK)\s*:|\Z)",
+    _HEADING + r"(?P<body>.*?)" + rf"(?=^{_HEADING}|\Z)",
     re.IGNORECASE | re.MULTILINE | re.DOTALL,
 )
 
