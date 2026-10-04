@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -1109,6 +1110,19 @@ class TestGrepHardening:
 # ---------------------------------------------------------------------------
 
 class TestFileStateCacheRewindLinkage:
+    @staticmethod
+    def _bump_mtime(path: Path, delta_ns: int = 1_000_000) -> None:
+        """显式推进 mtime 一档，模拟"回滚重写了文件"。
+
+        门禁（FileStateCache.check）只比较 mtime_ns：在时钟粒度内连续写两次会
+        拿到**相同**时间戳，此时"文件被改过"在语义上不可判定（内容、时间都
+        一致，放行写本来就是对的）。要断言"拒绝"就必须构造可判定的场景——
+        把回滚的时间推进一档，而不是赌时钟（全量跑时曾偶发失败）。
+        真实回滚发生在毫秒级之后，不依赖这个技巧。
+        """
+        st = path.stat()
+        os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + delta_ns))
+
     def _write_tool(self, file_cache, state_cache):
         from mewcode.tools.write_file import WriteFile
 
@@ -1160,6 +1174,7 @@ class TestFileStateCacheRewindLinkage:
         fh.track_edit(str(target))
         fh.rewind(0)
         file_cache.invalidate(str(target.resolve()))
+        self._bump_mtime(target)
 
         # 状态缓存还记着回滚前的快照 → 门禁必须拦截，直到重新 ReadFile
         result = asyncio.run(tool.execute(params))
@@ -1186,6 +1201,7 @@ class TestFileStateCacheRewindLinkage:
         target.write_text("v0", encoding="utf-8")
         fh.track_edit(str(target))
         fh.rewind(0)
+        self._bump_mtime(target)
 
         assert asyncio.run(tool.execute(params)).is_error is True
 
