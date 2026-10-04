@@ -1,0 +1,51 @@
+........................................................................ [  6%]
+........................................................................ [ 12%]
+........................................................................ [ 18%]
+........................................................................ [ 25%]
+........................................................................ [ 31%]
+........................................................s............... [ 37%]
+...............s..................................................ssssss [ 44%]
+ssssssss................................................................ [ 50%]
+........................................................................ [ 56%]
+........................................................................ [ 63%]
+........................................................................ [ 69%]
+..................................................F..................... [ 75%]
+...s.................................................................... [ 81%]
+........................................................................ [ 88%]
+........................................................................ [ 94%]
+..............................................................           [100%]
+================================== FAILURES ===================================
+_______________ TestConcurrency.test_concurrency_cap_respected ________________
+
+self = <test_service_worker.TestConcurrency object at 0x000002414F923530>
+tmp_path = WindowsPath('C:/Users/runneradmin/AppData/Local/Temp/pytest-of-runneradmin/pytest-0/test_concurrency_cap_respected0')
+
+    @pytest.mark.asyncio
+    async def test_concurrency_cap_respected(self, tmp_path: Path):
+        async with open_store(tmp_path / "jobs.db") as store:
+            running = 0
+            peak = 0
+    
+            async def handler(job):
+                nonlocal running, peak
+                running += 1
+                peak = max(peak, running)
+                await asyncio.sleep(0.05)
+                running -= 1
+    
+            pool = WorkerPool(store, handler, concurrency=2)
+            await pool.start()
+            try:
+                for i in range(6):
+                    job = await make_job(store, fingerprint=f"fp-{i}")
+                    await pool.submit(job.id)
+                await asyncio.wait_for(pool._queue.join(), timeout=5)
+            finally:
+                await pool.stop(drain_timeout=1)
+>           assert peak == 2
+E           assert 1 == 2
+
+tests\test_service_worker.py:59: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_service_worker.py::TestConcurrency::test_concurrency_cap_respected - assert 1 == 2
+1 failed, 1124 passed, 17 skipped in 156.32s (0:02:36)
