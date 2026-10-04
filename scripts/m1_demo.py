@@ -77,6 +77,38 @@ jobs:
         run: python test_app.py
 """
 
+#: M2 W4 demo：仓库带 compose 依赖 + 只有真起依赖才能过的集成测试。
+#: 服务层负责 `docker compose -p mewfix-<job> up -d --wait`，集成测试在沙箱
+#: 容器内跑（加入 compose 网络，按服务名 cache 寻址）；CI 不跑它。
+COMPOSE_YML = """services:
+  cache:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+"""
+
+INTEGRATION_TEST = '''"""Integration check: needs the docker-compose cache service (M2 W4).
+
+Runs inside the sandbox container joined to the compose project network, so the
+dependency is reached by its service name ("cache") - no host ports involved.
+"""
+import socket
+
+with socket.create_connection(("cache", 6379), timeout=10) as sock:
+    sock.sendall(b"PING\\r\\n")
+    if b"PONG" not in sock.recv(1024):
+        raise SystemExit("integration: cache did not answer PING")
+    sock.sendall(b"SET mewcode ok\\r\\n")
+    sock.recv(1024)
+    sock.sendall(b"GET mewcode\\r\\n")
+    if b"ok" not in sock.recv(1024):
+        raise SystemExit("integration: cache lost the value")
+print("integration ok: cache reachable and responsive")
+'''
+
 
 def _git(path: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
     return subprocess.run(["git", *args], cwd=str(path), capture_output=True, text=True, check=check)
@@ -95,10 +127,19 @@ def cmd_init(args: argparse.Namespace) -> int:
 
     (path / "app.py").write_text(buggy, encoding="utf-8")
     (path / "test_app.py").write_text(test_source, encoding="utf-8")
+    if args.with_compose:
+        (path / "docker-compose.yml").write_text(COMPOSE_YML, encoding="utf-8")
+        (path / "test_integration.py").write_text(INTEGRATION_TEST, encoding="utf-8")
     (path / "README.md").write_text(
         "# mewcode-alert-demo\n\n"
         "Throwaway repository for demonstrating MewCode's alert-driven fix pipeline.\n"
-        f"Planted bug: `{args.bug}`.\n",
+        f"Planted bug: `{args.bug}`.\n"
+        + (
+            "\nHas a docker-compose dependency (`cache`) and an integration test that\n"
+            "only passes when the service layer starts it (M2 W4).\n"
+            if args.with_compose
+            else ""
+        ),
         encoding="utf-8",
     )
     workflow = path / ".github" / "workflows" / "ci.yml"
@@ -173,6 +214,11 @@ def main(argv: list[str]) -> int:
     init.add_argument("--path", required=True)
     init.add_argument("--bug", choices=sorted(BUGS), default="config_error")
     init.add_argument("--branch", default="main")
+    init.add_argument(
+        "--with-compose",
+        action="store_true",
+        help="also add docker-compose.yml + test_integration.py (M2 W4 self-started test env)",
+    )
     init.set_defaults(func=cmd_init)
 
     alert = sub.add_parser("alert", help="send a simulated Alertmanager webhook")

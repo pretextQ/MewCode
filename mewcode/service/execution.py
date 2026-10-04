@@ -92,6 +92,51 @@ class TestOutcome:
 
 
 @dataclass
+class IntegrationOutcome:
+    """集成验证（自起测试环境，M2 W4）的结果：PR 证据与失败反馈的原料。
+
+    ``skipped`` 非空表示"仓库带了 compose 文件、这一步本该做但没能做"
+    （未配置命令 / 容器运行时不可用）——证据链里如实记录，不假装验证过。
+    """
+
+    compose_file: str
+    project: str = ""
+    network: str = ""
+    up_ok: bool = False
+    up_output: str = ""
+    services: str = ""
+    test: TestOutcome | None = None
+    down_output: str = ""
+    skipped: str = ""
+
+    @property
+    def ran(self) -> bool:
+        return not self.skipped
+
+    @property
+    def passed(self) -> bool:
+        return bool(self.ran and self.up_ok and self.test is not None and self.test.passed)
+
+    def summary(self) -> str:
+        if self.skipped:
+            return f"skipped ({self.skipped})"
+        if not self.up_ok:
+            return f"`{self.compose_file}`: docker compose up failed (project {self.project})"
+        if self.test is None:
+            return "integration test did not run"
+        return self.test.summary()
+
+    def failure_feedback(self) -> str:
+        """失败重试时交给 agent 的原始输出（与单测失败同一条反馈通路）。"""
+        if not self.up_ok:
+            return (
+                f"the repository has {self.compose_file} and the service could not start "
+                f"the dependencies with docker compose (project {self.project}):\n{self.up_output}"
+            )
+        return self.test.output if self.test is not None else ""
+
+
+@dataclass
 class AgentRunOutcome:
     final_text: str = ""
     tool_calls: int = 0
@@ -135,6 +180,18 @@ class CIGate(Protocol):
     ) -> Any: ...
 
 
+class IntegrationVerifier(Protocol):
+    """自起测试环境验证（W4 实现）：仓库含 compose 文件时起依赖、跑集成测试、清理。
+
+    返回 ``None`` 表示"这个仓库没有 compose 文件、不需要集成验证"；返回
+    ``IntegrationOutcome`` 表示这一步适用（``skipped`` 非空 = 本该做但没做）。
+    """
+
+    async def verify(
+        self, job: Job, repo: RepoConfig, work_dir: str
+    ) -> IntegrationOutcome | None: ...
+
+
 @dataclass
 class ExecutionContext:
     """执行链产物 = 交给 publisher 的证据链（PR body 的原料）。"""
@@ -148,6 +205,8 @@ class ExecutionContext:
     baseline_test: TestOutcome | None
     verify_test: TestOutcome | None
     attempts: int = 1
+    #: 集成验证结果（M2 W4）；None = 仓库没有 compose 文件、这一步不适用
+    integration: IntegrationOutcome | None = None
 
     def diff_stat(self) -> str:
         added = sum(
@@ -481,6 +540,7 @@ class ExecutionChain:
         test_runner: TestRunner | None = None,
         publisher: Publisher | None = None,
         ci_gate: CIGate | None = None,
+        integration_verifier: IntegrationVerifier | None = None,
         notifier: Any = None,
         worktree_manager_factory: Callable[[str], Any] | None = None,
     ) -> None:
@@ -490,6 +550,7 @@ class ExecutionChain:
         self.test_runner = test_runner or TestRunner()
         self.publisher = publisher
         self.ci_gate = ci_gate
+        self.integration_verifier = integration_verifier
         self.notifier = notifier
         self._worktree_manager_factory = worktree_manager_factory
         self._managers: dict[str, Any] = {}
@@ -639,6 +700,7 @@ class ExecutionChain:
                 mcp_servers=[
                     (cfg.name, cfg.description) for cfg in (self.config.mcp_servers or [])
                 ],
+                integration_command=repo.integration_test_command,
             )
             if attempt == 1:
                 await self._event(job.id, "agent_prompt", prompt)
@@ -679,6 +741,35 @@ class ExecutionChain:
                 await self._event(
                     job.id, "test_delta", f"before: {baseline.summary()} / after: {verify.summary()}"
                 )
+
+            # 集成验证（M2 W4）：单测过了（或未配置）才值得自起测试环境——
+            # 单测都不过的修复没必要起依赖再跑一遍。verifier 自身异常按基础设施
+            # 问题 escalate（不假装验证过，也不拿它烧 agent 的重试预算）。
+            integration: IntegrationOutcome | None = None
+            if (verify is None or verify.passed) and self.integration_verifier is not None:
+                try:
+                    integration = await self.integration_verifier.verify(job, repo, work_dir)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    await self._event(job.id, "integration_error", f"{type(e).__name__}: {e}")
+                    await self._escalate(
+                        job.id, f"integration verification raised: {type(e).__name__}: {e}"
+                    )
+                    return None
+                await self._record_integration(job.id, integration)
+
+            if integration is not None and integration.ran and not integration.passed:
+                feedback = await self._verify_failed(
+                    job,
+                    attempt,
+                    f"integration verification failed: {integration.summary()}",
+                    integration.failure_feedback(),
+                )
+                if feedback is None:
+                    return None
+                continue
+
             if verify is None or verify.passed:
                 return ExecutionContext(
                     repo=repo,
@@ -690,24 +781,68 @@ class ExecutionChain:
                     baseline_test=baseline,
                     verify_test=verify,
                     attempts=attempt,
+                    integration=integration,
                 )
 
-            # 验证失败：记录后重试（是否允许重试由状态机的 attempts 上限决定）
-            failed = await self._transition(
-                job.id, "verify_failed", reason=f"verification failed: {verify.summary()}"
+            # 单测失败：记录后重试（是否允许重试由状态机的 attempts 上限决定）
+            feedback = await self._verify_failed(
+                job, attempt, f"verification failed: {verify.summary()}", verify.output or ""
             )
-            if failed is None:
-                await self._escalate(job.id, f"verification failed: {verify.summary()}")
-                return None
-            if failed.attempts >= self.store.max_fix_attempts:
-                await self._escalate(
-                    job.id,
-                    f"verification still failing after {failed.attempts} attempt(s): {verify.summary()}",
-                )
+            if feedback is None:
                 return None
 
-            feedback = (verify.output or "")[-MAX_FEEDBACK_CHARS:]
-            await self._event(job.id, "verification_retry", f"retrying fix with test output (attempt {attempt + 1})")
+    async def _verify_failed(
+        self, job: Job, attempt: int, reason: str, output: str
+    ) -> str | None:
+        """验证失败（单测或集成）的统一收尾：记状态、判上限、准备重试反馈。
+
+        返回下一轮的反馈文本；``None`` 表示已收尾（超限 escalate 或状态机拒绝），
+        调用方必须停止循环。
+        """
+        failed = await self._transition(job.id, "verify_failed", reason=reason)
+        if failed is None:
+            await self._escalate(job.id, reason)
+            return None
+        if failed.attempts >= self.store.max_fix_attempts:
+            await self._escalate(
+                job.id,
+                f"verification still failing after {failed.attempts} attempt(s): {reason}",
+            )
+            return None
+        await self._event(
+            job.id, "verification_retry", f"retrying fix with test output (attempt {attempt + 1})"
+        )
+        return (output or "")[-MAX_FEEDBACK_CHARS:]
+
+    async def _record_integration(self, job_id: str, outcome: IntegrationOutcome | None) -> None:
+        """把集成验证的每一步落进审计（PR body 的证据链）。"""
+        if outcome is None:
+            return
+        if not outcome.ran:
+            await self._event(job_id, "integration_skipped", outcome.skipped)
+            return
+        services = " ".join(line for line in outcome.services.strip().splitlines()[1:] if line)
+        detail = f"project={outcome.project} file={outcome.compose_file} "
+        detail += f"up={'ok' if outcome.up_ok else 'failed'}"
+        if services:
+            detail += f" services: {services[:300]}"
+        if not outcome.up_ok:
+            detail += "\n" + outcome.up_output.strip()[-1500:]
+        await self._event(job_id, "integration_up", detail)
+        if outcome.test is not None:
+            test_detail = outcome.summary()
+            if outcome.test.output:
+                test_detail += "\n" + outcome.test.output[-2000:]
+            await self._event(job_id, "integration_tests", test_detail)
+        down = outcome.down_output.strip()
+        if down.startswith("(docker compose down exit"):
+            # 清理失败要如实说：容器/网络可能留在宿主上，需要人工看一眼
+            detail = f"project {outcome.project}: cleanup issue — {down[-300:]}"
+        else:
+            detail = f"project {outcome.project} removed (volumes included)"
+            if down:
+                detail += f"; {down[-300:]}"
+        await self._event(job_id, "integration_down", detail)
 
     async def _publish(self, job: Job, context: ExecutionContext) -> PublishResult | None:
         """发布并落 pr_opened；未配置/失败都不假装成功。"""

@@ -36,6 +36,8 @@ AUDIT_TIMELINE_KINDS = frozenset({
     "worktree_ready", "baseline_tests", "verify_tests", "test_delta",
     "agent_finished", "transition", "verification_retry", "ci_status",
     "ci_retry", "pr_created", "pr_updated", "escalated", "deduped",
+    # 集成验证（M2 W4）：起依赖 / 跑集成测试 / 清理各是一条证据
+    "integration_up", "integration_tests", "integration_down", "integration_skipped",
 })
 
 
@@ -59,6 +61,59 @@ def build_pr_title(job: Job) -> str:
     title = (job.title or job.payload.get("alertname") or "alert").strip()
     title = re.sub(r"\s+", " ", title)[:120]
     return f"[MewCode] {title}"
+
+
+def _integration_section(integration: Any | None) -> list[str]:
+    """集成验证（M2 W4）的证据小节：起依赖 → 跑集成测试 → 清理。
+
+    ``None``（仓库没有 compose 文件）不产生小节；``skipped`` 如实写明原因——
+    "没做"和"做了没过"对 review 者是两回事。
+    """
+    if integration is None:
+        return []
+    lines = ["", "## 集成验证（自起测试环境）", ""]
+    if not integration.ran:
+        lines += [
+            f"- Compose 文件：`{integration.compose_file}`",
+            f"- ⏭️ 未执行：{integration.skipped}",
+            "",
+            "> 单测证据仍然有效；集成验证需要容器运行时，本环境不具备。",
+        ]
+        return lines
+
+    lines.append(f"- Compose 文件：`{integration.compose_file}`（project `{integration.project}`）")
+    verdict = "✅ 启动成功" if integration.up_ok else "❌ 启动失败"
+    lines.append(f"- 依赖环境：`docker compose up -d --wait` {verdict}")
+    if integration.up_ok and integration.test is not None:
+        test = integration.test
+        result = "✅ 通过" if test.passed else "❌ 失败"
+        lines.append(f"- 集成测试：`{test.command}` → {result}（exit {test.exit_code}）")
+    elif integration.up_ok:
+        lines.append("- 集成测试：未执行")
+    lines.append("")
+    lines.append("> 集成测试在沙箱容器内执行，经 compose 网络按服务名访问依赖；任务结束已 `down -v` 清理。")
+
+    if not integration.up_ok and integration.up_output:
+        lines += [
+            "", "<details><summary>依赖环境启动输出</summary>", "", "```",
+            integration.up_output[-2000:], "```", "", "</details>",
+        ]
+    if integration.services.strip():
+        lines += [
+            "", "<details><summary>依赖服务状态（docker compose ps）</summary>", "", "```",
+            integration.services.strip()[-2000:], "```", "", "</details>",
+        ]
+    if integration.test is not None and integration.test.output:
+        lines += [
+            "", "<details><summary>集成测试输出</summary>", "", "```",
+            integration.test.output[-2000:], "```", "", "</details>",
+        ]
+    if integration.down_output.strip():
+        lines += [
+            "", "<details><summary>环境清理（docker compose down -v）</summary>", "", "```",
+            integration.down_output.strip()[-1000:], "```", "", "</details>",
+        ]
+    return lines
 
 
 def build_pr_body(
@@ -139,6 +194,8 @@ def build_pr_body(
             "", "<details><summary>修复后测试输出</summary>", "", "```",
             context.verify_test.output[-2000:], "```", "", "</details>",
         ]
+
+    lines += _integration_section(context.integration)
 
     configured_mcp = [name for name in (mcp_servers or []) if name]
     if configured_mcp or context.agent.mcp_tool_calls:

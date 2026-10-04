@@ -61,6 +61,7 @@ async def _serve(service, host: str, port: int, recover: bool = True) -> None:
     from aiohttp import web
 
     from mewcode.service.api import create_app
+    from mewcode.service.compose import ComposeVerifier
     from mewcode.service.execution import ExecutionChain, HeadlessAgentRunner, SandboxTestRunner
     from mewcode.service.jobs import JobStore
     from mewcode.service.notify import build_notifier
@@ -99,6 +100,9 @@ async def _serve(service, host: str, port: int, recover: bool = True) -> None:
     )
     vcs = GitHubVCS(service.vcs) if service.vcs.provider == "github" else None
     default_repo = next(iter(service.repos), "job")
+    # 集成验证（M2 W4）：沙箱不可用时 verifier 如实记 integration_skipped，
+    # 不做降级直跑——集成验证的前提就是容器运行时（compose 起依赖 + 容器内跑测试）
+    integration_verifier = ComposeVerifier(sandbox, runtime_bin=service.sandbox.runtime)
     chain = ExecutionChain(
         service,
         store,
@@ -106,6 +110,7 @@ async def _serve(service, host: str, port: int, recover: bool = True) -> None:
         test_runner=SandboxTestRunner(sandbox, repo_name=default_repo) if sandbox else None,
         publisher=PullRequestPublisher(vcs, store, service) if vcs else None,
         ci_gate=GitHubCIGate(vcs) if vcs else None,
+        integration_verifier=integration_verifier,
         notifier=notifier,
     )
     runtime = ServiceRuntime(
@@ -132,6 +137,9 @@ async def _serve(service, host: str, port: int, recover: bool = True) -> None:
     finally:
         print("shutting down: draining in-flight jobs...", flush=True)
         await runtime.stop()
+        # 取消路径上可能还有 compose down 在跑：等它收尾，别把依赖环境留在宿主上
+        # （仓库已知坑：后台子进程显式收尾，不靠进程退出兜底）
+        await integration_verifier.drain_cleanup_tasks()
         await http_runner.cleanup()
 
 

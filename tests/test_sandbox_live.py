@@ -306,3 +306,107 @@ async def test_agent_runs_in_container_with_mcp_tools(
     # 工具结果真的回到了模型：第二轮请求里带着假 Loki 的日志内容
     # （ensure_ascii=False：日志里有非 ASCII 字符，默认转义会让子串断言失真）
     assert DEFAULT_LOG_LINE in json.dumps(bodies[1], ensure_ascii=False)
+
+
+# ---------------------------------------------------------------------------
+# M2 W4：自起测试环境（compose）真机——起依赖、容器内跑集成测试、清理
+# ---------------------------------------------------------------------------
+
+#: 依赖服务用基础镜像自带的 python 起一个最小 HTTP 服务 + healthcheck，
+#: 不额外拉镜像（CI/本机都便宜）。集成测试按服务名 echo 访问它。
+COMPOSE_ECHO = """services:
+  echo:
+    image: python:3.12-slim
+    command: >
+      python -c "import http.server;http.server.HTTPServer(('',8000),type('H',(http.server.BaseHTTPRequestHandler,),{'do_GET':lambda s:(s.send_response(200),s.end_headers(),s.wfile.write(b'ok')),'log_message':lambda *a:None})).serve_forever()"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/')"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+"""
+
+INTEGRATION_CMD = (
+    'python -c "import urllib.request,sys; '
+    "ok = urllib.request.urlopen('http://echo:8000/').read() == b'ok'; "
+    "sys.exit(0 if ok else 1)\""
+)
+
+
+def _compose_project_has_leftovers(project: str) -> tuple[str, str]:
+    """返回 (残留容器, 残留网络)——验收"down -v 之后宿主干净"的判据。"""
+    containers = subprocess.run(
+        ["docker", "ps", "-a", "--filter", f"label=com.docker.compose.project={project}",
+         "--format", "{{.Names}}"],
+        capture_output=True, text=True, timeout=60,
+    ).stdout.strip()
+    networks = subprocess.run(
+        ["docker", "network", "ls", "--filter", f"name={project}", "--format", "{{.Name}}"],
+        capture_output=True, text=True, timeout=60,
+    ).stdout.strip()
+    return containers, networks
+
+
+@pytest.mark.asyncio
+async def test_compose_verification_starts_dependencies_and_cleans_up(
+    sandbox: DockerSandbox, worktree: Path
+):
+    """真机：compose 起依赖 → 容器内（加入 compose 网络）按服务名跑集成测试 → down -v 清理。"""
+    from types import SimpleNamespace
+
+    from mewcode.config import RepoConfig
+    from mewcode.service.compose import ComposeVerifier, compose_project
+
+    (worktree / "docker-compose.yml").write_text(COMPOSE_ECHO, encoding="utf-8")
+    job = SimpleNamespace(id="live-w4-ok", repo="job")  # repo=job 复用已有镜像 tag
+    repo = RepoConfig(
+        name="job", path=str(worktree), integration_test_command=INTEGRATION_CMD
+    )
+
+    verifier = ComposeVerifier(sandbox)
+    try:
+        outcome = await verifier.verify(job, repo, str(worktree))
+    finally:
+        await verifier.drain_cleanup_tasks()
+
+    assert outcome is not None and outcome.ran, outcome
+    assert outcome.up_ok, f"compose up failed:\n{outcome.up_output}"
+    assert outcome.test is not None and outcome.test.passed, (
+        f"integration test failed:\n{outcome.test.stdout if outcome.test else '(not run)'}"
+    )
+    # 证据链原料：依赖服务的健康状态（ps 输出里有服务名）
+    assert "echo" in outcome.services, outcome.services
+    # 清理：容器、网络、卷都没留下
+    project = compose_project(job.id)
+    containers, networks = _compose_project_has_leftovers(project)
+    assert not containers, f"containers leaked: {containers}"
+    assert not networks, f"networks leaked: {networks}"
+
+
+@pytest.mark.asyncio
+async def test_compose_up_failure_is_reported_and_cleaned_up(
+    sandbox: DockerSandbox, worktree: Path
+):
+    """真机：依赖起不来（镜像不存在）→ up 失败如实回报，测试不跑，环境照样清理。"""
+    from types import SimpleNamespace
+
+    from mewcode.config import RepoConfig
+    from mewcode.service.compose import ComposeVerifier, compose_project
+
+    (worktree / "docker-compose.yml").write_text(
+        "services:\n  broken:\n    image: mewcode-does-not-exist:1.2.3\n", encoding="utf-8"
+    )
+    job = SimpleNamespace(id="live-w4-fail", repo="job")
+    repo = RepoConfig(name="job", path=str(worktree), integration_test_command=INTEGRATION_CMD)
+
+    verifier = ComposeVerifier(sandbox)
+    try:
+        outcome = await verifier.verify(job, repo, str(worktree))
+    finally:
+        await verifier.drain_cleanup_tasks()
+
+    assert outcome is not None and outcome.ran and not outcome.passed
+    assert not outcome.up_ok and outcome.test is None
+    assert outcome.up_output.strip(), "compose up failure must carry its output as evidence"
+    containers, networks = _compose_project_has_leftovers(compose_project(job.id))
+    assert not containers and not networks, f"leftovers: {containers!r} / {networks!r}"

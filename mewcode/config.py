@@ -193,6 +193,10 @@ class RepoConfig:
     #: 验证命令（在 worktree 内执行）；空 = 跳过测试证据环节
     test_command: str = ""
     test_timeout_seconds: int = 300
+    #: 集成测试命令（M2 W4）：仓库含 compose 文件时，服务层先起依赖环境，
+    #: 再在沙箱容器内执行这条命令；空 = 不做集成验证
+    integration_test_command: str = ""
+    integration_timeout_seconds: int = 600
 
 
 @dataclass
@@ -356,6 +360,8 @@ def _load_single_file(path: Path) -> AppConfig:
                 base_branch=entry["base_branch"],
                 test_command=entry["test_command"],
                 test_timeout_seconds=entry["test_timeout_seconds"],
+                integration_test_command=entry["integration_test_command"],
+                integration_timeout_seconds=entry["integration_timeout_seconds"],
             )
             for name, entry in svc["repos"].items()
         },

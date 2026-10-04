@@ -135,6 +135,7 @@ def build_alert_prompt(
     feedback: str = "",
     skills: dict[str, str] | None = None,
     mcp_servers: list[tuple[str, str]] | None = None,
+    integration_command: str = "",
 ) -> str:
     """组装交给 agent 的首轮指令（M1 通用 SOP + M2 规范注入 + 内部工具链）。
 
@@ -144,6 +145,9 @@ def build_alert_prompt(
     ``mcp_servers`` 是 (名字, 说明) 列表：内部工具在工具表里可见，但没人
     告诉 agent "日志不在告警里、要去查"——它就可能直接猜。这一段就是那句
     提醒，只描述"能用什么"，不规定"必须用"。
+    ``integration_command`` 是仓库的集成测试命令（M2 W4）：由服务层自起
+    compose 依赖后执行，agent 自己跑不了（环境里没有 docker），所以只说
+    "保持它能过"，避免它去折腾 docker。
     """
     context = render_alert_context(job)
     logs = extract_logs(job)
@@ -212,6 +216,12 @@ def build_alert_prompt(
     ]
     if test_command:
         sections.append(f"- The repository's test command is: `{test_command}`")
+    if integration_command:
+        sections += [
+            "- The service also runs the repository's integration tests against a",
+            f"  docker-compose environment: `{integration_command}`. You cannot start it",
+            "  yourself (no container runtime here) — just keep it passing.",
+        ]
     sections += [
         "",
         "## Final message format",

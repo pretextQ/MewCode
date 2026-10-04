@@ -107,6 +107,30 @@ class TestServiceSection:
         with pytest.raises(ConfigError, match="must define 'path'"):
             validate_service({"repos": {"demo": {"url": "https://x"}}})
 
+    def test_repo_integration_test_fields(self):
+        """M2 W4：集成测试命令与超时的解析（空 = 不做集成验证）。"""
+        svc = validate_service({
+            "repos": {
+                "demo": {
+                    "path": "/srv/demo",
+                    "integration_test_command": "python test_integration.py",
+                    "integration_timeout_seconds": 120,
+                },
+                "plain": {"path": "/srv/plain"},
+            }
+        })
+        assert svc["repos"]["demo"]["integration_test_command"] == "python test_integration.py"
+        assert svc["repos"]["demo"]["integration_timeout_seconds"] == 120
+        # 未配置时是"不做集成验证"，不是"用默认命令跑点什么"
+        assert svc["repos"]["plain"]["integration_test_command"] == ""
+        assert svc["repos"]["plain"]["integration_timeout_seconds"] == 600
+
+    def test_repo_integration_timeout_must_be_positive(self):
+        with pytest.raises(ConfigError, match="integration_timeout_seconds"):
+            validate_service({
+                "repos": {"demo": {"path": "/srv/demo", "integration_timeout_seconds": 0}}
+            })
+
     def test_invalid_port_rejected(self):
         with pytest.raises(ConfigError, match="port"):
             validate_service({"port": 0})

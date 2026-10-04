@@ -411,6 +411,14 @@ def validate_service(raw_service: dict | None) -> dict:
             "test_timeout_seconds": _positive_int(
                 entry.get("test_timeout_seconds", 300), f"service.repos.{name}.test_timeout_seconds"
             ),
+            "integration_test_command": _optional_str(
+                entry.get("integration_test_command"),
+                f"service.repos.{name}.integration_test_command",
+            ),
+            "integration_timeout_seconds": _positive_int(
+                entry.get("integration_timeout_seconds", 600),
+                f"service.repos.{name}.integration_timeout_seconds",
+            ),
         }
 
     return {
