@@ -902,6 +902,36 @@ class TestSkillInjection:
             assert "Organization skill: org-code-style" not in prompt   # 未启用的不注入
             assert "- `SELF-CHECK:`" not in prompt
 
+    @pytest.mark.asyncio
+    async def test_empty_skills_list_disables_injection(self, tmp_path: Path, demo_repo: Path):
+        """`service.skills: []` = 明确关闭规范注入（M2 验收标准 2 的对比 demo 开关）。"""
+        config = ServiceConfig(
+            data_dir=str(tmp_path / "state"),
+            skills=[],
+            repos={"demo": RepoConfig(name="demo", path=str(demo_repo), test_command=_test_command())},
+        )
+        async with chain_env(tmp_path, demo_repo, publisher=FakePublisher(), config=config) as (store, chain, runner, _):
+            job = await make_job(store)
+            await chain(job)
+            prompt = runner.calls[0]["prompt"]
+            assert "Organization skill" not in prompt
+            assert "SELF-CHECK" not in prompt
+
+    @pytest.mark.asyncio
+    async def test_unset_skills_use_builtin_defaults(self, tmp_path: Path, demo_repo: Path):
+        """未配置（None）与空列表相反：走内置默认包。"""
+        config = ServiceConfig(
+            data_dir=str(tmp_path / "state"),
+            skills=None,
+            repos={"demo": RepoConfig(name="demo", path=str(demo_repo), test_command=_test_command())},
+        )
+        async with chain_env(tmp_path, demo_repo, publisher=FakePublisher(), config=config) as (store, chain, runner, _):
+            job = await make_job(store)
+            await chain(job)
+            prompt = runner.calls[0]["prompt"]
+            assert "Organization skill: incident-triage" in prompt
+            assert "Organization skill: org-code-style" in prompt
+
 
 class TestSelfCheckInPRBody:
     def make_ctx(self, final_text: str):

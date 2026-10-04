@@ -319,7 +319,9 @@ def validate_service(raw_service: dict | None) -> dict:
         "dedup_window_seconds": 1800,
         "data_dir": ".mewcode/service",
         "repo_label": "repository",
-        "skills": [],
+        # None = 未配置（执行链用内置默认 skill 包）；[] = 明确要求不注入任何 skill。
+        # 两者必须可区分：验收标准里的"关闭规范"就是写 skills: []
+        "skills": None,
         "token_budget": 0,
         "mcp_servers": [],
         "notify": {"type": "none", "webhook_url": "", "timeout_seconds": 10},
@@ -363,7 +365,9 @@ def validate_service(raw_service: dict | None) -> dict:
     token_budget = _positive_int(merged["token_budget"], "service.token_budget", minimum=0)
 
     skills = merged["skills"]
-    if not isinstance(skills, list) or not all(isinstance(x, str) for x in skills):
+    if skills is not None and (
+        not isinstance(skills, list) or not all(isinstance(x, str) for x in skills)
+    ):
         raise ConfigError("'service.skills' must be a list of skill names")
 
     # notify 段

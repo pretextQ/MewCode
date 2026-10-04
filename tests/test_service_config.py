@@ -107,6 +107,20 @@ class TestServiceSection:
         with pytest.raises(ConfigError, match="must define 'path'"):
             validate_service({"repos": {"demo": {"url": "https://x"}}})
 
+    def test_skills_three_states(self):
+        """skill 注入三态：未配置 = 默认包；[] = 明确不注入；非空 = 指定清单。
+
+        M2 验收标准 2（规范对比 demo）写的就是 `service.skills: []`——它必须
+        真的关掉注入，而不是"回退默认"。
+        """
+        assert validate_service({})["skills"] is None  # 未配置
+        assert validate_service({"skills": []})["skills"] == []  # 关闭
+        assert validate_service({"skills": ["incident-triage"]})["skills"] == ["incident-triage"]
+
+    def test_skills_non_list_rejected(self):
+        with pytest.raises(ConfigError, match="skills"):
+            validate_service({"skills": "incident-triage"})
+
     def test_repo_integration_test_fields(self):
         """M2 W4：集成测试命令与超时的解析（空 = 不做集成验证）。"""
         svc = validate_service({

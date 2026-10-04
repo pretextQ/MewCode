@@ -238,8 +238,9 @@ class ServiceConfig:
     data_dir: str = ".mewcode/service"
     #: 告警 label 中承载仓库名的键（Alertmanager adapter 使用）
     repo_label: str = "repository"
-    #: 注入提示词的规范类 skill（空 = 用 sop.DEFAULT_SKILLS）
-    skills: list[str] = field(default_factory=list)
+    #: 注入提示词的规范类 skill：None = 未配置（用 sop.DEFAULT_SKILLS）；
+    #: [] = 明确不注入任何 skill（验收标准里"关闭规范"的写法）；非空 = 指定清单
+    skills: list[str] | None = None
     #: 单 job token 预算，0 = 不限制（M1 默认；M3 的成本熔断复用此字段）
     token_budget: int = 0
     notify: NotifyConfig = field(default_factory=NotifyConfig)
@@ -320,7 +321,8 @@ def _load_single_file(path: Path) -> AppConfig:
         dedup_window_seconds=svc["dedup_window_seconds"],
         data_dir=svc["data_dir"],
         repo_label=svc["repo_label"],
-        skills=list(svc["skills"]),
+        # None 与 [] 语义不同（未配置 vs 明确关闭），不能合并成同一个值
+        skills=None if svc["skills"] is None else list(svc["skills"]),
         token_budget=svc["token_budget"],
         notify=NotifyConfig(
             type=svc["notify"]["type"],

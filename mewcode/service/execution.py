@@ -572,8 +572,12 @@ class ExecutionChain:
         return self._managers[repo_root]
 
     def _skill_bodies(self, work_dir: str) -> dict[str, str]:
-        """服务启用的规范正文（仓库自带同名 skill 会自动覆盖内置版）。"""
-        names = self.config.skills or list(sop.DEFAULT_SKILLS)
+        """服务启用的规范正文（仓库自带同名 skill 会自动覆盖内置版）。
+
+        ``service.skills`` 三态：未配置（None）= 内置默认包；``[]`` = 明确不注入
+        （"关闭规范"的对比 demo）；非空列表 = 只注入清单里的。
+        """
+        names = list(sop.DEFAULT_SKILLS) if self.config.skills is None else self.config.skills
         return sop.load_skill_bodies(work_dir, names)
 
     async def _event(self, job_id: str, kind: str, detail: str) -> None:
