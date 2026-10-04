@@ -234,13 +234,132 @@ def validate_teammate_mode(mode: object) -> str:
     return mode
 
 
+VALID_NOTIFY_TYPES = ("none", "slack", "dingtalk", "wecom")
+VALID_VCS_PROVIDERS = ("github", "none")
+
+
+def _positive_int(value: object, field_name: str, minimum: int = 1) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < minimum:
+        raise ConfigError(f"'{field_name}' must be an integer >= {minimum}")
+    return value
+
+
+def _optional_str(value: object, field_name: str) -> str:
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise ConfigError(f"'{field_name}' must be a string")
+    return value
+
+
+def validate_service(raw_service: dict | None) -> dict:
+    """校验 ``service:`` 配置段（M1 无头服务），返回清洗后的字典。
+
+    ``service:`` 缺省时为 None 等价于服务未配置——``mewcode serve`` 会以
+    默认值启动，但需要 repos 路由表的执行链会在运行到具体 job 时拒绝。
+    """
+    defaults: dict = {
+        "host": "127.0.0.1",
+        "port": 8321,
+        "concurrency": 3,
+        "job_timeout_seconds": 1800,
+        "drain_timeout_seconds": 60,
+        "webhook_token": "",
+        "dedup_window_seconds": 1800,
+        "data_dir": ".mewcode/service",
+        "token_budget": 0,
+        "notify": {"type": "none", "webhook_url": "", "timeout_seconds": 10},
+        "vcs": {
+            "provider": "github",
+            "token": "",
+            "api_base": "https://api.github.com",
+            "remote": "origin",
+            "base_branch": "master",
+        },
+        "repos": {},
+    }
+    if raw_service is None:
+        return defaults
+    if not isinstance(raw_service, dict):
+        raise ConfigError("'service' must be a mapping")
+
+    merged = {**defaults, **{k: v for k, v in raw_service.items() if k not in ("notify", "vcs", "repos")}}
+
+    host = _optional_str(merged["host"], "service.host")
+    port = _positive_int(merged["port"], "service.port")
+    if port > 65535:
+        raise ConfigError("'service.port' must be <= 65535")
+    concurrency = _positive_int(merged["concurrency"], "service.concurrency")
+    job_timeout = _positive_int(merged["job_timeout_seconds"], "service.job_timeout_seconds")
+    drain_timeout = _positive_int(merged["drain_timeout_seconds"], "service.drain_timeout_seconds")
+    dedup_window = _positive_int(merged["dedup_window_seconds"], "service.dedup_window_seconds")
+    # 0 = 不设预算（M1 默认）；正数 = 单 job token 上限
+    token_budget = _positive_int(merged["token_budget"], "service.token_budget", minimum=0)
+
+    # notify 段
+    raw_notify = raw_service.get("notify") or {}
+    if not isinstance(raw_notify, dict):
+        raise ConfigError("'service.notify' must be a mapping")
+    notify = {**defaults["notify"], **raw_notify}
+    if notify["type"] not in VALID_NOTIFY_TYPES:
+        raise ConfigError(
+            f"'service.notify.type' must be one of: {', '.join(VALID_NOTIFY_TYPES)}"
+        )
+    notify["webhook_url"] = _optional_str(notify["webhook_url"], "service.notify.webhook_url")
+    notify["timeout_seconds"] = _positive_int(notify["timeout_seconds"], "service.notify.timeout_seconds")
+
+    # vcs 段
+    raw_vcs = raw_service.get("vcs") or {}
+    if not isinstance(raw_vcs, dict):
+        raise ConfigError("'service.vcs' must be a mapping")
+    vcs = {**defaults["vcs"], **raw_vcs}
+    if vcs["provider"] not in VALID_VCS_PROVIDERS:
+        raise ConfigError(
+            f"'service.vcs.provider' must be one of: {', '.join(VALID_VCS_PROVIDERS)}"
+        )
+    for key in ("token", "api_base", "remote", "base_branch"):
+        vcs[key] = _optional_str(vcs[key], f"service.vcs.{key}")
+
+    # repos 路由表：告警 label 'repository' -> 本地 checkout 与远端信息
+    raw_repos = raw_service.get("repos") or {}
+    if not isinstance(raw_repos, dict):
+        raise ConfigError("'service.repos' must be a mapping of name -> repo config")
+    repos: dict = {}
+    for name, entry in raw_repos.items():
+        if not isinstance(entry, dict):
+            raise ConfigError(f"'service.repos.{name}' must be a mapping")
+        if "path" not in entry:
+            raise ConfigError(f"'service.repos.{name}' must define 'path'")
+        repos[name] = {
+            "name": name,
+            "path": _optional_str(entry["path"], f"service.repos.{name}.path"),
+            "url": _optional_str(entry.get("url"), f"service.repos.{name}.url"),
+            "base_branch": _optional_str(entry.get("base_branch"), f"service.repos.{name}.base_branch"),
+        }
+
+    return {
+        "host": host,
+        "port": port,
+        "concurrency": concurrency,
+        "job_timeout_seconds": job_timeout,
+        "drain_timeout_seconds": drain_timeout,
+        "webhook_token": _optional_str(merged["webhook_token"], "service.webhook_token"),
+        "dedup_window_seconds": dedup_window,
+        "data_dir": _optional_str(merged["data_dir"], "service.data_dir"),
+        "token_budget": token_budget,
+        "notify": notify,
+        "vcs": vcs,
+        "repos": repos,
+    }
+
+
 def validate_config_structure(raw: object) -> dict:
     """校验的主入口。校验解析后的原始配置，返回清洗后的字典。
 
     返回的字典包含以下键：
         providers、permission_mode、mcp_servers、hooks、
         enable_fork、enable_verification_agent、worktree、
-        teammate_mode、enable_coordinator_mode
+        teammate_mode、enable_coordinator_mode、service
     """
     if not isinstance(raw, dict) or "providers" not in raw:
         raise ConfigError("Config must contain a 'providers' list")
@@ -259,4 +378,5 @@ def validate_config_structure(raw: object) -> dict:
         "enable_coordinator_mode": validate_bool_field(
             raw.get("enable_coordinator_mode", False), "enable_coordinator_mode"
         ),
+        "service": validate_service(raw.get("service")),
     }

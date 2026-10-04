@@ -147,6 +147,49 @@ class WorktreeConfig:
 
 
 @dataclass
+class NotifyConfig:
+    type: str = "none"
+    webhook_url: str = ""
+    timeout_seconds: int = 10
+
+
+@dataclass
+class VCSConfig:
+    provider: str = "github"
+    # repr=False：traceback / 日志里不得出现明文 token（同 api_key 的处理）。
+    token: str = field(default="", repr=False)
+    api_base: str = "https://api.github.com"
+    remote: str = "origin"
+    base_branch: str = "master"
+
+
+@dataclass
+class RepoConfig:
+    name: str
+    path: str
+    url: str = ""
+    base_branch: str = ""
+
+
+@dataclass
+class ServiceConfig:
+    host: str = "127.0.0.1"
+    port: int = 8321
+    concurrency: int = 3
+    job_timeout_seconds: int = 1800
+    drain_timeout_seconds: int = 60
+    # repr=False：webhook token 与 API key 同级对待，不进日志。
+    webhook_token: str = field(default="", repr=False)
+    dedup_window_seconds: int = 1800
+    data_dir: str = ".mewcode/service"
+    #: 单 job token 预算，0 = 不限制（M1 默认；M3 的成本熔断复用此字段）
+    token_budget: int = 0
+    notify: NotifyConfig = field(default_factory=NotifyConfig)
+    vcs: VCSConfig = field(default_factory=VCSConfig)
+    repos: dict[str, RepoConfig] = field(default_factory=dict)
+
+
+@dataclass
 class AppConfig:
     providers: list[ProviderConfig]
     permission_mode: str = "default"
@@ -157,6 +200,7 @@ class AppConfig:
     worktree: WorktreeConfig = field(default_factory=WorktreeConfig)
     teammate_mode: str = ""
     enable_coordinator_mode: bool = False
+    service: ServiceConfig = field(default_factory=ServiceConfig)
 
 
 def _load_single_file(path: Path) -> AppConfig:
@@ -201,6 +245,40 @@ def _load_single_file(path: Path) -> AppConfig:
         stale_cutoff_hours=wt["stale_cutoff_hours"],
     )
 
+    svc = validated["service"]
+    service_cfg = ServiceConfig(
+        host=svc["host"],
+        port=svc["port"],
+        concurrency=svc["concurrency"],
+        job_timeout_seconds=svc["job_timeout_seconds"],
+        drain_timeout_seconds=svc["drain_timeout_seconds"],
+        webhook_token=svc["webhook_token"],
+        dedup_window_seconds=svc["dedup_window_seconds"],
+        data_dir=svc["data_dir"],
+        token_budget=svc["token_budget"],
+        notify=NotifyConfig(
+            type=svc["notify"]["type"],
+            webhook_url=svc["notify"]["webhook_url"],
+            timeout_seconds=svc["notify"]["timeout_seconds"],
+        ),
+        vcs=VCSConfig(
+            provider=svc["vcs"]["provider"],
+            token=svc["vcs"]["token"],
+            api_base=svc["vcs"]["api_base"],
+            remote=svc["vcs"]["remote"],
+            base_branch=svc["vcs"]["base_branch"],
+        ),
+        repos={
+            name: RepoConfig(
+                name=entry["name"],
+                path=entry["path"],
+                url=entry["url"],
+                base_branch=entry["base_branch"],
+            )
+            for name, entry in svc["repos"].items()
+        },
+    )
+
     return AppConfig(
         providers=providers,
         permission_mode=validated["permission_mode"],
@@ -211,6 +289,7 @@ def _load_single_file(path: Path) -> AppConfig:
         worktree=worktree_cfg,
         teammate_mode=validated["teammate_mode"],
         enable_coordinator_mode=validated["enable_coordinator_mode"],
+        service=service_cfg,
     )
 
 
@@ -238,6 +317,10 @@ def _merge_config(base: AppConfig, override: AppConfig) -> AppConfig:
         base.teammate_mode = override.teammate_mode
     if override.enable_coordinator_mode:
         base.enable_coordinator_mode = True
+    # 与 permission_mode 同样的"非默认才覆盖"语义：解析器无法区分
+    # "配置里没写 service 段" 与 "写了但都是默认值"，一律视为未覆盖。
+    if override.service != ServiceConfig():
+        base.service = override.service
     return base
 
 
