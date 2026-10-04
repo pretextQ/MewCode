@@ -276,6 +276,9 @@ def validate_service(raw_service: dict | None) -> dict:
             "api_base": "https://api.github.com",
             "remote": "origin",
             "base_branch": "master",
+            "ci_poll_interval_seconds": 20,
+            "ci_timeout_seconds": 1800,
+            "ci_none_grace_seconds": 120,
         },
         "repos": {},
     }
@@ -320,6 +323,8 @@ def validate_service(raw_service: dict | None) -> dict:
         )
     for key in ("token", "api_base", "remote", "base_branch"):
         vcs[key] = _optional_str(vcs[key], f"service.vcs.{key}")
+    for key in ("ci_poll_interval_seconds", "ci_timeout_seconds", "ci_none_grace_seconds"):
+        vcs[key] = _positive_int(vcs[key], f"service.vcs.{key}")
 
     # repos 路由表：告警 label 'repository' -> 本地 checkout 与远端信息
     raw_repos = raw_service.get("repos") or {}

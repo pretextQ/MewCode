@@ -61,8 +61,10 @@ async def _serve(service, host: str, port: int, recover: bool = True) -> None:
     from mewcode.service.api import create_app
     from mewcode.service.execution import ExecutionChain, HeadlessAgentRunner
     from mewcode.service.jobs import JobStore
+    from mewcode.service.publisher import GitHubCIGate, PullRequestPublisher
     from mewcode.service.runtime import ServiceRuntime
     from mewcode.service.triggers import build_adapters
+    from mewcode.service.vcs import GitHubVCS
 
     try:
         config = load_config()
@@ -81,7 +83,14 @@ async def _serve(service, host: str, port: int, recover: bool = True) -> None:
     await store.connect()
 
     runner = HeadlessAgentRunner(service, provider, hook_engine=HookEngine(hooks) if hooks else None)
-    chain = ExecutionChain(service, store, runner)
+    vcs = GitHubVCS(service.vcs) if service.vcs.provider == "github" else None
+    chain = ExecutionChain(
+        service,
+        store,
+        runner,
+        publisher=PullRequestPublisher(vcs, store, service) if vcs else None,
+        ci_gate=GitHubCIGate(vcs) if vcs else None,
+    )
     runtime = ServiceRuntime(
         service,
         handler=chain,

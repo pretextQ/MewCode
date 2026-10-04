@@ -161,6 +161,11 @@ class VCSConfig:
     api_base: str = "https://api.github.com"
     remote: str = "origin"
     base_branch: str = "master"
+    #: CI 轮询间隔与总超时
+    ci_poll_interval_seconds: int = 20
+    ci_timeout_seconds: int = 1800
+    #: 推上去多久还没有任何 CI 检查就认为该仓库没配 CI（不阻塞、但记录在案）
+    ci_none_grace_seconds: int = 120
 
 
 @dataclass
@@ -273,6 +278,9 @@ def _load_single_file(path: Path) -> AppConfig:
             api_base=svc["vcs"]["api_base"],
             remote=svc["vcs"]["remote"],
             base_branch=svc["vcs"]["base_branch"],
+            ci_poll_interval_seconds=svc["vcs"]["ci_poll_interval_seconds"],
+            ci_timeout_seconds=svc["vcs"]["ci_timeout_seconds"],
+            ci_none_grace_seconds=svc["vcs"]["ci_none_grace_seconds"],
         ),
         repos={
             name: RepoConfig(

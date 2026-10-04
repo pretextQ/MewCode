@@ -97,6 +97,14 @@ class Publisher(Protocol):
     async def publish(self, job: Job, context: ExecutionContext) -> PublishResult: ...
 
 
+class CIGate(Protocol):
+    """CI 门禁：等远端 checks 出结论（W4 实现）。"""
+
+    async def wait(
+        self, job: Job, context: ExecutionContext, published: PublishResult
+    ) -> Any: ...
+
+
 @dataclass
 class ExecutionContext:
     """执行链产物 = 交给 publisher 的证据链（PR body 的原料）。"""
@@ -292,6 +300,7 @@ class ExecutionChain:
         *,
         test_runner: TestRunner | None = None,
         publisher: Publisher | None = None,
+        ci_gate: CIGate | None = None,
         notifier: Any = None,
         worktree_manager_factory: Callable[[str], Any] | None = None,
     ) -> None:
@@ -300,6 +309,7 @@ class ExecutionChain:
         self.runner = runner
         self.test_runner = test_runner or TestRunner()
         self.publisher = publisher
+        self.ci_gate = ci_gate
         self.notifier = notifier
         self._worktree_manager_factory = worktree_manager_factory
         self._managers: dict[str, Any] = {}
@@ -392,18 +402,47 @@ class ExecutionChain:
             return
         baseline = await self._run_tests(job, repo, work_dir, phase="baseline")
 
-        # --- fixing ⇄ verifying：有界修复-验证循环 ---
+        # --- 修复 → 验证 → 发布 → CI 门禁 ---
+        # 外层循环处理"CI 红了"：带着 CI 失败信息回到 fixing 重来，
+        # 重试预算仍由状态机的 attempts 上限强制（超限由内层 escalate）。
         feedback = ""
-        attempt = 1
         while True:
-            fixing = await self._transition(job.id, "fixing", reason=f"agent run (attempt {attempt})")
+            context = await self._fix_and_verify(job, repo, worktree, baseline, feedback)
+            if context is None:
+                return
+
+            published = await self._publish(job, context)
+            if published is None:
+                return
+
+            status = await self._ci_gate(job, context, published)
+            if status is None:
+                return
+            feedback = f"CI failed after the push: {status.details}"
+            await self._event(job.id, "ci_retry", feedback)
+
+    # -- 阶段实现 ---------------------------------------------------------
+
+    async def _fix_and_verify(
+        self,
+        job: Job,
+        repo: RepoConfig,
+        worktree: Any,
+        baseline: TestOutcome | None,
+        feedback: str,
+    ) -> ExecutionContext | None:
+        """有界修复-验证循环。返回证据上下文；任何失败路径都返回 None（已收尾）。"""
+        work_dir = worktree.path
+        while True:
+            kind = "retry" if feedback else "new"
+            fixing = await self._transition(job.id, "fixing", reason=f"agent run ({kind})")
             if fixing is None:
                 await self._escalate(
                     job.id,
-                    f"fix retry ceiling reached after {attempt - 1} attempt(s); "
-                    "escalating instead of looping",
+                    "fix retry ceiling reached; escalating instead of looping",
                 )
-                return
+                return None
+            attempt = fixing.attempts
 
             prompt = sop.build_alert_prompt(
                 job,
@@ -420,13 +459,13 @@ class ExecutionChain:
                 outcome = await self.runner.run(job, work_dir, prompt, self._make_on_event(job))
             except TokenBudgetExceeded as e:
                 await self._escalate(job.id, f"cost guard: {e}")
-                return
+                return None
             except asyncio.CancelledError:
                 raise
             except Exception as e:
                 await self._event(job.id, "agent_error", f"{type(e).__name__}: {e}")
                 await self._escalate(job.id, f"agent run failed: {type(e).__name__}: {e}")
-                return
+                return None
 
             await self.store.update(job.id, result=outcome.final_text[:MAX_EVIDENCE_CHARS])
             await self._event(
@@ -442,17 +481,27 @@ class ExecutionChain:
                 await self._transition(
                     job.id, "cant_repro", reason="agent produced no code changes; nothing to publish"
                 )
-                return
+                return None
 
             if await self._transition(job.id, "verifying", reason="re-running tests after fix") is None:
-                return
+                return None
             verify = await self._run_tests(job, repo, work_dir, phase="verify")
             if verify is not None and baseline is not None:
                 await self._event(
                     job.id, "test_delta", f"before: {baseline.summary()} / after: {verify.summary()}"
                 )
             if verify is None or verify.passed:
-                break
+                return ExecutionContext(
+                    repo=repo,
+                    work_dir=work_dir,
+                    prompt=prompt,
+                    agent=outcome,
+                    changed_files=changed_files,
+                    diff=diff,
+                    baseline_test=baseline,
+                    verify_test=verify,
+                    attempts=attempt,
+                )
 
             # 验证失败：记录后重试（是否允许重试由状态机的 attempts 上限决定）
             failed = await self._transition(
@@ -460,40 +509,26 @@ class ExecutionChain:
             )
             if failed is None:
                 await self._escalate(job.id, f"verification failed: {verify.summary()}")
-                return
+                return None
             if failed.attempts >= self.store.max_fix_attempts:
                 await self._escalate(
                     job.id,
                     f"verification still failing after {failed.attempts} attempt(s): {verify.summary()}",
                 )
-                return
+                return None
 
             feedback = (verify.output or "")[-MAX_FEEDBACK_CHARS:]
-            await self._event(
-                job.id, "verification_retry", f"retrying fix with test output (attempt {attempt + 1})"
-            )
-            attempt += 1
+            await self._event(job.id, "verification_retry", f"retrying fix with test output (attempt {attempt + 1})")
 
-        context = ExecutionContext(
-            repo=repo,
-            work_dir=work_dir,
-            prompt=prompt,
-            agent=outcome,
-            changed_files=changed_files,
-            diff=diff,
-            baseline_test=baseline,
-            verify_test=verify,
-            attempts=attempt,
-        )
-
-        # --- 发布（W4）：未配置发布器时不假装成功 ---
+    async def _publish(self, job: Job, context: ExecutionContext) -> PublishResult | None:
+        """发布并落 pr_opened；未配置/失败都不假装成功。"""
         if self.publisher is None:
             await self._escalate(
                 job.id,
-                "fix verified but no publisher is configured (PR publishing lands in W4); "
-                f"changes kept in worktree: {', '.join(changed_files[:10])}",
+                "fix verified but no publisher is configured; "
+                f"changes kept in worktree: {', '.join(context.changed_files[:10])}",
             )
-            return
+            return None
 
         try:
             published = await self.publisher.publish(job, context)
@@ -502,18 +537,65 @@ class ExecutionChain:
         except Exception as e:
             await self._event(job.id, "publish_error", f"{type(e).__name__}: {e}")
             await self._escalate(job.id, f"publishing failed: {type(e).__name__}: {e}")
-            return
+            return None
 
         for kind, detail in published.extra_events:
             await self._event(job.id, kind, detail)
-        await self._transition(
+        if await self._transition(
             job.id,
             "pr_opened",
             reason=f"PR opened for branch {published.branch}",
             pr_url=published.pr_url,
             branch=published.branch,
-        )
+        ) is None:
+            return None
         await self._notify(job.id, "pr_opened", published.pr_url)
+        return published
+
+    async def _ci_gate(
+        self, job: Job, context: ExecutionContext, published: PublishResult
+    ) -> Any | None:
+        """等 CI 结论。返回失败状态表示"可重试"，None 表示已收尾。"""
+        if self.ci_gate is None:
+            return None
+
+        if await self._transition(job.id, "ci_gate", reason="watching CI checks") is None:
+            return None
+        try:
+            status = await self.ci_gate.wait(job, context, published)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            await self._event(job.id, "ci_error", f"{type(e).__name__}: {e}")
+            await self._escalate(job.id, f"CI polling failed: {type(e).__name__}: {e}")
+            return None
+
+        await self.store.update(job.id, ci_status=status.state)
+        await self._event(job.id, "ci_status", f"{status.state}: {status.details}")
+
+        if status.state in ("success", "none"):
+            if await self._transition(
+                job.id,
+                "human_review",
+                reason=f"CI {status.state}: {status.details}",
+                ci_status=status.state,
+            ) is None:
+                return None
+            await self._notify(job.id, "human_review", status.details)
+            return None
+
+        if status.is_failure:
+            failed = await self._transition(
+                job.id, "ci_failed", reason=f"CI failed: {status.details}", ci_status="failure"
+            )
+            if failed is None:
+                await self._escalate(job.id, f"CI failed: {status.details}")
+                return None
+            return status
+
+        # 超时未出结论：不假装成功，交给人
+        await self._escalate(job.id, f"CI did not conclude: {status.details}")
+        return None
 
     # -- 内部 -------------------------------------------------------------
 

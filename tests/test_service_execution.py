@@ -610,3 +610,125 @@ class TestHeadlessRunnerBudget:
         with pytest.raises(RuntimeError):
             await runner.run(job, str(tmp_path), "prompt", lambda e: None)
         assert cancelled["done"] is True
+
+
+# =========================================================================
+# G. CI 门禁（W4）：绿 -> human_review；红 -> 带信息重试；超时不假装成功
+# =========================================================================
+
+class FakeCIGate:
+    """按脚本返回 CI 结论；记录调用次数。"""
+
+    def __init__(self, states: list[str]) -> None:
+        self.states = states
+        self.calls = 0
+
+    async def wait(self, job, context, published):
+        from mewcode.service.vcs import CheckStatus
+
+        state = self.states[min(self.calls, len(self.states) - 1)]
+        self.calls += 1
+        if state == "boom":
+            raise RuntimeError("github api unreachable")
+        details = {"success": "all 2 checks passed", "failure": "failing checks: pytest",
+                   "pending": "CI did not conclude within 1800s", "none": "no check runs"}[state]
+        return CheckStatus(state=state, details=details)
+
+
+@asynccontextmanager
+async def ci_env(tmp_path: Path, repo: Path, states: list[str], scripts=None, publisher=None):
+    store = JobStore(tmp_path / "jobs.db")
+    await store.connect()
+    service = ServiceConfig(
+        data_dir=str(tmp_path / "state"),
+        repos={"demo": RepoConfig(name="demo", path=str(repo), test_command=_test_command())},
+    )
+    runner = FakeRunner(scripts)
+    gate = FakeCIGate(states)
+    chain = ExecutionChain(
+        service, store, runner, publisher=publisher or FakePublisher(), ci_gate=gate, test_runner=TestRunner()
+    )
+    try:
+        yield store, chain, runner, gate
+    finally:
+        await store.close()
+
+
+class TestCIGate:
+    @pytest.mark.asyncio
+    async def test_green_ci_reaches_human_review(self, tmp_path: Path, demo_repo: Path):
+        async with ci_env(tmp_path, demo_repo, ["success"]) as (store, chain, _, gate):
+            job = await make_job(store)
+            await chain(job)
+            final = await store.get_or_raise(job.id)
+            assert final.status == "human_review"
+            assert final.ci_status == "success"
+            assert final.pr_url
+            assert gate.calls == 1
+            kinds = {e.kind for e in await store.events(job.id)}
+            assert "ci_status" in kinds
+
+    @pytest.mark.asyncio
+    async def test_ci_failure_retries_then_succeeds(self, tmp_path: Path, demo_repo: Path):
+        """CI 红 -> 带失败信息重跑 agent -> 再次发布 -> 绿。"""
+        async with ci_env(
+            tmp_path, demo_repo, ["failure", "success"], scripts=[CALC_FIXED, CALC_FIXED]
+        ) as (store, chain, runner, gate):
+            job = await make_job(store)
+            await chain(job)
+
+            final = await store.get_or_raise(job.id)
+            assert final.status == "human_review"
+            assert final.attempts == 2
+            assert len(runner.calls) == 2
+            assert gate.calls == 2
+            # 第二次的提示词带上了 CI 失败信息
+            assert "CI failed" in runner.calls[1]["prompt"]
+            events = await store.events(job.id)
+            assert any(e.kind == "ci_retry" for e in events)
+            assert any("ci_failed" in e.detail for e in events)
+
+    @pytest.mark.asyncio
+    async def test_ci_failure_exhausts_retries_and_escalates(self, tmp_path: Path, demo_repo: Path):
+        async with ci_env(tmp_path, demo_repo, ["failure"]) as (store, chain, runner, _):
+            job = await make_job(store)
+            await chain(job)
+            final = await store.get_or_raise(job.id)
+            assert final.status == "escalate"
+            assert final.attempts == store.max_fix_attempts
+            assert len(runner.calls) == store.max_fix_attempts
+
+    @pytest.mark.asyncio
+    async def test_ci_timeout_escalates_not_pretend_success(self, tmp_path: Path, demo_repo: Path):
+        async with ci_env(tmp_path, demo_repo, ["pending"]) as (store, chain, _, _):
+            job = await make_job(store)
+            await chain(job)
+            final = await store.get_or_raise(job.id)
+            assert final.status == "escalate"
+            assert "did not conclude" in final.last_error
+
+    @pytest.mark.asyncio
+    async def test_repo_without_ci_does_not_block(self, tmp_path: Path, demo_repo: Path):
+        async with ci_env(tmp_path, demo_repo, ["none"]) as (store, chain, _, _):
+            job = await make_job(store)
+            await chain(job)
+            final = await store.get_or_raise(job.id)
+            assert final.status == "human_review"
+            assert final.ci_status == "none"
+
+    @pytest.mark.asyncio
+    async def test_ci_polling_error_escalates(self, tmp_path: Path, demo_repo: Path):
+        async with ci_env(tmp_path, demo_repo, ["boom"]) as (store, chain, _, _):
+            job = await make_job(store)
+            await chain(job)
+            final = await store.get_or_raise(job.id)
+            assert final.status == "escalate"
+            assert "CI polling failed" in final.last_error
+
+    @pytest.mark.asyncio
+    async def test_no_ci_gate_stops_at_pr_opened(self, tmp_path: Path, demo_repo: Path):
+        """未配置门禁时停在 pr_opened（等待外部流程），不擅自判定成功。"""
+        async with chain_env(tmp_path, demo_repo, publisher=FakePublisher()) as (store, chain, _, _):
+            job = await make_job(store)
+            await chain(job)
+            assert (await store.get_or_raise(job.id)).status == "pr_opened"
