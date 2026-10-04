@@ -1,0 +1,49 @@
+........................................................................ [  7%]
+........................................................................ [ 15%]
+........................................................................ [ 22%]
+........................................................................ [ 30%]
+........................................................................ [ 37%]
+.................ssssssssssss.s......................................... [ 45%]
+........................................................................ [ 52%]
+........................................................................ [ 60%]
+........................................................................ [ 67%]
+...................................s.................................... [ 75%]
+........................................................................ [ 82%]
+........................................................................ [ 90%]
+.................F...................................................... [ 97%]
+......................                                                   [100%]
+=================================== FAILURES ===================================
+______________________ test_send_message_reentrancy_guard ______________________
+
+app_factory = <function app_factory.<locals>._make at 0x7ff70ccec9a0>
+
+    @pytest.mark.asyncio
+    async def test_send_message_reentrancy_guard(app_factory):
+        """快速双触发 _send_message：只有第一个实例运行。"""
+        client = _SlowClient()
+        app = app_factory(client)
+        async with app.run_test() as _pilot:
+            agent = _SlowAgent()
+            app.agent = agent
+    
+            t1 = asyncio.create_task(app._send_message("hello"))
+            await asyncio.sleep(0.1)
+            # 第一个在跑（流式位已置）
+            assert app._streaming is True
+            seen: list[str] = []
+            app._show_system_message = lambda text: seen.append(text)
+    
+            # 第二个立即返回，不并行
+            await app._send_message("hello again")
+            assert any("忽略重复请求" in s for s in seen)
+>           assert agent.runs == 1, f"第二个实例启动了新的 agent 循环: {agent.runs}"
+E           AssertionError: 第二个实例启动了新的 agent 循环: 0
+E           assert 0 == 1
+E            +  where 0 = <test_tui_hardening._SlowAgent object at 0x7ff70cb379b0>.runs
+
+tests/test_tui_hardening.py:106: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_tui_hardening.py::test_send_message_reentrancy_guard - AssertionError: 第二个实例启动了新的 agent 循环: 0
+assert 0 == 1
+ +  where 0 = <test_tui_hardening._SlowAgent object at 0x7ff70cb379b0>.runs
+1 failed, 943 passed, 14 skipped in 29.98s
