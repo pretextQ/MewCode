@@ -126,3 +126,34 @@ class TestModuleEntry:
 
         assert callable(m.main)
         assert Path(m.__file__).name == "__main__.py"
+
+
+class TestHeadlessOutputFormat:
+    """`-p` 的机器可读输出：服务层的沙箱执行靠它回读结果与用量。"""
+
+    def _dispatch(self, monkeypatch, argv: list[str]) -> dict:
+        """跑一次 main() 的 -p 分支，捕获 _run_prompt 的调用参数。"""
+        captured: dict = {}
+
+        async def fake_run_prompt(config, mode, hooks, prompt, output_format="text"):
+            captured.update(prompt=prompt, output_format=output_format)
+
+        monkeypatch.setattr("mewcode.__main__._run_prompt", fake_run_prompt)
+        monkeypatch.setattr("mewcode.__main__.load_config", lambda: make_config(ServiceConfig()))
+        monkeypatch.setattr("mewcode.__main__.load_hooks", lambda raw: [])
+        monkeypatch.setattr(sys, "argv", argv)
+        main()
+        return captured
+
+    def test_default_is_text(self, monkeypatch):
+        assert self._dispatch(monkeypatch, ["mewcode", "-p", "do it"])["output_format"] == "text"
+
+    def test_json_format_selected(self, monkeypatch):
+        captured = self._dispatch(monkeypatch, ["mewcode", "-p", "do it", "--output-format", "json"])
+        assert captured["output_format"] == "json"
+        assert captured["prompt"] == "do it"
+
+    def test_invalid_format_rejected(self, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["mewcode", "-p", "x", "--output-format", "yaml"])
+        with pytest.raises(SystemExit):
+            main()

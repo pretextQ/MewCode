@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import sys
@@ -168,6 +169,13 @@ def main() -> None:
         default=None,
         help="Run non-interactively: execute the prompt and print the result to stdout",
     )
+    parser.add_argument(
+        "--output-format",
+        choices=["text", "json"],
+        default="text",
+        help="Non-interactive output format: 'text' (default) prints the result, "
+        "'json' prints a machine-readable summary (result, usage, tool calls)",
+    )
     args = parser.parse_args()
 
     try:
@@ -188,7 +196,7 @@ def main() -> None:
     hook_engine = HookEngine(hooks) if hooks else None
 
     if args.p is not None:
-        asyncio.run(_run_prompt(config, permission_mode, hook_engine, args.p))
+        asyncio.run(_run_prompt(config, permission_mode, hook_engine, args.p, args.output_format))
         return
 
     from mewcode.app import MewCodeApp
@@ -209,7 +217,7 @@ def main() -> None:
     app.run()
 
 
-async def _run_prompt(config, permission_mode, hook_engine, prompt: str) -> None:
+async def _run_prompt(config, permission_mode, hook_engine, prompt: str, output_format: str = "text") -> None:
     from mewcode.agent import Agent
     from mewcode.agents.loader import AgentLoader
     from mewcode.agents.task_manager import TaskManager
@@ -314,8 +322,19 @@ async def _run_prompt(config, permission_mode, hook_engine, prompt: str) -> None
     agent.notification_fn = drain_mailbox_only
 
     conv = ConversationManager()
-    last_result = await agent.run_to_completion(prompt, conv)
-    print(last_result, flush=True)
+    counters = {"tool_calls": 0}
+    json_mode = output_format == "json"
+
+    def _on_event(event: dict) -> None:
+        if event.get("type") == "tool_use":
+            counters["tool_calls"] += 1
+
+    if json_mode:
+        # JSON 模式只输出最后一份摘要，中间过程不落 stdout
+        last_result = await agent.run_to_completion(prompt, conv, event_callback=_on_event)
+    else:
+        last_result = await agent.run_to_completion(prompt, conv)
+        print(last_result, flush=True)
 
     # 门控改为 TaskManager 的公开接口：仅用 AgentTool 后台任务（无 team）
     # 的运行此前会直接 return，asyncio.run 退出时在途任务被整体取消
@@ -325,13 +344,28 @@ async def _run_prompt(config, permission_mode, hook_engine, prompt: str) -> None
             for note in notes:
                 conv.add_system_reminder(note)
             last_result = await agent.run_to_completion(
-                "Teammate notifications received. Process them and continue.", conv
+                "Teammate notifications received. Process them and continue.", conv,
+                event_callback=_on_event if json_mode else None,
             )
-            print(last_result, flush=True)
+            if not json_mode:
+                print(last_result, flush=True)
             continue
         if not task_manager.has_pending_work():
             break
         await asyncio.sleep(2)
+
+    if json_mode:
+        # 机器可读摘要：服务层（含容器内沙箱执行）依赖它回读 agent 结果与用量
+        payload = {
+            "result": last_result,
+            "usage": {
+                "inputTokens": agent.total_input_tokens,
+                "outputTokens": agent.total_output_tokens,
+            },
+            "toolCalls": counters["tool_calls"],
+            "sessionId": agent.session_id,
+        }
+        print(json.dumps(payload, ensure_ascii=False), flush=True)
 
 
 if __name__ == "__main__":
