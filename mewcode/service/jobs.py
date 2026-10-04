@@ -489,6 +489,19 @@ class JobStore:
 
             return await asyncio.to_thread(_do)
 
+    async def count_by_status(self) -> dict[str, int]:
+        """各状态的 job 数量（healthz 的观测口径）。"""
+        async with self._lock:
+            conn = self._require_conn()
+
+            def _do() -> dict[str, int]:
+                rows = conn.execute(
+                    "SELECT status, COUNT(*) AS n FROM jobs GROUP BY status"
+                ).fetchall()
+                return {r["status"]: r["n"] for r in rows}
+
+            return await asyncio.to_thread(_do)
+
     async def list_unfinished(self) -> list[Job]:
         """所有非终态 job（服务重启时的恢复输入）。"""
         async with self._lock:

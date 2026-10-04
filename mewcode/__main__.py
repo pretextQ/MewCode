@@ -13,6 +13,96 @@ from mewcode.hooks import HookConfigError, HookEngine, load_hooks
 from mewcode.permissions import PermissionMode
 
 
+def _is_loopback(host: str) -> bool:
+    return host in ("127.0.0.1", "localhost", "::1")
+
+
+def _serve_main(argv: list[str]) -> None:
+    """``mewcode serve``：无头服务入口（M1）。"""
+    parser = argparse.ArgumentParser(prog="mewcode serve", description="Run the alert-driven service")
+    parser.add_argument("--host", default=None, help="bind address (overrides service.host)")
+    parser.add_argument("--port", type=int, default=None, help="bind port (overrides service.port)")
+    parser.add_argument("--data-dir", default=None, help="state dir (overrides service.data_dir)")
+    parser.add_argument(
+        "--no-recover",
+        action="store_true",
+        help="do not re-queue unfinished jobs found in the store on startup",
+    )
+    args = parser.parse_args(argv)
+
+    try:
+        config = load_config()
+    except ConfigError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    service = config.service
+    host = args.host or service.host
+    port = args.port or service.port
+    if args.data_dir:
+        service.data_dir = args.data_dir
+
+    # 无 token 的写端点只允许回环监听：告警 webhook 会触发自动改代码，
+    # 裸奔在 0.0.0.0 上等于把"无人值守的 shell"挂到公网。
+    if not _is_loopback(host) and not service.webhook_token:
+        print(
+            f"Error: refusing to bind {host} without service.webhook_token configured; "
+            "set a token or bind to 127.0.0.1",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    asyncio.run(_serve(service, host, port, recover=not args.no_recover))
+
+
+async def _serve(service, host: str, port: int, recover: bool = True) -> None:
+    from aiohttp import web
+
+    from mewcode.service.api import create_app
+    from mewcode.service.runtime import ServiceRuntime, unconfigured_handler
+
+    runtime = ServiceRuntime(service, handler=unconfigured_handler)
+    await runtime.start(recover=recover)
+
+    adapters: dict = {}  # W2 接入 alertmanager / manual 适配器
+    app = create_app(runtime, adapters)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host, port)
+    await site.start()
+    print(f"mewcode service listening on http://{host}:{port}", flush=True)
+
+    stop = asyncio.Event()
+    _install_signal_handlers(stop)
+    try:
+        await stop.wait()
+    finally:
+        print("shutting down: draining in-flight jobs...", flush=True)
+        await runtime.stop()
+        await runner.cleanup()
+
+
+def _install_signal_handlers(stop: asyncio.Event) -> None:
+    """SIGINT/SIGTERM → 置位停止事件。
+
+    不经 KeyboardInterrupt（那样在 Windows 上会让清理逻辑走取消路径），
+    由主线程信号处理器直接唤醒事件循环。
+    """
+    import signal
+
+    loop = asyncio.get_running_loop()
+
+    def _on_signal(signum, frame):  # pragma: no cover - 由信号触发
+        loop.call_soon_threadsafe(stop.set)
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            signal.signal(sig, _on_signal)
+        except (ValueError, OSError):  # 非主线程等场景：退化为默认行为
+            pass
+
+
 def main() -> None:
     # 先确保 .mewcode/ 目录存在，否则下面写 debug.log 会因目录不存在而崩溃
     Path(".mewcode").mkdir(parents=True, exist_ok=True)
@@ -22,6 +112,10 @@ def main() -> None:
         filename=".mewcode/debug.log",
         filemode="w",
     )
+
+    if len(sys.argv) > 1 and sys.argv[1] == "serve":
+        _serve_main(sys.argv[2:])
+        return
 
     parser = argparse.ArgumentParser(prog="mewcode", description="MewCode AI coding assistant")
     parser.add_argument(
