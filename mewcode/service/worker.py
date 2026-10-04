@@ -161,14 +161,28 @@ class WorkerPool:
         except TimeoutError:
             await self._escalate_safely(job_id, f"job timeout after {self.job_timeout:.0f}s")
         except asyncio.CancelledError:
-            # 优雅退出的兜底：等待 drain 超时后消费者被取消。错误现场先落库再重新抛出。
-            await asyncio.shield(self._escalate_safely(job_id, "cancelled during service shutdown"))
+            # 优雅退出的兜底：drain 超时后消费者被取消。保留原状态、只落一条中断事件——
+            # 服务重启时 requeue_unfinished 会把它从最后状态捡起来继续跑；若这里
+            # escalate，job 就变成"需要人工介入"，重启恢复永远轮不到它。
+            await asyncio.shield(self._record_interruption(job_id))
             raise
         except Exception as e:  # handler 的任何异常都不能让 job 卡在中间态
             log.exception("worker %d: handler failed for %s", index, job_id)
             await self._escalate_safely(job_id, f"{type(e).__name__}: {e}")
         finally:
             self._in_flight.discard(job_id)
+
+    async def _record_interruption(self, job_id: str) -> None:
+        """记录中断现场而不改状态（供重启恢复接续）。"""
+        try:
+            job = await self.store.get(job_id)
+            if job is None or job.is_terminal:
+                return
+            await self.store.add_event(
+                job_id, "interrupted", f"cancelled during service shutdown (status={job.status})"
+            )
+        except JobStoreError as e:  # pragma: no cover - 落库失败只能记日志
+            log.error("failed to record interruption for %s: %s", job_id, e)
 
     async def _escalate_safely(self, job_id: str, reason: str) -> None:
         job = await self.store.get(job_id)

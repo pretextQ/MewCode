@@ -25,15 +25,6 @@ from .worker import JobHandler, WorkerPool
 log = logging.getLogger(__name__)
 
 
-async def unconfigured_handler(job: Job) -> None:
-    """W1 占位执行链：服务能收单、落库、可观测，但还没有执行内核。
-
-    抛错而不是静默返回——worker 会把 job 收敛到 escalate 并记录原因，
-    job 不会卡在 received 假装"在处理"。W3 用真实执行链替换这一注入点。
-    """
-    raise RuntimeError("execution chain not configured (agent wiring lands in W3)")
-
-
 @dataclass
 class IntakeResult:
     """一次 intake 的结果：新入队的 job 与合并到已有 job 的告警。"""

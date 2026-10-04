@@ -179,7 +179,8 @@ class TestGracefulShutdown:
             assert not pool.running
 
     @pytest.mark.asyncio
-    async def test_stop_cancels_stragglers_and_escalates(self, tmp_path: Path):
+    async def test_stop_cancels_stragglers_without_terminalising_them(self, tmp_path: Path):
+        """drain 超时被取消：只落中断事件、不改状态——重启恢复要靠它保持未完结。"""
         async with open_store(tmp_path / "jobs.db") as store:
             started = asyncio.Event()
 
@@ -195,8 +196,36 @@ class TestGracefulShutdown:
 
             await pool.stop(drain_timeout=0.2)  # drain 超时 -> 取消在途
             final = await store.get_or_raise(job.id)
-            assert final.status == "escalate"
-            assert "shutdown" in final.last_error
+            assert final.status == "received"          # 状态保留，未变终态
+            assert not final.is_terminal
+            events = await store.events(job.id)
+            assert any(e.kind == "interrupted" for e in events)
+
+    @pytest.mark.asyncio
+    async def test_interrupted_job_is_recovered_on_restart(self, tmp_path: Path):
+        """被取消的 job 在下一次启动时由 requeue_unfinished 接续（验收标准 3）。"""
+        async with open_store(tmp_path / "jobs.db") as store:
+            job = await make_job(store)
+            await store.transition(job.id, "triaging")
+            await store.transition(job.id, "reproducing")
+            await store.transition(job.id, "fixing")
+            await store.add_event(job.id, "interrupted", "cancelled during service shutdown")
+
+            seen: list[str] = []
+
+            async def handler(j):
+                seen.append(j.status)
+
+            pool = WorkerPool(store, handler, concurrency=1, job_timeout=5)
+            await pool.start()
+            try:
+                assert await pool.requeue_unfinished() == 1
+                await asyncio.wait_for(pool._queue.join(), timeout=5)
+            finally:
+                await pool.stop(drain_timeout=1)
+            assert seen == ["received"]
+            kinds = {e.kind for e in await store.events(job.id)}
+            assert {"interrupted", "recovery_reset", "recovered"} <= kinds
 
     @pytest.mark.asyncio
     async def test_stop_is_idempotent(self, tmp_path: Path):
