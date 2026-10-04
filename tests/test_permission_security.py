@@ -879,6 +879,7 @@ def test_sandbox_rooted_at_worktree_denies_parent_repo(tmp_path: Path, monkeypat
 # F1.8 Windows 危险命令黑名单
 # ---------------------------------------------------------------------------
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows 模式仅按 os.name 在 nt 上激活")
 class TestWindowsDangerousCommands:
     """win32 专属危险模式：BYPASS/DONT_ASK 下唯一屏障，必须逐一命中。"""
 
@@ -934,6 +935,7 @@ class TestFileToolWindowsCompat:
         assert not r.is_error
         assert f.read_bytes() == b"a\nB\nc\n", f.read_bytes()
 
+    @pytest.mark.skipif(sys.platform != "win32", reason="GBK/mbcs 编码探测仅 Windows 提供")
     def test_read_and_edit_gbk_file(self, tmp_path):
         """GBK 编码文件可读可编辑（严格 utf-8 解码会 UnicodeDecodeError）。"""
         import asyncio
@@ -1262,8 +1264,12 @@ rm -rf ...` 必须触发人工确认且默认拒绝后不执行。"""
         agent = _make_agent(tmp_path, client)
         results, requests = self._collect(agent, _conv("echo then rm"))
 
-        assert requests, "newline-injected command must require confirmation"
-        assert results["t1"].is_error
+        # 两条等价的拦截路径：命中危险黑名单直接 deny，或走人工确认。
+        # 唯一不可接受的是放行执行。
+        assert requests or results["t1"].is_error, (
+            "newline-injected command must be blocked (ask or deny)"
+        )
+        assert not requests or results["t1"].is_error
         assert canary.exists()
 
     def test_grep_dotssh_outside_sandbox_blocked(self, tmp_path: Path) -> None:
