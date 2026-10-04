@@ -243,7 +243,11 @@ class HeadlessAgentRunner:
         )
         return Agent(
             client=create_client(self.provider),
-            registry=create_default_registry(),
+            # bind_work_dir 是隔离的关键：不绑定的话 Bash 的 cwd 是本进程的
+            # 工作目录（服务启动目录），命令会跑在**主仓库**而不是 job 的
+            # worktree 里，相对路径工具同理。CLI 场景 cwd 恰好等于 work_dir，
+            # 掩盖了这一点；服务场景必须显式绑定（真机验收时实测踩到）。
+            registry=create_default_registry().bind_work_dir(work_dir),
             protocol=self.provider.protocol,
             work_dir=work_dir,
             permission_checker=checker,

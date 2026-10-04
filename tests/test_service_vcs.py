@@ -22,6 +22,7 @@ from mewcode.service.publisher import (
     PullRequestPublisher,
     build_pr_body,
     build_pr_title,
+    filter_timeline,
     parse_agent_report,
 )
 from mewcode.service.vcs import (
@@ -356,7 +357,7 @@ def make_context(work_dir: str = "/tmp/wt") -> ExecutionContext:
 
 class TestPRBody:
     def test_body_has_all_required_sections(self):
-        body = build_pr_body(make_job_stub(), make_context(), [("2026-10-04T10:00:00Z", "worktree_ready")])
+        body = build_pr_body(make_job_stub(), make_context(), [("2026-10-04T10:00:00Z", "worktree_ready", "path=/wt")])
         for heading in ("## 告警摘要", "## 根因分析", "## 修复说明", "## 测试证据", "## 审计记录"):
             assert heading in body, f"missing section {heading}"
         assert "5xx 比例 12%" in body            # 告警证据
@@ -536,3 +537,32 @@ class TestCredentialHygiene:
         vcs._remote_transport = lambda wd: _noop(("https", "credential-host-with-no-creds.invalid"))  # type: ignore[method-assign]
         with pytest.raises(VCSAuthError):
             await vcs.resolve_token()
+
+
+class TestPRBodyTimeline:
+    """PR body 的审计表只放状态推进与验证证据，不放 agent 运行细节。"""
+
+    def test_noise_events_filtered_out(self):
+        timeline = [
+            ("t1", "created", "status=received repo=demo"),
+            ("t2", "agent_prompt", "You are an on-call engineer... (huge)"),
+            ("t3", "agent_tool_use", "Bash: ls -la"),
+            ("t4", "agent_usage", "in=1000 out=200"),
+            ("t5", "transition", "fixing -> verifying: re-running tests"),
+            ("t6", "verify_tests", "pytest -q → exit 0"),
+            ("t7", "ci_status", "success: all checks passed"),
+        ]
+        body = build_pr_body(make_job_stub(), make_context(), timeline)
+        assert "You are an on-call engineer" not in body
+        assert "Bash: ls -la" not in body
+        assert "in=1000 out=200" not in body
+        assert "fixing -> verifying" in body
+        assert "verify_tests" in body and "ci_status" in body
+
+    def test_filter_timeline_whitelist(self):
+        kept = filter_timeline([
+            ("t", "agent_tool_use", "x"),
+            ("t", "transition", "y"),
+            ("t", "worktree_ready", "z"),
+        ])
+        assert [k for _, k, _ in kept] == ["transition", "worktree_ready"]

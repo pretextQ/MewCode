@@ -57,6 +57,11 @@ RETRY_STATES = frozenset({"fix_failed", "verify_failed", "ci_failed"})
 
 TERMINAL_STATES = frozenset({"merged", "invalid", "cant_repro", "escalate"})
 
+#: 等人工的等待态：非终态，但重启恢复**不得**自动重跑。
+#: human_review 表示"PR 已开出去，等 review"——服务重启时把它当成中断任务
+#: 重跑，会每次都重新烧一遍 token 并重复 push（真机验收时实测到）。
+HUMAN_WAIT_STATES = frozenset({"human_review"})
+
 #: fix 阶段总尝试次数上限（首次 + 2 次重试 = 3），对应架构文档
 #: "重试上限 N=2"：超限必须 escalate，不允许死循环烧 token。
 DEFAULT_MAX_FIX_ATTEMPTS = 3
@@ -503,7 +508,7 @@ class JobStore:
             return await asyncio.to_thread(_do)
 
     async def list_unfinished(self) -> list[Job]:
-        """所有非终态 job（服务重启时的恢复输入）。"""
+        """所有非终态 job（调试/观测口径：含等人工的等待态）。"""
         async with self._lock:
             conn = self._require_conn()
 
@@ -517,6 +522,11 @@ class JobStore:
                 return [_row_to_job(r) for r in rows]
 
             return await asyncio.to_thread(_do)
+
+    async def list_resumable(self) -> list[Job]:
+        """可被重启恢复接续的 job：非终态，且不是在等人工。"""
+        jobs = await self.list_unfinished()
+        return [j for j in jobs if j.status not in HUMAN_WAIT_STATES]
 
     async def find_open_by_fingerprint(
         self, repo: str, fingerprint: str, window_seconds: int

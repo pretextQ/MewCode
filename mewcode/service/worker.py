@@ -109,10 +109,13 @@ class WorkerPool:
     async def requeue_unfinished(self) -> int:
         """服务重启恢复：把非终态 job 重新入队。
 
+        等人工的等待态（human_review）被排除在外——那不是"被中断的工作"，
+        而是"球在人手里"，重启重跑只会白白烧 token 并重复 push。
+
         在途状态（如中途被杀在 fixing）先回退到 received 再入队——重跑
         执行链时 worktree 快速恢复会复现上次的代码现场（F3.4/F3.5）。
         """
-        jobs = await self.store.list_unfinished()
+        jobs = await self.store.list_resumable()
         requeued = 0
         for job in jobs:
             if job.status != "received":

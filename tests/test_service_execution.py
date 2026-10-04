@@ -732,3 +732,48 @@ class TestCIGate:
             job = await make_job(store)
             await chain(job)
             assert (await store.get_or_raise(job.id)).status == "pr_opened"
+
+
+# =========================================================================
+# H. 隔离不变式：agent 的工具必须绑定到 job 的 worktree
+# =========================================================================
+
+class TestWorktreeBinding:
+    """真机验收时实测到的坑：工具没绑 work_dir 时，Bash 的 cwd 是服务进程的
+    启动目录（主仓库），agent 的 shell 命令会跑在错误的地方。"""
+
+    def test_registry_is_bound_to_worktree(self, tmp_path: Path):
+        from mewcode.config import ProviderConfig
+
+        provider = ProviderConfig(name="t", protocol="openai", base_url="http://x", model="m", api_key="k")
+        runner = HeadlessAgentRunner(ServiceConfig(), provider)
+        worktree = tmp_path / "wt"
+        worktree.mkdir()
+
+        agent = runner._build_agent(str(worktree))
+
+        assert agent.work_dir == str(worktree)
+        bash = agent.registry.get("Bash")
+        assert bash is not None
+        assert bash._work_dir == str(worktree), "Bash 必须绑定到 worktree，否则命令跑在主仓库"
+        for tool_name in ("ReadFile", "WriteFile", "EditFile", "Glob", "Grep"):
+            tool = agent.registry.get(tool_name)
+            if tool is not None and hasattr(tool, "_work_dir"):
+                assert tool._work_dir == str(worktree), f"{tool_name} 未绑定 worktree"
+
+    @pytest.mark.asyncio
+    async def test_bash_tool_runs_inside_worktree(self, tmp_path: Path):
+        """端到端确认：Bash 工具的 cwd 落在 worktree 内。"""
+        from mewcode.config import ProviderConfig
+
+        provider = ProviderConfig(name="t", protocol="openai", base_url="http://x", model="m", api_key="k")
+        runner = HeadlessAgentRunner(ServiceConfig(), provider)
+        worktree = tmp_path / "wt"
+        worktree.mkdir()
+        (worktree / "marker.txt").write_text("inside", encoding="utf-8")
+
+        agent = runner._build_agent(str(worktree))
+        bash = agent.registry.get("Bash")
+        result = await bash.execute(bash.params_model(command='cat marker.txt'))
+        assert "inside" in result.output
+        assert not result.is_error

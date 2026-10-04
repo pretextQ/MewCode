@@ -152,8 +152,13 @@ class WorktreeManager:
                 ["worktree", "add", "-B", branch_name, wt_path, base_branch],
             )
             if result.returncode != 0:
+                # 带上 rc 与 stdout：git 在个别失败路径上（例如 Windows 文件锁）
+                # 只写 stdout 或不写任何内容，只有 stderr 的错误信息会无法定位。
+                detail = result.stderr.strip() or "(no stderr)"
+                extra = result.stdout.strip()
                 raise WorktreeError(
-                    f"git worktree add failed: {result.stderr.strip()}"
+                    f"git worktree add failed (rc={result.returncode}): {detail}"
+                    + (f" | stdout: {extra}" if extra else "")
                 )
 
             await asyncio.to_thread(

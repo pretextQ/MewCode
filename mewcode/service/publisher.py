@@ -39,6 +39,20 @@ _SECTION_RE = re.compile(
     re.IGNORECASE | re.MULTILINE | re.DOTALL,
 )
 
+#: 进 PR body 审计表的事件类型：只保留状态推进与验证证据。
+#: agent_prompt / agent_tool_use / agent_usage 属于运行细节，会把 review 者
+#: 淹没在噪音里（PR body 的目标是"不看 agent 日志也能做判断"）。
+AUDIT_TIMELINE_KINDS = frozenset({
+    "worktree_ready", "baseline_tests", "verify_tests", "test_delta",
+    "agent_finished", "transition", "verification_retry", "ci_status",
+    "ci_retry", "pr_created", "pr_updated", "escalated", "deduped",
+})
+
+
+def filter_timeline(timeline: list[tuple[str, str, str]]) -> list[tuple[str, str, str]]:
+    """从完整审计（ts, kind, detail）里筛出适合放进 PR body 的条目。"""
+    return [entry for entry in timeline if entry[1] in AUDIT_TIMELINE_KINDS]
+
 
 def parse_agent_report(text: str) -> dict[str, str]:
     """从 agent 的收尾报告里抽 ROOT CAUSE / FIX / VERIFICATION 三段。
@@ -57,7 +71,7 @@ def build_pr_title(job: Job) -> str:
     return f"[MewCode] {title}"
 
 
-def build_pr_body(job: Job, context: ExecutionContext, timeline: list[tuple[str, str]]) -> str:
+def build_pr_body(job: Job, context: ExecutionContext, timeline: list[tuple[str, str, str]]) -> str:
     """拼装 PR body（结构化模板，见 W4.2）。"""
     report = parse_agent_report(context.agent.final_text)
     root_cause = report.get("ROOT CAUSE") or (context.agent.final_text or "").strip() or "(agent 未给出结论)"
@@ -121,10 +135,11 @@ def build_pr_body(job: Job, context: ExecutionContext, timeline: list[tuple[str,
         ]
 
     lines += ["", "## 审计记录", "", f"- 修复尝试次数：{context.attempts}", ""]
-    if timeline:
+    entries = filter_timeline(timeline)
+    if entries:
         lines += ["| 时间 | 事件 |", "|---|---|"]
-        for ts, detail in timeline[-25:]:
-            lines.append(f"| {ts} | {detail.replace('|', '/')} |")
+        for ts, kind, detail in entries[-25:]:
+            lines.append(f"| {ts} | `{kind}` {detail.replace('|', '/')[:250]} |")
 
     lines += [
         "",
@@ -158,7 +173,7 @@ class PullRequestPublisher:
         await self.vcs.push(context.work_dir, branch)
 
         slug = await self.vcs.resolve_repo_slug(context.work_dir)
-        timeline = [(e.ts, e.detail) for e in await self.store.events(job.id)]
+        timeline = [(e.ts, e.kind, e.detail) for e in await self.store.events(job.id)]
         body = build_pr_body(job, context, timeline)
 
         existing = await self.vcs.find_open_pr(slug, branch)

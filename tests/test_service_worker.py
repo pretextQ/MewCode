@@ -273,3 +273,48 @@ class TestRecovery:
             events = await store.events(job.id)
             assert any(e.kind == "recovery_reset" for e in events)
             assert any(e.kind == "recovered" for e in events)
+
+
+class TestHumanWaitStatesNotResumed:
+    """等人工的 job（human_review）不属于"被中断的工作"，重启恢复不得重跑。"""
+
+    @pytest.mark.asyncio
+    async def test_human_review_job_not_requeued(self, tmp_path: Path):
+        async with open_store(tmp_path / "jobs.db") as store:
+            job = await make_job(store)
+            for state in ("triaging", "reproducing", "fixing", "verifying", "pr_opened", "ci_gate"):
+                await store.transition(job.id, state)
+            job = await store.transition(job.id, "human_review", pr_url="https://x/pr/1")
+
+            seen: list[str] = []
+
+            async def handler(j):
+                seen.append(j.status)
+
+            pool = WorkerPool(store, handler, concurrency=1)
+            await pool.start()
+            try:
+                assert await pool.requeue_unfinished() == 0
+                await asyncio.sleep(0.1)
+            finally:
+                await pool.stop(drain_timeout=1)
+
+            assert seen == []
+            assert (await store.get_or_raise(job.id)).status == "human_review"
+            assert await store.list_resumable() == []
+            # 仍在"未完结"口径里（观测用），只是不参与恢复
+            assert [j.id for j in await store.list_unfinished()] == [job.id]
+
+    @pytest.mark.asyncio
+    async def test_interrupted_and_human_wait_coexist(self, tmp_path: Path):
+        async with open_store(tmp_path / "jobs.db") as store:
+            waiting = await make_job(store, fingerprint="fp-wait")
+            for state in ("triaging", "reproducing", "fixing", "verifying", "pr_opened", "ci_gate"):
+                await store.transition(waiting.id, state)
+            await store.transition(waiting.id, "human_review")
+
+            interrupted = await make_job(store, fingerprint="fp-int")
+            for state in ("triaging", "reproducing", "fixing"):
+                await store.transition(interrupted.id, state)
+
+            assert [j.id for j in await store.list_resumable()] == [interrupted.id]

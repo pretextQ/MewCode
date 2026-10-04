@@ -129,6 +129,16 @@ class GitHubVCS:
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
+                # 无人值守下绝不能出现交互：GCM_INTERACTIVE=never 让它宁可失败
+                # 也不弹窗（实测：多账号时弹"Select an account"会把 headless
+                # 进程挂死，直到 30s 超时）。GCM_PROVIDER=generic 让 GCM 直接
+                # 读存储而不走它的账号选择流程（只影响 GCM，其他 helper 忽略）。
+                env={
+                    **os.environ,
+                    "GIT_TERMINAL_PROMPT": "0",
+                    "GCM_INTERACTIVE": "never",
+                    "GCM_PROVIDER": "generic",
+                },
             )
             payload = f"protocol={protocol}\nhost={host}\n\n".encode()
             stdout, _ = await asyncio.wait_for(proc.communicate(payload), timeout=30)
@@ -174,6 +184,12 @@ class GitHubVCS:
             "GIT_TERMINAL_PROMPT": "0",
             "GIT_ASKPASS": "",
         }
+        if askpass_token:
+            # 关键：清空 credential.helper。push 的 URL 里带 x-access-token 用户名，
+            # 交给 Git Credential Manager 会触发交互式认证（实测卡在
+            # git-credential-manager.exe 上直到 job 超时）——headless 服务里
+            # 没有任何人能回答它。凭证只由 GIT_ASKPASS 提供。
+            args = ["-c", "credential.helper=", *args]
         askpass_file = ""
         if askpass_token:
             # token 不进 argv：写一个临时 askpass 脚本，从环境变量里取。
