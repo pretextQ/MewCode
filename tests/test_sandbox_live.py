@@ -410,3 +410,20 @@ async def test_compose_up_failure_is_reported_and_cleaned_up(
     assert outcome.up_output.strip(), "compose up failure must carry its output as evidence"
     containers, networks = _compose_project_has_leftovers(compose_project(job.id))
     assert not containers and not networks, f"leftovers: {containers!r} / {networks!r}"
+
+
+@pytest.mark.asyncio
+async def test_stale_container_does_not_block_the_next_run(sandbox: DockerSandbox, worktree: Path):
+    """真机：硬杀服务留下的同名容器（模拟 SIGKILL）不该挡住下一次运行。"""
+    name = sandbox.container_name("live-stale")
+    subprocess.run(
+        ["docker", "run", "-d", "--name", name, "python:3.12-slim",
+         "python", "-c", "import time; time.sleep(300)"],
+        capture_output=True, text=True, timeout=120, check=True,
+    )
+    try:
+        result = await sandbox.run_command("live-stale", str(worktree), "echo survived", timeout=600)
+        assert result.exit_code == 0, result.stdout
+        assert "survived" in result.stdout
+    finally:
+        subprocess.run(["docker", "rm", "-f", name], capture_output=True, timeout=60)

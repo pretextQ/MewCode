@@ -506,6 +506,7 @@ class DockerSandbox:
         )
 
         log.info("sandbox: starting container %s (image=%s network=%s)", name, image, network or self.config.network)
+        await self._evict_stale_container(name)
         code, out = await self._run(argv, timeout=timeout)
         timed_out = code == 124
         if timed_out:
@@ -544,6 +545,7 @@ class DockerSandbox:
             network=network,
             mount_src=mount_src,
         )
+        await self._evict_stale_container(name)
         code, out = await self._run(argv, timeout=timeout)
         if code == 124:
             await self.stop_container(name)
@@ -580,6 +582,18 @@ class DockerSandbox:
 
     async def remove_container(self, name: str) -> None:
         await self._run([self.runtime, "rm", "-f", name], timeout=60)
+
+    async def _evict_stale_container(self, name: str) -> None:
+        """启动同名容器前先清掉残留——收尾必须幂等。
+
+        服务被硬杀（SIGKILL / 掉电 / kill 后台任务）时容器不会走收尾流程，
+        而容器名由 job id 决定：重启恢复重跑时 `docker run --name` 会直接
+        撞 "name is already in use"，把一个可恢复的 job 变成需人工介入
+        （真机演示时踩到：杀掉服务后残留的 agent 容器挡住了下一次运行）。
+        容器名这个命名空间归沙箱所有，所以先删后建是安全的；不存在时
+        `docker rm -f` 只会报 "No such container"，忽略即可。
+        """
+        await self.remove_container(name)
 
     async def remove_run_dir(self, run_dir: Path) -> None:
         await asyncio.to_thread(shutil.rmtree, run_dir, True)

@@ -393,6 +393,31 @@ class TestRunAgent:
         flags = [c for c in recorded(record) if c[0] == "run"][0]
         assert flags[flags.index("--network") + 1] == "none"
 
+    @pytest.mark.asyncio
+    async def test_stale_container_is_evicted_before_starting(self, tmp_path: Path):
+        """硬杀服务留下的同名容器不能挡住重跑（恢复路径的健壮性）。
+
+        容器名由 job id 决定；服务被 SIGKILL 时不会有任何收尾，残留容器会让
+        `docker run --name` 直接失败——先 `rm -f` 再 `run`，收尾幂等。
+        """
+        sandbox, record = make_sandbox(tmp_path)
+        await sandbox.run_agent("job-14", str(tmp_path), "p", PROVIDER, repo_name="demo", timeout=30)
+        calls = recorded(record)
+        rm_index = next(i for i, c in enumerate(calls) if c[0] == "rm")
+        run_index = next(i for i, c in enumerate(calls) if c[0] == "run")
+        assert calls[rm_index][1:3] == ["-f", "mewcode-job-14"]
+        assert rm_index < run_index, "必须先清残留再启动同名容器"
+
+    @pytest.mark.asyncio
+    async def test_stale_command_container_is_evicted_too(self, tmp_path: Path):
+        sandbox, record = make_sandbox(tmp_path)
+        await sandbox.run_command("job-15", str(tmp_path), "echo hi", timeout=30)
+        calls = recorded(record)
+        rm_index = next(i for i, c in enumerate(calls) if c[0] == "rm")
+        run_index = next(i for i, c in enumerate(calls) if c[0] == "run")
+        assert calls[rm_index][1:3] == ["-f", "mewcode-job-15-cmd"]
+        assert rm_index < run_index
+
 
 class TestOutputParsing:
     def parse(self, output: str, code: int = 0):
