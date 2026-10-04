@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: pytest (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Sync dependencies
+        run: uv sync
+
+      - name: Lint (ruff)
+        run: uv run ruff check .
+
+      - name: Type check (mypy core packages)
+        run: uv run mypy mewcode/tools mewcode/permissions mewcode/serialization.py
+
+      # 失败时把完整输出推到 ci-logs 分支（公开仓库可匿名 git fetch 定位
+      # 平台相关失败；API 侧日志下载需要认证，故走此通道）。
+      - name: Run tests
+        shell: bash
+        run: |
+          set -o pipefail
+          uv run pytest -q --maxfail=10 --timeout=120 2>&1 | tee pytest.log
+          exit ${PIPESTATUS[0]}
+
+      - name: Dump test log to ci-logs branch
+        if: failure()
+        shell: bash
+        run: |
+          git config user.email ci-bot@example.com
+          git config user.name ci-bot
+          git fetch origin ci-logs || true
+          base_ref="origin/ci-logs"
+          git checkout -B ci-logs "$base_ref" 2>/dev/null || git checkout --orphan ci-logs
+          mkdir -p logs
+          cp pytest.log "logs/${{ matrix.os }}-$(git rev-parse --short HEAD~0 2>/dev/null || echo run)-$(date +%s).txt"
+          git add logs
+          git commit -m "ci: test log" || true
+          git push origin ci-logs
+
+  security:
+    # 高危告警通道：权限安全回归套件独立跑，失败即阻塞合并。
+    name: security regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Sync dependencies
+        run: uv sync
+
+      - name: Permission security regression
+        shell: bash
+        run: |
+          set -o pipefail
+          uv run pytest tests/test_permission_security.py -q --maxfail=1 --timeout=120 2>&1 | tee security.log
+          exit ${PIPESTATUS[0]}
+
+      - name: Dump security log to ci-logs branch
+        if: failure()
+        shell: bash
+        run: |
+          git config user.email ci-bot@example.com
+          git config user.name ci-bot
+          git fetch origin ci-logs || true
+          base_ref="origin/ci-logs"
+          git checkout -B ci-logs "$base_ref" 2>/dev/null || git checkout --orphan ci-logs
+          mkdir -p logs
+          cp security.log "logs/security-$(date +%s).txt"
+          git add logs
+          git commit -m "ci: security log" || true
+          git push origin ci-logs

@@ -1,0 +1,76 @@
+[project]
+name = "mewcode"
+version = "0.2.0"
+description = "A terminal AI coding assistant"
+requires-python = ">=3.11"
+dependencies = [
+    "textual>=2.1.0",
+    "anthropic>=0.42.0",
+    "openai>=1.60.0",
+    "pyyaml>=6.0",
+    "pydantic>=2.0",
+    "mcp>=1.12.0",
+    "httpx>=0.27.0",
+]
+
+[project.scripts]
+mewcode = "mewcode.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["mewcode"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.3.0",
+    "ruff>=0.16.0",
+    "mypy>=1.14.0",
+    "types-pyyaml>=6.0",
+    "pytest-timeout>=2.3",
+]
+
+[tool.ruff]
+# 120 而非 100：现状 >100 的行 134 处、>120 的仅 59 处（集中在提示词文本），
+# 120 与现状最匹配；提示词/协调者模块为纯文本，折行会改变发给模型的内容，
+# 在 per-file-ignores 中单独豁免。
+line-length = 120
+target-version = "py311"
+extend-exclude = [".mewcode"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = [
+    # 存量代码大量使用 except Exception: pass / log 的防御性兜底，静默吞异常
+    # 是有意为之的容错策略（工具层、TUI 事件处理器），收紧需要逐处补日志，
+    # 不属于本计划的整改范围。
+    "SIM105",
+    "SIM108",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# 测试里允许长的字面量配置串与未使用的夹具参数。
+"tests/*" = ["E501", "B007", "SIM117", "E402"]
+# 提示词文本与协调者注入文本：折行会改变发给模型的内容，保持原样。
+"mewcode/prompts.py" = ["E501"]
+"mewcode/teams/coordinator.py" = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+check_untyped_defs = true
+exclude = ["^\\.mewcode/", "^build/", "^dist/"]
+
+[[tool.mypy.overrides]]
+module = ["mewcode.tools.*", "mewcode.permissions.*", "mewcode.serialization"]
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "strict"
+filterwarnings = [
+    "error::DeprecationWarning",
+    "ignore:'asyncio.iscoroutinefunction' is deprecated:DeprecationWarning",
+]

@@ -1,0 +1,16 @@
+config.yaml
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+dist/
+build/
+.idea/
+.vscode/
+.mewcode/*
+!.mewcode/config.example.yaml
+!.mewcode/skills/
+.claude/
+CLAUDE.md
+docs/
+.coverage
