@@ -243,6 +243,48 @@ class TestHappyPath:
 # B. triaging 判据：信息不足不下手
 # =========================================================================
 
+class TestIgnoredPathsInDiff:
+    """服务自身状态不能算"修复产物"——diff 统计与提交必须同一份清单。
+
+    真机踩到：容器内 agent 的 cwd 是 worktree，`mewcode -p` 在其中写了
+    .mewcode/debug.log，PR body 报"2 files, +32"而实际提交只有 app.py 的 +3。
+    """
+
+    def test_is_ignored_path_matches_any_depth(self) -> None:
+        from mewcode.service.execution import is_ignored_path
+
+        assert is_ignored_path(".mewcode/debug.log")
+        assert is_ignored_path("sub/dir/__pycache__/mod.pyc")
+        assert is_ignored_path("pkg\\.pytest_cache\\v")
+        assert not is_ignored_path("app.py")
+        assert not is_ignored_path("src/mewcode_helpers.py")  # 前缀相似不算
+
+    @pytest.mark.asyncio
+    async def test_diff_excludes_service_state(self, tmp_path: Path, demo_repo: Path):
+        from mewcode.service.execution import COMMIT_EXCLUDES
+
+        async with chain_env(tmp_path, demo_repo) as (store, chain, _runner, _):
+            job = await make_job(store)
+            manager = chain._worktree_manager(str(demo_repo))
+            worktree = await manager.create(job.id, base_branch="HEAD")
+
+            (Path(worktree.path) / "calc.py").write_text(CALC_FIXED, encoding="utf-8")
+            log_dir = Path(worktree.path) / ".mewcode"
+            log_dir.mkdir(exist_ok=True)
+            (log_dir / "debug.log").write_text("noise from the agent run\n", encoding="utf-8")
+
+            changed, diff = await chain._collect_diff(job.id, worktree)
+
+        assert changed == ["calc.py"]
+        assert "debug.log" not in diff and "noise from the agent run" not in diff
+        # 提交侧用的是同一份路径清单（否则 body 与真实提交会对不上）
+        assert any(".mewcode" in spec for spec in COMMIT_EXCLUDES)
+
+
+# =========================================================================
+# B2. triaging 判据：信息不足不下手
+# =========================================================================
+
 class TestTriaging:
     @pytest.mark.asyncio
     async def test_empty_payload_escalates_without_worktree(self, tmp_path: Path, demo_repo: Path):

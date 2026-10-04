@@ -15,22 +15,12 @@ from typing import Any
 
 from mewcode.config import ServiceConfig
 
-from .execution import ExecutionContext, PublishResult
+from .execution import COMMIT_EXCLUDES, ExecutionContext, PublishResult
 from .jobs import Job, JobStore
 from .sop import extract_logs, render_alert_context
 from .vcs import CheckStatus, VCSError, VCSProvider
 
 log = logging.getLogger(__name__)
-
-#: 不进入提交的路径（服务自身状态与 Python 缓存）。
-#: 每个目录给出两种 glob：根目录形式与任意深度形式——git 的 exclude
-#: pathspec 不做递归匹配，漏掉任一种都会把服务状态提交进 PR。
-_IGNORED_DIRS = (".mewcode", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache")
-COMMIT_EXCLUDES: tuple[str, ...] = tuple(
-    spec
-    for _dir in _IGNORED_DIRS
-    for spec in (f":(exclude,glob){_dir}/**", f":(exclude,glob)**/{_dir}/**")
-)
 
 _REPORT_KEYS = r"(?:ROOT CAUSE|FIX|VERIFICATION|SELF\-CHECK)"
 _SECTION_RE = re.compile(

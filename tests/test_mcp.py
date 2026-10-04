@@ -405,6 +405,63 @@ class TestExtractText:
         assert "[image: image/png]" in _extract_text(content)
 
 # ===========================================================================
+# MCPClient 收尾：cancel scope 异常不能把正常结束变成异常退出
+# ===========================================================================
+
+class TestClientCleanupCancellation:
+    """M2 W3 真机踩到：容器里 agent 干完活，收尾时 MCP stdio 的 anyio
+    cancel scope 抛 CancelledError（"Cancelled via cancel scope ..."），
+    进程 exit 1 且没有任何输出，服务只能把已经做完的修复丢掉。"""
+
+    class _ExplodingStack:
+        def __init__(self, exc: BaseException) -> None:
+            self.exc = exc
+            self.exited = False
+
+        async def __aexit__(self, *args) -> None:
+            self.exited = True
+            raise self.exc
+
+    @pytest.mark.asyncio
+    async def test_scoped_cancellation_during_teardown_is_swallowed(self) -> None:
+        import asyncio
+
+        from mewcode.mcp.client import MCPClient
+
+        client = MCPClient(MCPServerConfig(name="x", command="echo"))
+        stack = self._ExplodingStack(asyncio.CancelledError("Cancelled via cancel scope 1 by <Task>"))
+        client._stack = stack  # type: ignore[assignment]
+
+        await client.close()  # 伪取消不该从收尾路径漏出去
+
+        assert stack.exited
+        assert client._stack is None
+        assert not client.is_alive
+
+    @pytest.mark.asyncio
+    async def test_close_mcp_never_raises(self, caplog) -> None:
+        """``close_mcp`` 的契约：收尾失败只记日志，绝不改变结果语义。"""
+        import asyncio
+
+        from mewcode.mcp.bootstrap import MCPBootstrapResult, close_mcp
+
+        class ExplodingManager:
+            def __init__(self, exc: BaseException) -> None:
+                self.exc = exc
+
+            async def shutdown(self) -> None:
+                raise self.exc
+
+        for exc in (asyncio.CancelledError("scoped"), RuntimeError("teardown broke")):
+            result = MCPBootstrapResult(manager=ExplodingManager(exc), server_names=["s"])
+            await close_mcp(result)  # 不抛
+
+        # 没有 manager 时也要安全（未配置 MCP 的服务路径）
+        await close_mcp(MCPBootstrapResult())
+        await close_mcp(None)
+
+
+# ===========================================================================
 # MCPManager：部分失败容错
 # ===========================================================================
 

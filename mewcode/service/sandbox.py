@@ -336,12 +336,15 @@ class DockerSandbox:
         env: dict[str, str] | None = None,
         network: str | None = None,
         mount_src: bool = False,
+        extra_args: list[str] | None = None,
     ) -> list[str]:
         """组装 `docker run` 参数（纯函数，便于单测覆盖隔离与限额项）。
 
         ``shell_command`` 是容器内要跑的命令；给了 config/prompt 时同时挂载
         mewcode 源码与最小配置（agent 模式）。``mount_src`` 让验证类命令也能
         拿到只读源码（跑 mewcode 自身的内部工具时需要，例如 MCP server 探活）。
+        ``extra_args`` 原样附在镜像名之前（如 ``--add-host``），调用方负责
+        清楚自己加了什么——隔离项本身不从这里改。
         """
         env = env or {}
         agent_mode = bool(config_path and prompt_path)
@@ -365,6 +368,9 @@ class DockerSandbox:
             "-v", f"{Path(work_dir).resolve()}:{self.config.workdir}",
             "-e", "HOME=/tmp",
             "-e", "PYTHONDONTWRITEBYTECODE=1",
+            # 调试日志写到容器 /tmp：cwd 是 worktree，写 .mewcode/ 会成为
+            # "修复产物"的一部分（真机踩到：PR body 改动统计多出一个日志文件）
+            "-e", "MEWCODE_LOG_FILE=/tmp/mewcode-debug.log",
         ]
         if agent_mode:
             args += [
@@ -378,6 +384,7 @@ class DockerSandbox:
             ]
         for key, value in sorted(env.items()):
             args += ["-e", f"{key}={value}"]
+        args += list(extra_args or [])
         args += [image, "sh", "-c", shell_command]
         return args
 
@@ -450,6 +457,7 @@ class DockerSandbox:
         timeout: float,
         network: str | None = None,
         mcp_servers: list | None = None,
+        extra_args: list[str] | None = None,
     ) -> SandboxRunResult:
         """在容器内跑一次 agent，返回结构化结果（超时则强制杀掉容器）。"""
         if not await self.available():
@@ -475,6 +483,7 @@ class DockerSandbox:
             prompt_path=str(prompt_path),
             env=self.container_env(provider_config, mcp_servers=mcp_servers),
             network=network,
+            extra_args=extra_args,
         )
 
         log.info("sandbox: starting container %s (image=%s network=%s)", name, image, network or self.config.network)

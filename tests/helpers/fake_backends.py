@@ -141,6 +141,10 @@ class FakeBackend:
             host = "127.0.0.1"
         return f"http://{host}:{port}"
 
+    @property
+    def port(self) -> int:
+        return int(self._server.server_address[1])
+
     def start(self) -> FakeBackend:
         self._thread.start()
         return self
@@ -188,9 +192,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="fake Loki + GitHub backends for tests")
     parser.add_argument("--loki-port", type=int, default=8899)
     parser.add_argument("--github-port", type=int, default=8900)
+    parser.add_argument(
+        "--log-line", action="append", default=None,
+        help="log line served by the fake Loki (repeatable; default: one canned line)",
+    )
     args = parser.parse_args()
 
-    loki = make_loki(host="0.0.0.0", port=args.loki_port)
+    loki = make_loki(lines=args.log_line, host="0.0.0.0", port=args.loki_port)
     github = make_github(host="0.0.0.0", port=args.github_port)
     loki.start()
     github.start()

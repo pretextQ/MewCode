@@ -8,12 +8,15 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
-from mewcode.config import SandboxConfig
-from mewcode.service.sandbox import DockerSandbox
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from mewcode.config import SandboxConfig  # noqa: E402
+from mewcode.service.sandbox import DockerSandbox  # noqa: E402
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("MEWCODE_DOCKER_TESTS") != "1",
@@ -226,3 +229,81 @@ async def test_ci_mcp_server_works_inside_the_container(sandbox: DockerSandbox, 
     out = result.stdout
     assert "PROBE_OK=0" in out, out
     assert "pytest (ubuntu-latest)" in out, out
+
+
+@pytest.mark.asyncio
+async def test_agent_runs_in_container_with_mcp_tools(
+    sandbox: DockerSandbox, worktree: Path, monkeypatch
+):
+    """**完整 agent 路径**在容器里跑通：`mewcode -p --output-format json --config ...`。
+
+    这条链此前只在真机演示时被走到过，一次性暴露了三个问题（`--config` 参数
+    根本不存在、镜像依赖未钉版、MCP 子进程丢了 PYTHONPATH）。用假模型把它
+    钉成自动化测试：真正的 CLI 参数、真正的配置挂载、真正的 MCP 工具调用，
+    唯一的替身是 LLM（宿主上的假 OpenAI 服务，经 host.docker.internal 访问）。
+    """
+    import json
+
+    from mewcode.config import MCPServerConfig, ProviderConfig
+
+
+    from helpers.fake_backends import DEFAULT_LOG_LINE, make_loki
+    from helpers.fake_llm import FakeLLM
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")  # 容器里的 key 只走环境变量
+
+    llm = FakeLLM(
+        script=[
+            {"tool_calls": [("mcp_logs_query_logs", json.dumps({"query": '{app="checkout"}'}))]},
+            {"text": "ROOT CAUSE: simulated\nFIX: none\nVERIFICATION: log query"},
+        ],
+        host="0.0.0.0",
+    ).start()
+    loki = make_loki(lines=[DEFAULT_LOG_LINE], host="0.0.0.0").start()
+    try:
+        provider = ProviderConfig(
+            name="fake",
+            protocol="openai-compat",
+            base_url=f"http://host.docker.internal:{llm.port}/v1",
+            model="fake-model",
+            api_key="",  # 容器配置里 api_key 恒空：真实 key 由环境变量注入
+        )
+        mcp_servers = [
+            MCPServerConfig(
+                name="logs",
+                command="python",
+                args=["-m", "mewcode.mcp.servers.logs"],
+                env={"MEWCODE_LOKI_URL": f"http://host.docker.internal:{loki.port}"},
+                description="Query production logs.",
+            )
+        ]
+        result = await sandbox.run_agent(
+            "live-agent",
+            str(worktree),
+            "Investigate the failing service. Use the internal tools if the payload is not enough.",
+            provider,
+            repo_name="live-agent",
+            timeout=900,
+            mcp_servers=mcp_servers,
+            # Linux 上 host.docker.internal 需要显式映射；Docker Desktop 本就支持
+            extra_args=["--add-host", "host.docker.internal:host-gateway"],
+        )
+    finally:
+        llm.stop()
+        loki.stop()
+
+    assert result.exit_code == 0, f"agent run failed:\n{result.stdout[-3000:]}"
+    assert "ROOT CAUSE" in result.result_text
+    # 结构化摘要回报了内部工具的使用（服务层据此写审计与 PR body）
+    assert result.extra.get("mcpCalls") == 1, result.extra
+    assert "mcp_logs_query_logs" in (result.extra.get("mcpTools") or []), result.extra
+    # agent 的运行日志不落在 worktree 里（真机踩到：它进了 PR 的改动统计）
+    assert not (worktree / ".mewcode" / "debug.log").exists(), "agent polluted the worktree"
+
+    bodies = llm.posted_bodies()
+    assert len(bodies) >= 2, f"expected a tool round trip, got {len(bodies)} request(s)"
+    # 容器里的 agent 真的把 MCP 工具挂进了工具表
+    assert "mcp_logs_query_logs" in json.dumps(bodies[0].get("tools"))
+    # 工具结果真的回到了模型：第二轮请求里带着假 Loki 的日志内容
+    # （ensure_ascii=False：日志里有非 ASCII 字符，默认转义会让子串断言失真）
+    assert DEFAULT_LOG_LINE in json.dumps(bodies[1], ensure_ascii=False)

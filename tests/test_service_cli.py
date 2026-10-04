@@ -153,6 +153,76 @@ class TestHeadlessOutputFormat:
         assert captured["output_format"] == "json"
         assert captured["prompt"] == "do it"
 
+
+class TestConfigFlag:
+    """``--config``：沙箱容器靠它跑生成的最小配置（真机演示前它并不存在）。"""
+
+    def test_prompt_mode_loads_the_given_path(self, monkeypatch, tmp_path: Path):
+        cfg = tmp_path / "minimal.yaml"
+        cfg.write_text(
+            "providers:\n"
+            "- name: t\n"
+            "  protocol: openai\n"
+            "  base_url: http://x\n"
+            "  model: m\n",
+            encoding="utf-8",
+        )
+        seen: dict = {}
+
+        async def fake_run_prompt(config, mode, hooks, prompt, output_format="text"):
+            seen["provider"] = config.providers[0].name
+
+        monkeypatch.setattr("mewcode.__main__._run_prompt", fake_run_prompt)
+        monkeypatch.setattr("mewcode.__main__.load_hooks", lambda raw: [])
+        monkeypatch.setattr(sys, "argv", ["mewcode", "-p", "hi", "--config", str(cfg)])
+        main()
+        assert seen["provider"] == "t"
+
+    def test_prompt_mode_without_config_uses_discovery(self, monkeypatch):
+        calls: list = []
+
+        def fake_load(path=None):
+            calls.append(path)
+            return make_config(ServiceConfig())
+
+        async def fake_run_prompt(config, mode, hooks, prompt, output_format="text"):
+            return None
+
+        monkeypatch.setattr("mewcode.__main__._run_prompt", fake_run_prompt)
+        monkeypatch.setattr("mewcode.__main__.load_config", fake_load)
+        monkeypatch.setattr("mewcode.__main__.load_hooks", lambda raw: [])
+        monkeypatch.setattr(sys, "argv", ["mewcode", "-p", "hi"])
+        main()
+        assert calls == [None]
+
+    def test_serve_uses_the_given_config_file(self, monkeypatch, tmp_path: Path):
+        cfg = tmp_path / "service.yaml"
+        cfg.write_text(
+            "providers:\n"
+            "- name: t\n"
+            "  protocol: openai\n"
+            "  base_url: http://x\n"
+            "  model: m\n"
+            "service:\n"
+            "  port: 9877\n",
+            encoding="utf-8",
+        )
+        seen: dict = {}
+
+        async def fake_serve(service, host, port, recover=True):
+            seen.update(port=port, service_port=service.port)
+
+        monkeypatch.setattr("mewcode.__main__._serve", fake_serve)
+        _serve_main(["--config", str(cfg)])
+        assert seen == {"port": 9877, "service_port": 9877}
+
+    def test_missing_config_file_exits_with_error(self, monkeypatch, tmp_path: Path, capsys):
+        monkeypatch.setattr(sys, "argv", ["mewcode", "-p", "hi", "--config", str(tmp_path / "nope.yaml")])
+        with pytest.raises(SystemExit) as ei:
+            main()
+        assert ei.value.code == 1
+        assert "not found" in capsys.readouterr().err.lower()
+
     def test_invalid_format_rejected(self, monkeypatch):
         monkeypatch.setattr(sys, "argv", ["mewcode", "-p", "x", "--output-format", "yaml"])
         with pytest.raises(SystemExit):

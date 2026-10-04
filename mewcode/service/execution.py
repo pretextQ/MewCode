@@ -42,6 +42,33 @@ MAX_EVIDENCE_CHARS = 4_000
 #: 传给 agent 的失败反馈上限（验证失败重试时）
 MAX_FEEDBACK_CHARS = 3_000
 
+#: 不算"修复产物"的路径：服务自身状态与 Python 缓存。
+#: diff 统计（本模块）与提交（publisher）必须用**同一份清单**，否则 PR body
+#: 里的改动规模会与真实提交对不上——真机踩到：容器内 agent 在 worktree 里写了
+#: .mewcode/debug.log，body 报"2 files, +32"而实际提交只有 app.py 的 +3。
+IGNORED_DIRS = (".mewcode", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache")
+
+
+def is_ignored_path(path: str) -> bool:
+    """路径里出现任一被忽略目录名即视为非产物（与提交排除的语义一致）。"""
+    return any(part in IGNORED_DIRS for part in path.replace("\\", "/").split("/"))
+
+
+def commit_excludes() -> list[str]:
+    """git 的 exclude pathspec：每个目录给出根目录与任意深度两种 glob。
+
+    git 的 exclude pathspec 不做递归匹配，漏掉任一种都会把服务状态提交进 PR。
+    """
+    return [
+        spec
+        for _dir in IGNORED_DIRS
+        for spec in (f":(exclude,glob){_dir}/**", f":(exclude,glob)**/{_dir}/**")
+    ]
+
+
+#: 提交时使用的固定排除清单（publisher 直接引用；语义与 :func:`commit_excludes` 一致）
+COMMIT_EXCLUDES: tuple[str, ...] = tuple(commit_excludes())
+
 
 class TokenBudgetExceeded(Exception):
     """单 job token 预算熔断（架构文档：成本控制双重要求之一）。"""
@@ -838,14 +865,18 @@ class ExecutionChain:
             path = line[3:].strip()
             if " -> " in path:  # rename: "old -> new"
                 path = path.split(" -> ")[-1]
-            if path:
+            if path and not is_ignored_path(path):
                 changed.append(path)
         if not changed:
             return [], ""
 
-        # 未跟踪文件先 add -N，否则 diff 里看不到它们的内容
-        await asyncio.to_thread(_git, ["add", "-N", "."])
-        code, diff = await asyncio.to_thread(_git, ["diff", "--no-color", "--", "."])
+        # 未跟踪文件先 add -N，否则 diff 里看不到它们的内容；服务自身状态与
+        # 缓存目录同样排除（与提交用同一份 exclude）
+        excludes = commit_excludes()
+        await asyncio.to_thread(_git, ["add", "-N", "--", ".", *excludes])
+        code, diff = await asyncio.to_thread(
+            _git, ["diff", "--no-color", "--", ".", *excludes]
+        )
         if code != 0:
             return changed, ""
         if len(diff) > MAX_DIFF_CHARS:

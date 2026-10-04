@@ -15,6 +15,7 @@ TUI 的接线在 ``app.py``（交互式，工具延迟加载、连接失败只�
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 
@@ -81,10 +82,19 @@ async def register_mcp_tools(
 
 
 async def close_mcp(result: MCPBootstrapResult | None) -> None:
-    """显式收尾 stdio 子进程（仓库已知坑：不能依赖进程退出兜底）。"""
+    """显式收尾 stdio 子进程（仓库已知坑：不能依赖进程退出兜底）。
+
+    契约：**永不抛出**。收尾失败不该改变作业的结果语义——已经跑完的修复不能
+    被一次清理异常改写（真机踩到：容器里 agent 干完活，MCP 收尾的伪取消让
+    进程 exit 1、成果整份丢掉）。
+    """
     if result is None or result.manager is None:
         return
     try:
         await result.manager.shutdown()
-    except Exception as e:  # 收尾失败只记日志：作业结果不受影响
+    except asyncio.CancelledError:
+        # anyio 作用域取消在收尾阶段很常见（见 mcp/client.py 的说明）；调用方
+        # 真被取消时，原始 CancelledError 会在 finally 之后继续传播，丢不了。
+        log.debug("MCP shutdown cancelled during teardown")
+    except Exception as e:
         log.warning("MCP shutdown failed: %s", e)

@@ -24,6 +24,7 @@ def _serve_main(argv: list[str]) -> None:
     parser.add_argument("--host", default=None, help="bind address (overrides service.host)")
     parser.add_argument("--port", type=int, default=None, help="bind port (overrides service.port)")
     parser.add_argument("--data-dir", default=None, help="state dir (overrides service.data_dir)")
+    parser.add_argument("--config", default=None, help="path to config.yaml (overrides discovery)")
     parser.add_argument(
         "--no-recover",
         action="store_true",
@@ -32,7 +33,7 @@ def _serve_main(argv: list[str]) -> None:
     args = parser.parse_args(argv)
 
     try:
-        config = load_config()
+        config = load_config(Path(args.config)) if args.config else load_config()
     except ConfigError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
@@ -155,12 +156,18 @@ def _install_signal_handlers(stop: asyncio.Event) -> None:
 
 
 def main() -> None:
-    # 先确保 .mewcode/ 目录存在，否则下面写 debug.log 会因目录不存在而崩溃
-    Path(".mewcode").mkdir(parents=True, exist_ok=True)
+    # 调试日志默认写在仓库内的 .mewcode/debug.log；沙箱容器里 agent 的 cwd 是
+    # job 的 worktree，写进去就成了"修复产物"的一部分（真机踩到：PR body 的
+    # 改动统计里多出一个 .mewcode/debug.log）。容器用 MEWCODE_LOG_FILE 重定向。
+    log_file = Path(os.environ.get("MEWCODE_LOG_FILE") or ".mewcode/debug.log")
+    try:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        log_file = Path(os.devnull)  # 只读文件系统等：宁可没有日志也不能崩
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(name)s %(message)s",
-        filename=".mewcode/debug.log",
+        filename=str(log_file),
         filemode="w",
     )
 
@@ -188,10 +195,16 @@ def main() -> None:
         help="Non-interactive output format: 'text' (default) prints the result, "
         "'json' prints a machine-readable summary (result, usage, tool calls)",
     )
+    parser.add_argument(
+        "--config",
+        default=None,
+        help="path to config.yaml (overrides discovery); used by the sandbox, which "
+        "runs the agent against a generated minimal config instead of ~/.mewcode",
+    )
     args = parser.parse_args()
 
     try:
-        config = load_config()
+        config = load_config(Path(args.config)) if args.config else load_config()
     except ConfigError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
@@ -227,6 +240,25 @@ def main() -> None:
         driver_class=NoAltScreenDriver,
     )
     app.run()
+
+
+def _summary_payload(agent, result_text: str, counters: dict, mcp_tools_used: set[str]) -> dict:
+    """``-p --output-format json`` 的机器可读摘要（服务层与容器回读依赖它）。
+
+    单独成函数：这是与沙箱执行层之间的**契约**，值得能被直接测。
+    """
+    return {
+        "result": result_text,
+        "usage": {
+            "inputTokens": agent.total_input_tokens,
+            "outputTokens": agent.total_output_tokens,
+        },
+        "toolCalls": counters["tool_calls"],
+        # M2 W3：内部工具链的使用证据（服务层据此写 job 审计与 PR body）
+        "mcpCalls": counters["mcp_calls"],
+        "mcpTools": sorted(mcp_tools_used),
+        "sessionId": agent.session_id,
+    }
 
 
 async def _run_prompt(config, permission_mode, hook_engine, prompt: str, output_format: str = "text") -> None:
@@ -382,25 +414,16 @@ async def _run_prompt(config, permission_mode, hook_engine, prompt: str, output_
             if not task_manager.has_pending_work():
                 break
             await asyncio.sleep(2)
+
+        if json_mode:
+            # 机器可读摘要：服务层（含容器内沙箱执行）依赖它回读 agent 结果与用量。
+            # **先出结果，再收尾**：收尾（MCP stdio 子进程）万一出问题，也不能把
+            # 已经做完的活丢掉——真机踩到过：容器里 agent 干完活了，收尾异常让
+            # 进程 exit 1 且没有任何输出，服务只能 escalate。
+            print(json.dumps(_summary_payload(agent, last_result, counters, mcp_tools_used), ensure_ascii=False), flush=True)
     finally:
         # 显式收尾 MCP stdio 子进程：不能依赖进程退出兜底（仓库已知坑）
         await close_mcp(mcp_result)
-
-    if json_mode:
-        # 机器可读摘要：服务层（含容器内沙箱执行）依赖它回读 agent 结果与用量
-        payload = {
-            "result": last_result,
-            "usage": {
-                "inputTokens": agent.total_input_tokens,
-                "outputTokens": agent.total_output_tokens,
-            },
-            "toolCalls": counters["tool_calls"],
-            # M2 W3：内部工具链的使用证据（服务层据此写 job 审计与 PR body）
-            "mcpCalls": counters["mcp_calls"],
-            "mcpTools": sorted(mcp_tools_used),
-            "sessionId": agent.session_id,
-        }
-        print(json.dumps(payload, ensure_ascii=False), flush=True)
 
 
 if __name__ == "__main__":

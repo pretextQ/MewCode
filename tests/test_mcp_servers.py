@@ -328,25 +328,37 @@ class TestReadOnlyEnforcement:
 
 class TestHeadlessJsonPayload:
     def test_json_payload_counts_mcp_calls(self) -> None:
-        """``_run_prompt`` 的事件回调把 mcp_ 前缀的工具调用单独计数。"""
-        counters = {"tool_calls": 0, "mcp_calls": 0}
-        used: set[str] = set()
+        """``-p`` 的摘要契约：服务层（含容器回读）靠这些字段判断内部工具用没用。"""
+        from mewcode.__main__ import _summary_payload
 
-        def on_event(event: dict) -> None:
-            if event.get("type") == "tool_use":
-                counters["tool_calls"] += 1
-                name = str(event.get("toolName") or "")
-                if name.startswith("mcp_"):
-                    counters["mcp_calls"] += 1
-                    used.add(name)
+        class FakeAgent:
+            total_input_tokens = 1200
+            total_output_tokens = 300
+            session_id = "sess-1"
 
-        on_event({"type": "tool_use", "toolName": "Bash"})
-        on_event({"type": "tool_use", "toolName": "mcp_logs_query_logs"})
-        on_event({"type": "tool_use", "toolName": "mcp_ci_get_check_runs"})
-        on_event({"type": "usage", "usage": {"inputTokens": 1}})
+        payload = _summary_payload(
+            FakeAgent(), "ROOT CAUSE: x", {"tool_calls": 3, "mcp_calls": 2},
+            {"mcp_ci_get_check_runs", "mcp_logs_query_logs"},
+        )
+        assert payload == {
+            "result": "ROOT CAUSE: x",
+            "usage": {"inputTokens": 1200, "outputTokens": 300},
+            "toolCalls": 3,
+            "mcpCalls": 2,
+            "mcpTools": ["mcp_ci_get_check_runs", "mcp_logs_query_logs"],
+            "sessionId": "sess-1",
+        }
 
-        assert counters == {"tool_calls": 3, "mcp_calls": 2}
-        assert sorted(used) == ["mcp_ci_get_check_runs", "mcp_logs_query_logs"]
+    def test_payload_without_mcp_usage(self) -> None:
+        from mewcode.__main__ import _summary_payload
+
+        class FakeAgent:
+            total_input_tokens = 1
+            total_output_tokens = 1
+            session_id = "s"
+
+        payload = _summary_payload(FakeAgent(), "done", {"tool_calls": 0, "mcp_calls": 0}, set())
+        assert payload["mcpCalls"] == 0 and payload["mcpTools"] == []
 
 
 def test_probe_helper_is_importable() -> None:

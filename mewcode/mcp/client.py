@@ -127,6 +127,19 @@ class MCPClient:
                     logger.debug("Cancel scope cleanup (expected during shutdown): %s", e)
                 else:
                     raise
+            except asyncio.CancelledError as e:
+                # MCP 的 stdio 传输基于 anyio cancel scope：收尾时它会以
+                # CancelledError 的形式抛出"作用域内取消"（"Cancelled via
+                # cancel scope ..."），这不是调用方在取消我们。真机踩到：
+                # 容器里 agent 已经干完活，这个伪取消让进程 exit 1，服务把
+                # 成果整份丢掉。
+                #
+                # 为什么吞掉是安全的：如果调用方**真的**在取消这个任务，原始
+                # CancelledError 会在 finally（本函数就在这里被调用）结束后由
+                # 解释器继续传播——收尾里吞掉的是这份"内层伪取消"，丢不了
+                # 真正的取消信号。`task.cancelling()` 不能用来判别：anyio 用它
+                # 自己的作用域取消了宿主任务，计数器此时同样非零。
+                logger.debug("MCP stdio cleanup cancelled (scoped cancellation): %s", e)
             except Exception:
                 logger.debug("Error closing stack for '%s'", self.name, exc_info=True)
             self._stack = None
