@@ -10,9 +10,11 @@ from mewcode.tools.base import Tool, ToolResult
 if TYPE_CHECKING:
     from mewcode.agent import Agent
     from mewcode.agents.loader import AgentLoader
+    from mewcode.agents.parser import AgentDef
     from mewcode.agents.task_manager import TaskManager
     from mewcode.agents.trace import TraceManager
     from mewcode.client import LLMClient
+    from mewcode.permissions import PermissionChecker, PermissionMode
 
 log = logging.getLogger(__name__)
 
@@ -55,7 +57,7 @@ _MODE_STRICTNESS: dict[str, int] = {
 }
 
 
-def resolve_permission_mode(pm_str: str) -> "PermissionMode":
+def resolve_permission_mode(pm_str: str) -> PermissionMode:
     """定义声明的 permission_mode → 枚举；未知值告警并降级 DEFAULT。"""
     from mewcode.permissions import PermissionMode
 
@@ -72,10 +74,10 @@ def resolve_permission_mode(pm_str: str) -> "PermissionMode":
 
 
 def resolve_effective_mode(
-    parent_mode: "PermissionMode",
-    defined_mode: "PermissionMode",
+    parent_mode: PermissionMode,
+    defined_mode: PermissionMode,
     is_background: bool,
-) -> "PermissionMode":
+) -> PermissionMode:
     """子代理生效模式：交互式取 max(父, 定义)（严格度优先）；
     非交互后台任务无法弹确认，固定 DONT_ASK（不低于它，即不会拿到 BYPASS）；
     父模式为 PLAN 时一律 PLAN，杜绝 PLAN 只读保护被子代理穿透。"""
@@ -92,11 +94,11 @@ def resolve_effective_mode(
 
 
 def build_subagent_checker(
-    parent_agent: "Agent",
+    parent_agent: Agent,
     sandbox_root: str,
     defined_mode: str,
     is_background: bool,
-) -> tuple["PermissionChecker", "PermissionMode"]:
+) -> tuple[PermissionChecker, PermissionMode]:
     """子代理 PermissionChecker：继承父 RuleEngine 与沙箱（同根时复用实例），
     生效模式按 resolve_effective_mode 计算。"""
     from mewcode.permissions import (
@@ -144,7 +146,7 @@ TEAMMATE_ADDENDUM = (
 )
 
 
-class AgentTool(Tool):
+class AgentTool(Tool[AgentToolParams]):
     name = "Agent"
     description = (
         "Launch a sub-agent to handle a task in an isolated context. "
@@ -187,8 +189,8 @@ class AgentTool(Tool):
             return apply_plan_readonly_filter(registry)
         return registry
 
-    async def execute(self, params: BaseModel) -> ToolResult:
-        p: AgentToolParams = params  # type: ignore[assignment]
+    async def execute(self, params: AgentToolParams) -> ToolResult:
+        p = params
 
         if p.team_name:
             return await self._execute_as_teammate(p)
@@ -202,18 +204,11 @@ class AgentTool(Tool):
         if isolation == "worktree":
             return await self._execute_with_worktree(p)
 
+        from mewcode.agent import Agent as AgentClass
         from mewcode.agents.fork import ForkError, build_forked_messages
         from mewcode.agents.parser import AgentDef
         from mewcode.agents.tool_filter import resolve_agent_tools
-        from mewcode.agent import Agent as AgentClass
         from mewcode.conversation import ConversationManager
-        from mewcode.permissions import (
-            DangerousCommandDetector,
-            PathSandbox,
-            PermissionChecker,
-            PermissionMode,
-            RuleEngine,
-        )
 
         definition: AgentDef | None = None
         conversation: ConversationManager
@@ -356,23 +351,18 @@ class AgentTool(Tool):
         return ToolResult(output=result_text or "(sub-agent returned no output)")
 
     async def _execute_as_teammate(self, p: AgentToolParams) -> ToolResult:
+        # 分派方（execute）仅在 p.team_name 非空时进入本方法
+        assert p.team_name is not None, "team_name is required for teammate spawn"
         if self._team_manager is None:
             return ToolResult(output="TeamManager not configured.", is_error=True)
         if self._worktree_manager is None:
             return ToolResult(output="WorktreeManager not configured for team spawn.", is_error=True)
 
+        from mewcode.agent import Agent as AgentClass
         from mewcode.agents.fork import ForkError, build_forked_messages
         from mewcode.agents.parser import AgentDef
         from mewcode.agents.tool_filter import build_teammate_tools
-        from mewcode.agent import Agent as AgentClass
         from mewcode.conversation import ConversationManager
-        from mewcode.permissions import (
-            DangerousCommandDetector,
-            PathSandbox,
-            PermissionChecker,
-            PermissionMode,
-            RuleEngine,
-        )
         from mewcode.teams.models import BackendType, TeammateInfo
         from mewcode.teams.registry import AgentNameRegistry
 
@@ -562,7 +552,7 @@ class AgentTool(Tool):
                 self._team_manager.register_pane_id(agent_id, pane_info.pane_id)
             elif backend == BackendType.ITERM2:
                 from mewcode.teams.spawn_iterm2 import spawn_iterm2_teammate
-                pane_info = spawn_iterm2_teammate(
+                spawn_iterm2_teammate(
                     team_name=p.team_name,
                     teammate_name=teammate_name,
                     worktree_path=wt.path,
@@ -594,7 +584,6 @@ class AgentTool(Tool):
         params: AgentToolParams,
         definition: AgentDef,
     ) -> LLMClient:
-        from mewcode.agents.parser import AgentDef
 
         model_override = params.model or (
             definition.model if definition.model != "inherit" else None
@@ -615,17 +604,9 @@ class AgentTool(Tool):
                 is_error=True,
             )
 
+        from mewcode.agent import Agent as AgentClass
         from mewcode.agents.parser import AgentDef
         from mewcode.agents.tool_filter import resolve_agent_tools
-        from mewcode.agent import Agent as AgentClass
-        from mewcode.conversation import ConversationManager
-        from mewcode.permissions import (
-            DangerousCommandDetector,
-            PathSandbox,
-            PermissionChecker,
-            PermissionMode,
-            RuleEngine,
-        )
         from mewcode.worktree.integration import (
             build_worktree_notice,
             generate_worktree_name,

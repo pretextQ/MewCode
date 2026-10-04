@@ -40,9 +40,8 @@ class PermissionChecker:
         content = extract_content(tool.name, arguments)
 
         # Layer 0: Plan 模式的工具白名单（plan 文件写例外移到 Layer 2 之后）
-        if self.mode == PermissionMode.PLAN:
-            if tool.name in _PLAN_MODE_ALLOWED_TOOLS:
-                return Decision(effect="allow", reason="Plan mode: allowed tool")
+        if self.mode == PermissionMode.PLAN and tool.name in _PLAN_MODE_ALLOWED_TOOLS:
+            return Decision(effect="allow", reason="Plan mode: allowed tool")
 
         # Layer 1b: 危险命令黑名单（仅 Bash）——先于白名单，保证黑名单可达
         if tool.category == "command":

@@ -15,7 +15,7 @@ class Params(BaseModel):
     timeout: int = Field(default=120, description="Timeout in seconds (max 600)")
 
 
-class Bash(Tool):
+class Bash(Tool[Params]):
     name = "Bash"
     description = "Execute a shell command and return stdout and stderr."
     params_model = Params
@@ -33,7 +33,7 @@ class Bash(Tool):
                 stderr=asyncio.subprocess.PIPE,
             )
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             await proc.wait()
             return ToolResult(output=f"Error: command timed out after {timeout}s", is_error=True)

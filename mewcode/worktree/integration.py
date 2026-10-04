@@ -5,7 +5,7 @@ import secrets
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from mewcode.worktree.manager import WorktreeManager
+    pass
 
 
 WORKTREE_NOTICE_TEMPLATE = """\

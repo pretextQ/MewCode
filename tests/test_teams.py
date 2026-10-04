@@ -3,27 +3,20 @@
 
 from __future__ import annotations
 
-import asyncio
-import json
 import os
 import shutil
 import tempfile
-import time
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mewcode.teams.models import (
-    AgentTeam,
-    BackendType,
-    TeammateInfo,
-    resolve_team_dir,
-    unique_team_name,
+from mewcode.agents.tool_filter import (
+    COORDINATOR_MODE_ALLOWED_TOOLS,
+    IN_PROCESS_TEAMMATE_ALLOWED_TOOLS,
+    TEAMMATE_COORDINATION_TOOLS,
+    apply_coordinator_filter,
 )
-from mewcode.teams.shared_task import SharedTask, SharedTaskStore
-from mewcode.teams.mailbox import Mailbox, MailboxMessage, create_message
-from mewcode.teams.registry import AgentNameRegistry
 from mewcode.teams.backend_detect import BackendDetectionError, detect_backend
 from mewcode.teams.coordinator import (
     get_coordinator_system_prompt,
@@ -31,13 +24,15 @@ from mewcode.teams.coordinator import (
     is_coordinator_mode,
     match_session_mode,
 )
-from mewcode.agents.tool_filter import (
-    COORDINATOR_MODE_ALLOWED_TOOLS,
-    IN_PROCESS_TEAMMATE_ALLOWED_TOOLS,
-    TEAMMATE_COORDINATION_TOOLS,
-    build_teammate_tools,
-    apply_coordinator_filter,
+from mewcode.teams.mailbox import Mailbox, create_message
+from mewcode.teams.models import (
+    AgentTeam,
+    BackendType,
+    TeammateInfo,
+    unique_team_name,
 )
+from mewcode.teams.registry import AgentNameRegistry
+from mewcode.teams.shared_task import SharedTaskStore
 from mewcode.tools import ToolRegistry
 from mewcode.tools.base import Tool, ToolResult
 

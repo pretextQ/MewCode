@@ -1,9 +1,7 @@
 
 from __future__ import annotations
 
-import json
-import tempfile
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -22,12 +20,10 @@ from mewcode.memory.instructions import (
 )
 from mewcode.memory.session import (
     RecordType,
-    ResumeResult,
     Session,
     SessionManager,
     SessionMeta,
     SessionRecord,
-
     make_compact_boundary,
     parse_compact_boundary,
     records_to_messages,
@@ -221,7 +217,7 @@ class TestSessionManager:
     def test_cleanup_removes_old_sessions(self, tmp_path: Path) -> None:
         mgr = SessionManager(str(tmp_path))
         s = mgr.create()
-        s.meta.last_active = datetime.now(timezone.utc) - timedelta(days=31)
+        s.meta.last_active = datetime.now(UTC) - timedelta(days=31)
         s.meta.save(mgr._sessions_dir / f"{s.session_id}.meta")
         s.close()
 
@@ -242,7 +238,7 @@ class TestSessionManager:
 
 class TestValidateMessageChain:
     def test_complete_chain(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         records = [
             SessionRecord(type=RecordType.USER, content="hi", timestamp=now),
             SessionRecord(
@@ -264,7 +260,7 @@ class TestValidateMessageChain:
         assert validate_message_chain(records) == 4
 
     def test_truncate_at_missing_tool_result(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         records = [
             SessionRecord(type=RecordType.USER, content="hi", timestamp=now),
             SessionRecord(type=RecordType.ASSISTANT, content="ok", timestamp=now),
@@ -283,7 +279,7 @@ class TestValidateMessageChain:
 
 class TestRecordsToMessages:
     def test_basic_roundtrip(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         records = [
             SessionRecord(type=RecordType.USER, content="hello", timestamp=now),
             SessionRecord(type=RecordType.ASSISTANT, content="world", timestamp=now),
@@ -294,7 +290,7 @@ class TestRecordsToMessages:
         assert messages[1].role == "assistant"
 
     def test_tool_result_grouping(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         records = [
             SessionRecord(type=RecordType.USER, content="go", timestamp=now),
             SessionRecord(
@@ -323,7 +319,7 @@ class TestRecordsToMessages:
         assert messages[3].role == "assistant"
 
     def test_system_prompt_skipped(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         records = [
             SessionRecord(type=RecordType.SYSTEM_PROMPT, content="system", timestamp=now),
             SessionRecord(type=RecordType.USER, content="hi", timestamp=now),
@@ -431,7 +427,7 @@ class TestCompactBoundaryRoundTrip:
     def test_parse_malformed_boundary_degrades(self) -> None:
         bad = SessionRecord(
             type=RecordType.COMPACT_BOUNDARY, content="not a dict",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
         )
         summary, keep_msgs = parse_compact_boundary(bad)
         assert summary == ""
@@ -787,7 +783,7 @@ def test_generate_session_summary_survives_truncated_tool_pair():
     """切片切断 tool_use 配对时不得产生非法消息序列（400 → 摘要恒空）。"""
     import asyncio
 
-    from mewcode.conversation import ConversationManager, Message, ToolResultBlock, ToolUseBlock
+    from mewcode.conversation import ConversationManager, ToolUseBlock
     from mewcode.memory.session import generate_session_summary
 
     conv = ConversationManager()

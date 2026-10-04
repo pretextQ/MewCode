@@ -12,7 +12,6 @@ from mewcode.teams.progress import TeammateProgress, ToolActivity
 from mewcode.teams.registry import AgentNameRegistry
 from mewcode.teams.shared_task import SharedTask, SharedTaskStore
 
-
 __all__ = [
     "AgentTeam",
     "AgentNameRegistry",

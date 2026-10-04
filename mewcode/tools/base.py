@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 import copy
-from dataclasses import dataclass
 import locale
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Generic, Literal, TypeVar
 
 from pydantic import BaseModel
 
@@ -14,6 +14,8 @@ SKIP_DIRS = {".git", ".venv", "node_modules", "__pycache__", ".tox", ".mypy_cach
 MAX_OUTPUT_CHARS = 10000
 
 ToolCategory = Literal["read", "write", "command"]
+
+ParamsT = TypeVar("ParamsT", bound=BaseModel)
 
 
 def detect_encoding(path: Path) -> str:
@@ -58,18 +60,11 @@ def read_text_preserve(path: Path) -> str:
     """
     enc = detect_encoding(path)
     try:
-        with open(path, "r", encoding=enc, newline="") as f:
+        with open(path, encoding=enc, newline="") as f:
             return f.read()
     except UnicodeDecodeError:
-        with open(path, "r", encoding="utf-8", errors="replace", newline="") as f:
+        with open(path, encoding="utf-8", errors="replace", newline="") as f:
             return f.read()
-
-
-def read_text_preserve(path: Path) -> str:
-    """读取文本：newline='' 保持行尾原样，编码走探测回退。"""
-    enc = detect_encoding(path)
-    with open(path, "r", encoding=enc, newline="") as f:
-        return f.read()
 
 
 def write_text_preserve(path: Path, content: str) -> str:
@@ -90,10 +85,10 @@ class ToolResult:
     is_error: bool = False
 
 
-class Tool(ABC):
+class Tool(ABC, Generic[ParamsT]):
     name: str
     description: str
-    params_model: type[BaseModel]
+    params_model: type[ParamsT]
     category: ToolCategory = "read"
     is_concurrency_safe: bool = False
     is_system_tool: bool = False
@@ -105,7 +100,7 @@ class Tool(ABC):
         return self.category == "read"
 
 
-    def bind(self, work_dir: str) -> "Tool":
+    def bind(self, work_dir: str) -> Tool:
         """返回绑定 work_dir 的浅拷贝代理：相对路径与子进程 cwd 以 work_dir
         为基准（in-process 子代理运行在 worktree 时使用）。未绑定工具保持
         原有进程 CWD 行为。"""
@@ -132,7 +127,7 @@ class Tool(ABC):
         }
 
     @abstractmethod
-    async def execute(self, params: BaseModel) -> ToolResult: ...
+    async def execute(self, params: ParamsT) -> ToolResult: ...
 
 
 # --- 流式事件 ---
@@ -187,4 +182,12 @@ class StreamEnd:
     cache_creation: int = 0
 
 
-StreamEvent = TextDelta | ThinkingDelta | ThinkingComplete | ToolCallStart | ToolCallDelta | ToolCallComplete | StreamEnd
+StreamEvent = (
+    TextDelta
+    | ThinkingDelta
+    | ThinkingComplete
+    | ToolCallStart
+    | ToolCallDelta
+    | ToolCallComplete
+    | StreamEnd
+)

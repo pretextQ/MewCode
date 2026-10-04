@@ -12,7 +12,7 @@ class SyntheticOutputParams(BaseModel):
     output: dict[str, Any] | list[Any] | str
 
 
-class SyntheticOutputTool(Tool):
+class SyntheticOutputTool(Tool[SyntheticOutputParams]):
     name = "SyntheticOutput"
     description = (
         "Return structured output in JSON format. "
@@ -29,8 +29,8 @@ class SyntheticOutputTool(Tool):
         self._json_schema = json_schema
 
 
-    async def execute(self, params: BaseModel) -> ToolResult:
-        p: SyntheticOutputParams = params  # type: ignore[assignment]
+    async def execute(self, params: SyntheticOutputParams) -> ToolResult:
+        p = params
 
         if self._json_schema is not None:
             error = self._validate_schema(p.output)

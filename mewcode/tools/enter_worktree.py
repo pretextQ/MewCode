@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import secrets
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 
 class EnterWorktreeParams(BaseModel):
-    name: Optional[str] = Field(
+    name: str | None = Field(
         default=None,
         description=(
             'Optional name for the worktree. Each "/"-separated segment may '
@@ -24,7 +24,7 @@ class EnterWorktreeParams(BaseModel):
     )
 
 
-class EnterWorktreeTool(Tool):
+class EnterWorktreeTool(Tool[EnterWorktreeParams]):
     name = "EnterWorktree"
     description = (
         "Creates an isolated worktree (via git) and switches the session into it"

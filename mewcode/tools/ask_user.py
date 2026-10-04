@@ -5,7 +5,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from mewcode.tools.base import Tool, ToolResult
+from mewcode.tools.base import Tool, ToolCategory, ToolResult
 
 
 class QuestionItem(BaseModel):
@@ -36,7 +36,7 @@ class AskUserEvent:
         self.future = future
 
 
-class AskUserTool(Tool):
+class AskUserTool(Tool[AskUserParams]):
     name = "AskUserQuestion"
     description = (
         "Ask the user one or more questions when you need information "
@@ -45,7 +45,7 @@ class AskUserTool(Tool):
         "question types."
     )
     params_model = AskUserParams
-    category: str = "read"
+    category: ToolCategory = "read"
     is_system_tool = True
     should_defer = True
 
@@ -76,10 +76,12 @@ class AskUserTool(Tool):
             # 无 UI 预创建（非交互路径）时的兜底
             self.prepare(questions_data)
         event = self._pending_event
+        if event is None:  # pragma: no cover — prepare() 必然设置 _pending_event
+            return ToolResult(output="AskUser failed to prepare event", is_error=True)
 
         try:
             answers = await asyncio.wait_for(event.future, timeout=300)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return ToolResult(
                 output="User did not respond within 5 minutes", is_error=True
             )

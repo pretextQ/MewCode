@@ -2,15 +2,12 @@
 """Hook 系统的测试 —— 涵盖事件、条件、执行器、引擎、加载器以及与 agent 的集成。"""
 from __future__ import annotations
 
-import asyncio
-from typing import Any, AsyncIterator
 from unittest.mock import patch
 
 import pytest
 
 from mewcode.hooks import (
     Action,
-    ActionResult,
     Condition,
     ConditionGroup,
     ConditionParseError,
@@ -517,7 +514,7 @@ class TestAgentHookIntegration:
         from mewcode.client import LLMClient
         from mewcode.conversation import ConversationManager
         from mewcode.tools import create_default_registry
-        from mewcode.tools.base import StreamEnd, StreamEvent, TextDelta, ToolCallComplete
+        from mewcode.tools.base import StreamEnd, TextDelta, ToolCallComplete
 
         class MockClient(LLMClient):
             def __init__(self):

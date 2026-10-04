@@ -17,7 +17,7 @@ class TeamCreateParams(BaseModel):
     description: str = ""
 
 
-class TeamCreateTool(Tool):
+class TeamCreateTool(Tool[TeamCreateParams]):
     name = "TeamCreate"
     description = (
         "Create a new team for coordinating multiple agents.\n\n"
@@ -72,8 +72,8 @@ class TeamCreateTool(Tool):
         self._enable_coordinator_mode = enable_coordinator_mode
 
 
-    async def execute(self, params: BaseModel) -> ToolResult:
-        p: TeamCreateParams = params  # type: ignore[assignment]
+    async def execute(self, params: TeamCreateParams) -> ToolResult:
+        p = params
 
         from mewcode.teams.backend_detect import BackendDetectionError
 

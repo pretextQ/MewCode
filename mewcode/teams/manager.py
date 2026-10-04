@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from mewcode.teams.backend_detect import BackendDetectionError, detect_backend
+from mewcode.teams.backend_detect import detect_backend
 from mewcode.teams.mailbox import Mailbox, create_message
 from mewcode.teams.models import (
     AgentTeam,
@@ -21,7 +20,7 @@ from mewcode.teams.shared_task import SharedTaskStore
 from mewcode.teams.spawn_inprocess import InProcessTeammateHandle
 
 if TYPE_CHECKING:
-    from mewcode.agent import Agent
+    pass
 
 log = logging.getLogger(__name__)
 

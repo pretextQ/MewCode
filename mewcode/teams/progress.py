@@ -4,8 +4,6 @@ import random
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Optional
-
 
 SPINNER_VERBS = [
     "Accomplishing", "Architecting", "Baking", "Beboppin'", "Befuddling",
@@ -73,11 +71,11 @@ class TeammateProgress:
     status: str = "running"
     tool_use_count: int = 0
     token_count: int = 0
-    last_activity: Optional[ToolActivity] = None
+    last_activity: ToolActivity | None = None
     recent_activities: list[ToolActivity] = field(default_factory=list)
     spinner_verb: str = field(default_factory=random_verb)
     start_time: float = field(default_factory=time.monotonic)
-    last_message: Optional[str] = None
+    last_message: str | None = None
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def record_tool_use(self, tool_name: str, args: dict) -> None:

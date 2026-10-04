@@ -4,8 +4,9 @@ import asyncio
 import logging
 import secrets
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from mewcode.agent import Agent

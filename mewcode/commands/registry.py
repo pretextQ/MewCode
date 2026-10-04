@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Awaitable, Callable, Protocol
+from enum import StrEnum
+from typing import Any, Protocol
 
 
-class CommandType(str, Enum):
+class CommandType(StrEnum):
     LOCAL = "local"
     LOCAL_UI = "local_ui"
     PROMPT = "prompt"

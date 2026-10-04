@@ -15,7 +15,7 @@ class TaskGetParams(BaseModel):
     task_id: str
 
 
-class TaskGetTool(Tool):
+class TaskGetTool(Tool[TaskGetParams]):
     name = "TaskGet"
     description = "Get details of a shared task by ID, including dependency information."
     params_model = TaskGetParams
@@ -28,8 +28,8 @@ class TaskGetTool(Tool):
         self._team_name = team_name
 
 
-    async def execute(self, params: BaseModel) -> ToolResult:
-        p: TaskGetParams = params  # type: ignore[assignment]
+    async def execute(self, params: TaskGetParams) -> ToolResult:
+        p = params
 
         store = self._team_manager.get_task_store(self._team_name)
         if store is None:

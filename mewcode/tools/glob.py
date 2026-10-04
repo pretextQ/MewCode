@@ -14,7 +14,7 @@ class Params(BaseModel):
     path: str = Field(default=".", description="Base directory to search from")
 
 
-class Glob(Tool):
+class Glob(Tool[Params]):
     name = "Glob"
     description = "Find files matching a glob pattern, returning relative paths."
     params_model = Params

@@ -2,19 +2,13 @@
 """MCP 客户端系统的测试（第 6 章）。"""
 from __future__ import annotations
 
-import asyncio
-import os
 import textwrap
-import tempfile
 from pathlib import Path
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-import yaml
 
 from mewcode.config import (
-    AppConfig,
     ConfigError,
     MCPServerConfig,
     build_child_env,
@@ -328,8 +322,9 @@ class TestLoadConfigMCP:
 class TestMCPToolWrapper:
     def test_name_format(self) -> None:
         from mcp import types as mcp_types
-        from mewcode.mcp.tool_wrapper import MCPToolWrapper
+
         from mewcode.mcp.client import MCPClient
+        from mewcode.mcp.tool_wrapper import MCPToolWrapper
 
         tool_def = mcp_types.Tool(
             name="search_issues",
@@ -352,6 +347,7 @@ class TestMCPToolWrapper:
 
     def test_get_schema_uses_original_input_schema(self) -> None:
         from mcp import types as mcp_types
+
         from mewcode.mcp.tool_wrapper import MCPToolWrapper
 
         input_schema = {
@@ -378,6 +374,7 @@ class TestMCPToolWrapper:
 class TestExtractText:
     def test_text_content(self) -> None:
         from mcp import types as mcp_types
+
         from mewcode.mcp.tool_wrapper import _extract_text
 
         content = [
@@ -393,6 +390,7 @@ class TestExtractText:
 
     def test_image_content(self) -> None:
         from mcp import types as mcp_types
+
         from mewcode.mcp.tool_wrapper import _extract_text
 
         content = [mcp_types.ImageContent(type="image", data="...", mimeType="image/png")]

@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import json
-import os
 import subprocess
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -295,7 +292,7 @@ class TestWorktreeManager:
         assert "exit-keep" in manager.active
 
     def test_exit_remove_clean(self, manager):
-        wt = asyncio.run(manager.create("exit-rm"))
+        _wt = asyncio.run(manager.create("exit-rm"))
         asyncio.run(manager.enter("exit-rm"))
         asyncio.run(
             manager.exit("exit-rm", action="remove", discard_changes=True)

@@ -47,7 +47,7 @@ class Params(BaseModel):
     include: str = Field(default="", description="Glob filter for filenames (e.g. '*.py')")
 
 
-class Grep(Tool):
+class Grep(Tool[Params]):
     name = "Grep"
     description = "Search file contents using a regex pattern, returning file:line:content matches."
     params_model = Params

@@ -5,28 +5,26 @@ from __future__ import annotations
 
 import asyncio
 import textwrap
-import time
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from mewcode.agents.parser import AgentDef, AgentParseError, parse_agent_file, parse_frontmatter
-from mewcode.agents.loader import AgentLoader
-from mewcode.agents.tool_filter import (
-    ALL_AGENT_DISALLOWED_TOOLS,
-    ASYNC_AGENT_ALLOWED_TOOLS,
-    resolve_agent_tools,
-)
 from mewcode.agents.fork import (
     FORK_BOILERPLATE_TAG,
     ForkError,
     build_forked_messages,
 )
-from mewcode.agents.trace import TraceManager, TraceNode
-from mewcode.agents.task_manager import BackgroundTask, TaskManager
+from mewcode.agents.loader import AgentLoader
 from mewcode.agents.notification import format_task_notification, inject_task_notifications
-from mewcode.conversation import ConversationManager, Message, ToolResultBlock, ToolUseBlock
+from mewcode.agents.parser import AgentDef, AgentParseError, parse_agent_file, parse_frontmatter
+from mewcode.agents.task_manager import BackgroundTask, TaskManager
+from mewcode.agents.tool_filter import (
+    ASYNC_AGENT_ALLOWED_TOOLS,
+    resolve_agent_tools,
+)
+from mewcode.agents.trace import TraceManager
+from mewcode.conversation import ConversationManager, ToolUseBlock
 from mewcode.tools import ToolRegistry
 from mewcode.tools.base import Tool, ToolResult
 
@@ -778,7 +776,7 @@ class TestTaskManagerStateMachine:
         from mewcode.agents.task_manager import TaskManager
 
         tm = TaskManager()
-        task_id = tm.launch(_FakeBgAgent(), "do it")
+        _task_id = tm.launch(_FakeBgAgent(), "do it")  # noqa: F841 — 触发后台任务即可，id 无需引用
 
         async def _wait_notify():
             while tm._notify_queue.empty():

@@ -2,10 +2,10 @@
 """五层权限系统的测试。"""
 from __future__ import annotations
 
-import asyncio
 import tempfile
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any
 
 import pytest
 import yaml
@@ -25,7 +25,6 @@ from mewcode.agent import (
 from mewcode.client import LLMClient
 from mewcode.conversation import ConversationManager
 from mewcode.permissions import (
-    Decision,
     DangerousCommandDetector,
     PathSandbox,
     PermissionChecker,

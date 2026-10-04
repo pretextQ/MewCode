@@ -70,7 +70,7 @@ async def _handle_create(
         return
 
     try:
-        session = await manager.enter(name)
+        await manager.enter(name)
         if ctx.agent:
             ctx.agent.work_dir = wt.path
     except Exception as e:

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from mewcode.commands.registry import Command, CommandContext, CommandType
 
-
 REVIEW_PROMPT = (
     "请审查当前 git diff 中的代码变更。重点关注：\n"
     "1. 逻辑错误\n"

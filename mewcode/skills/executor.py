@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, AsyncIterator
+from typing import TYPE_CHECKING
 
 from mewcode.conversation import ConversationManager, Message
 from mewcode.skills.parser import SkillDef, substitute_arguments
 from mewcode.tools import ToolRegistry
 
 if TYPE_CHECKING:
-    from mewcode.agent import Agent, AgentEvent
+    from mewcode.agent import Agent
     from mewcode.client import LLMClient
 
 log = logging.getLogger(__name__)
@@ -94,6 +94,8 @@ class SkillExecutor:
 
         from mewcode.agent import (
             Agent as AgentClass,
+        )
+        from mewcode.agent import (
             ErrorEvent,
             LoopComplete,
             PermissionRequest,

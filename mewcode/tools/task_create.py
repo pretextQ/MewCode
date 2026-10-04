@@ -19,7 +19,7 @@ class TaskCreateParams(BaseModel):
     blocked_by: list[str] | None = None
 
 
-class TaskCreateTool(Tool):
+class TaskCreateTool(Tool[TaskCreateParams]):
     name = "TaskCreate"
     description = (
         "Create a shared task in the team's task board. "
@@ -36,8 +36,8 @@ class TaskCreateTool(Tool):
         self._agent_name = agent_name
 
 
-    async def execute(self, params: BaseModel) -> ToolResult:
-        p: TaskCreateParams = params  # type: ignore[assignment]
+    async def execute(self, params: TaskCreateParams) -> ToolResult:
+        p = params
 
         store = self._team_manager.get_task_store(self._team_name)
         if store is None:

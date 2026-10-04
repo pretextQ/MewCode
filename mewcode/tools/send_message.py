@@ -24,7 +24,7 @@ class SendMessageParams(BaseModel):
 VALID_MESSAGE_TYPES = {"text", "shutdown_request", "shutdown_response"}
 
 
-class SendMessageTool(Tool):
+class SendMessageTool(Tool[SendMessageParams]):
     name = "SendMessage"
     description = (
         "Send a message to a teammate by name or agent ID. "
@@ -50,12 +50,13 @@ class SendMessageTool(Tool):
         self._from_agent_name = from_agent_name
 
 
-    async def execute(self, params: BaseModel) -> ToolResult:
-        p: SendMessageParams = params  # type: ignore[assignment]
+    async def execute(self, params: SendMessageParams) -> ToolResult:
+        p = params
 
         if p.message_type not in VALID_MESSAGE_TYPES:
+            valid = ", ".join(sorted(VALID_MESSAGE_TYPES))
             return ToolResult(
-                output=f"Invalid message_type '{p.message_type}'. Must be one of: {', '.join(sorted(VALID_MESSAGE_TYPES))}",
+                output=f"Invalid message_type '{p.message_type}'. Must be one of: {valid}",
                 is_error=True,
             )
 

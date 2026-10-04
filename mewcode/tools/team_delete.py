@@ -16,7 +16,7 @@ class TeamDeleteParams(BaseModel):
     team_name: str
 
 
-class TeamDeleteTool(Tool):
+class TeamDeleteTool(Tool[TeamDeleteParams]):
     name = "TeamDelete"
     description = (
         "Delete an Agent Team. Terminates all pane processes, removes worktrees, "
@@ -32,8 +32,8 @@ class TeamDeleteTool(Tool):
         self._parent_agent = parent_agent
 
 
-    async def execute(self, params: BaseModel) -> ToolResult:
-        p: TeamDeleteParams = params  # type: ignore[assignment]
+    async def execute(self, params: TeamDeleteParams) -> ToolResult:
+        p = params
 
         from mewcode.teams.manager import TeamError
 

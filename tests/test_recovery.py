@@ -1,19 +1,15 @@
 
 from __future__ import annotations
 
-import time
-
-import pytest
-
 from mewcode.context.manager import (
+    _RECOVERY_CHARS_PER_TOKEN,
     RECOVERY_FILE_LIMIT,
-    RECOVERY_SKILLS_BUDGET,
     RECOVERY_TOKENS_PER_FILE,
     RECOVERY_TOKENS_PER_SKILL,
     RecoveryState,
-    _RECOVERY_CHARS_PER_TOKEN,
     build_recovery_attachment,
 )
+
 
 def test_recovery_attachment_empty_when_nothing_recorded():
     assert build_recovery_attachment(None, None) == ""

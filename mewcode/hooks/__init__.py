@@ -17,7 +17,6 @@ from mewcode.hooks.models import (
     ToolRejectedError,
 )
 
-
 __all__ = [
     "Action",
     "ActionResult",

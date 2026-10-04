@@ -25,12 +25,12 @@ from mewcode.mcp.manager import MCPManager
 class FakeSession:
     """Stand-in for ClientSession recording how many were constructed."""
 
-    instances: list["FakeSession"] = []
+    instances: list[FakeSession] = []
 
     def __init__(self, read: Any, write: Any) -> None:
         FakeSession.instances.append(self)
 
-    async def __aenter__(self) -> "FakeSession":
+    async def __aenter__(self) -> FakeSession:
         return self
 
     async def __aexit__(self, *exc: Any) -> None:

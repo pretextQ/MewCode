@@ -1,7 +1,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
@@ -16,7 +16,7 @@ class ExitWorktreeParams(BaseModel):
     action: str = Field(
         description='"keep" leaves the worktree and branch on disk; "remove" deletes both.',
     )
-    discard_changes: Optional[bool] = Field(
+    discard_changes: bool | None = Field(
         default=None,
         description=(
             'Required true when action is "remove" and the worktree has '
@@ -26,7 +26,7 @@ class ExitWorktreeParams(BaseModel):
     )
 
 
-class ExitWorktreeTool(Tool):
+class ExitWorktreeTool(Tool[ExitWorktreeParams]):
     name = "ExitWorktree"
     description = (
         "Exits a worktree session created by EnterWorktree and restores "

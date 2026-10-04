@@ -18,7 +18,7 @@ class Params(BaseModel):
     content: str = Field(description="Content to write to the file")
 
 
-class WriteFile(Tool):
+class WriteFile(Tool[Params]):
     name = "WriteFile"
     description = (
         "Write content to a file, creating parent directories if needed. Overwrites existing files.\n"
@@ -28,7 +28,12 @@ class WriteFile(Tool):
     category = "write"
 
 
-    def __init__(self, file_cache: FileCache | None = None, file_history: Any = None, file_state_cache: FileStateCache | None = None) -> None:
+    def __init__(
+        self,
+        file_cache: FileCache | None = None,
+        file_history: Any = None,
+        file_state_cache: FileStateCache | None = None,
+    ) -> None:
         self._cache = file_cache
         self.file_history = file_history
         self._state_cache = file_state_cache

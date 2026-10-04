@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -9,7 +9,7 @@ from textual.message import Message
 from textual.widgets import Static
 
 
-class PlanChoice(str, Enum):
+class PlanChoice(StrEnum):
     YOLO = "yolo"
     MANUAL = "manual"
     FEEDBACK = "feedback"

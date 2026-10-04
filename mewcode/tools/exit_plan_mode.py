@@ -1,7 +1,7 @@
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from pydantic import BaseModel
 
@@ -12,7 +12,7 @@ class ExitPlanModeParams(BaseModel):
     pass
 
 
-class ExitPlanModeTool(Tool):
+class ExitPlanModeTool(Tool[ExitPlanModeParams]):
     name = "ExitPlanMode"
     description = (
         "Exit plan mode and present the plan for user approval. "

@@ -5,22 +5,21 @@ from __future__ import annotations
 import json
 import textwrap
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
+from mewcode.skills.executor import (
+    SkillDependencyError,
+    filter_tool_registry,
+)
+from mewcode.skills.loader import SkillLoader
 from mewcode.skills.parser import (
     SkillDef,
     SkillParseError,
     parse_frontmatter,
     parse_skill_file,
     substitute_arguments,
-)
-from mewcode.skills.loader import SkillLoader
-from mewcode.skills.executor import (
-    SkillDependencyError,
-    SkillExecutor,
-    filter_tool_registry,
 )
 from mewcode.tools import ToolRegistry
 from mewcode.tools.base import Tool, ToolResult
@@ -515,7 +514,6 @@ class TestLoadSkillTool:
 
 class TestAgentSkillIntegration:
     def test_activate_and_clear(self) -> None:
-        from mewcode.agent import Agent
         from mewcode.prompts import build_environment_context
 
         env = build_environment_context(

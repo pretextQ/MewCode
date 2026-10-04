@@ -1,16 +1,21 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import random
+import re
 import time as _time
+from collections.abc import Coroutine
 from pathlib import Path
-from typing import Any, Coroutine
+from typing import TYPE_CHECKING, Any
 
+from rich.text import Text as RichText
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message as TMessage
+from textual.theme import Theme
 from textual.widgets import Markdown, OptionList, Static, TextArea
 from textual.widgets.option_list import Option
 
@@ -21,7 +26,6 @@ from mewcode.agent import (
     HookEvent,
     LoopComplete,
     PermissionRequest,
-    PermissionResponse,
     RetryEvent,
     StreamText,
     ThinkingText,
@@ -30,6 +34,11 @@ from mewcode.agent import (
     TurnComplete,
     UsageEvent,
 )
+from mewcode.agents.loader import AgentLoader
+from mewcode.agents.notification import inject_task_notifications
+from mewcode.agents.task_manager import TaskManager
+from mewcode.agents.trace import TraceManager
+from mewcode.cache import FileCache
 from mewcode.client import (
     AuthenticationError,
     LLMClient,
@@ -45,9 +54,12 @@ from mewcode.commands import (
 )
 from mewcode.commands.completion import CompletionPopup
 from mewcode.commands.handlers import register_all_commands
+from mewcode.commands.handlers.skill_register import register_skill_commands
+from mewcode.commands.handlers.tasks import create_tasks_command
+from mewcode.commands.handlers.worktree import create_worktree_command
 from mewcode.config import MCPServerConfig, ProviderConfig
-from mewcode.hooks import HookContext, HookEngine, load_hooks
 from mewcode.conversation import ConversationManager, Message
+from mewcode.hooks import HookContext, HookEngine
 from mewcode.mcp import MCPManager
 from mewcode.memory import (
     MemoryManager,
@@ -66,17 +78,9 @@ from mewcode.permissions import (
     PermissionMode,
     RuleEngine,
 )
-from mewcode.agents.loader import AgentLoader
-from mewcode.agents.task_manager import TaskManager
-from mewcode.agents.trace import TraceManager
-from mewcode.agents.notification import inject_task_notifications
-from mewcode.commands.handlers.tasks import create_tasks_command
 from mewcode.skills.executor import SkillExecutor
 from mewcode.skills.loader import SkillLoader
-from mewcode.commands.handlers.skill_register import register_skill_commands
-from rich.text import Text as RichText
-from textual.theme import Theme
-from mewcode.cache import FileCache
+from mewcode.teammate_tree import TeammateTree
 from mewcode.tools import ToolRegistry, create_default_registry
 from mewcode.tools.agent_tool import AgentTool
 from mewcode.tools.ask_user import AskUserEvent, AskUserTool
@@ -84,10 +88,13 @@ from mewcode.tools.impl.tool_search import ToolSearchTool
 from mewcode.tools.load_skill import LoadSkill
 from mewcode.worktree.cleanup import start_stale_cleanup_task
 from mewcode.worktree.manager import WorktreeManager
-from mewcode.commands.handlers.worktree import create_worktree_command
-from mewcode.teammate_tree import TeammateTree
 
-import re
+if TYPE_CHECKING:
+    from mewcode.askuser_dialog import InlineAskUserWidget
+    from mewcode.permission_dialog import InlinePermissionWidget
+    from mewcode.plan_dialog import InlinePlanWidget
+
+logger = logging.getLogger(__name__)
 
 MAX_TRUNCATED_LINES = 20
 MAX_AT_REF_BYTES = 10240
@@ -126,7 +133,8 @@ def expand_at_refs(text: str, work_dir: str) -> str:
         if not os.path.isfile(full_path):
             return m.group(0)
         try:
-            content = open(full_path, encoding="utf-8", errors="replace").read(MAX_AT_REF_BYTES)
+            with open(full_path, encoding="utf-8", errors="replace") as f:
+                content = f.read(MAX_AT_REF_BYTES)
             return f"[File: {rel_path}]\n```\n{content}\n```"
         except Exception:
             return m.group(0)
@@ -167,7 +175,7 @@ class ChatInput(TextArea):
         if self._history_file.exists():
             try:
                 lines = self._history_file.read_text(encoding="utf-8").splitlines()
-                self._history = [l for l in lines if l.strip()]
+                self._history = [ln for ln in lines if ln.strip()]
             except Exception:
                 pass
 
@@ -1167,7 +1175,6 @@ class MewCodeApp(App):
                 block._render_expanded()
 
         for summary in self.query(ToolGroupSummary):
-            was_expanded = summary._expanded
             summary.toggle()
             parent = summary.parent
             if parent:
@@ -1188,8 +1195,8 @@ class MewCodeApp(App):
         if focused is None:
             return None
         from mewcode.askuser_dialog import InlineAskUserWidget
-        from mewcode.plan_dialog import InlinePlanWidget
         from mewcode.permission_dialog import InlinePermissionWidget
+        from mewcode.plan_dialog import InlinePlanWidget
 
         for cls in (InlineAskUserWidget, InlinePlanWidget, InlinePermissionWidget):
             if isinstance(focused, cls):
@@ -1264,7 +1271,7 @@ class MewCodeApp(App):
                 timeout=8.0,
             )
             return await asyncio.to_thread(render_reminder, results)
-        except (asyncio.TimeoutError, Exception):
+        except (TimeoutError, Exception):
             return ""
 
     async def _send_message(self, text: str, is_notification: bool = False) -> None:
@@ -1320,7 +1327,7 @@ class MewCodeApp(App):
                 reminder = await asyncio.wait_for(prefetch_task, timeout=3.0)
                 if reminder:
                     self.conversation.add_system_reminder(reminder)
-            except (asyncio.TimeoutError, Exception):
+            except (TimeoutError, Exception):
                 pass
 
         history_cursor = len(self.conversation.history)
@@ -1535,7 +1542,7 @@ class MewCodeApp(App):
             self._show_error(str(e))
         except Exception as e:
             # 意外异常不再让裸 create_task 无声死掉
-            log.exception("Unexpected error in _send_message")
+            logger.exception("Unexpected error in _send_message")
             self._show_error(f"Unexpected error: {e}")
         finally:
             self._finish_streaming()
@@ -1601,7 +1608,7 @@ class MewCodeApp(App):
             pass
 
     def on_inline_plan_widget_responded(
-        self, event: "InlinePlanWidget.Responded"
+        self, event: InlinePlanWidget.Responded
     ) -> None:
         from mewcode.plan_dialog import InlinePlanWidget, PlanChoice
 
@@ -1659,7 +1666,7 @@ class MewCodeApp(App):
             pass
 
     def on_inline_ask_user_widget_responded(
-        self, event: "InlineAskUserWidget.Responded"
+        self, event: InlineAskUserWidget.Responded
     ) -> None:
         from mewcode.askuser_dialog import InlineAskUserWidget
 
@@ -1782,7 +1789,7 @@ class MewCodeApp(App):
             pass
 
     def on_inline_permission_widget_responded(
-        self, event: "InlinePermissionWidget.Responded"
+        self, event: InlinePermissionWidget.Responded
     ) -> None:
         from mewcode.permission_dialog import InlinePermissionWidget
 

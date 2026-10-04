@@ -4,11 +4,10 @@ import asyncio
 import json
 import re
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Awaitable, Callable
-
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -130,9 +129,8 @@ def parse_frontmatter(content: str) -> dict[str, str]:
             result["name"] = val
         elif key == "description":
             result["description"] = val
-        elif key == "type":
-            if val in VALID_TYPES:
-                result["type"] = val
+        elif key == "type" and val in VALID_TYPES:
+            result["type"] = val
     return result
 
 
@@ -218,7 +216,7 @@ def format_memory_manifest(memories: list[MemoryHeader]) -> str:
         scope_tag = f"[{m.scope}-scope] " if m.scope else ""
         type_tag = f"[{m.type}] " if m.type else ""
         ts = datetime.fromtimestamp(
-            m.mtime_ms / 1000, tz=timezone.utc
+            m.mtime_ms / 1000, tz=UTC
         ).strftime("%Y-%m-%dT%H:%M:%S.") + f"{m.mtime_ms % 1000:03d}Z"
         # 给 selector 看的是 filename（selector 回显它作为选择键）；
         # 绝对路径对选择没有信息量，还曾导致回显值全部被白名单丢弃

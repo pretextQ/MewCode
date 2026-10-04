@@ -5,7 +5,6 @@ import os
 
 from mewcode.commands.registry import Command, CommandContext, CommandType
 
-
 VERSION = "v0.9.0"
 
 
@@ -34,7 +33,7 @@ async def handle_status(ctx: CommandContext) -> None:
 
     if ctx.memory_manager:
         content = ctx.memory_manager.load()
-        mem_lines = [l for l in content.split("\n") if l.strip().startswith("- ")]
+        mem_lines = [ln for ln in content.split("\n") if ln.strip().startswith("- ")]
         lines.append(f"记忆: {len(mem_lines)} 条")
 
     work_dir = ctx.agent.work_dir if ctx.agent else os.getcwd()

@@ -19,7 +19,6 @@ from mewcode.memory.session import (
     validate_message_chain,
 )
 
-
 __all__ = [
     "MemoryManager",
     "RelevantMemory",

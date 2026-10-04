@@ -73,7 +73,7 @@ class MCPClient:
             args=self.config.args,
             env=build_child_env(self.config.env),
         )
-        devnull = open(os.devnull, "w")
+        devnull = open(os.devnull, "w")  # noqa: SIM115 — 生命周期由 AsyncExitStack 管理
         self._stack.callback(devnull.close)
         read, write = await self._stack.enter_async_context(
             stdio_client(params, errlog=devnull)

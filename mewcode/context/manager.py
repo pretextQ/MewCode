@@ -5,9 +5,10 @@ import os
 import shutil
 import threading
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from mewcode.client import ContextOverflowError
 from mewcode.conversation import (
@@ -472,7 +473,10 @@ def build_compact_messages(
     if has_keep_tail:
         content += "\n\n近期消息已原样保留。"
     if transcript_path:
-        content += f"\n\n如果你需要压缩前的具体细节（代码片段、报错信息等），请用 ReadFile 读取完整会话记录：{transcript_path}"
+        content += (
+            "\n\n如果你需要压缩前的具体细节（代码片段、报错信息等），"
+            f"请用 ReadFile 读取完整会话记录：{transcript_path}"
+        )
     if attachment:
         content += "\n\n---\n\n" + attachment
     return [
@@ -696,7 +700,7 @@ def _compute_keep_start_index(messages: list[Message]) -> int:
             break
 
         kept_tokens += tok
-        kept_count += 1
+        kept_count += 1  # noqa: SIM113 — 倒序扫描 + 双退出条件，改 enumerate 反而难读
         keep_start = i
 
         # 保底条件已满足（token 下限或消息条数下限达到其一）：
@@ -820,9 +824,9 @@ async def auto_compact(
     max_retries = 3
     llm_output: str | None = None
 
-    for attempt in range(max_retries):
+    for _attempt in range(max_retries):
         try:
-            from mewcode.tools.base import StreamEnd, StreamEvent, TextDelta
+            from mewcode.tools.base import StreamEnd, TextDelta
 
             collected_text = ""
             async for event in client.stream(summary_conv, system=SUMMARY_PROMPT):

@@ -22,5 +22,11 @@ jobs:
       - name: Sync dependencies
         run: uv sync
 
+      - name: Lint (ruff)
+        run: uv run ruff check .
+
+      - name: Type check (mypy core packages)
+        run: uv run mypy mewcode/tools mewcode/permissions mewcode/serialization.py
+
       - name: Run tests
         run: uv run pytest -q --maxfail=10

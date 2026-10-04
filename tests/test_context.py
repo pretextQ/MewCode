@@ -1,8 +1,6 @@
 
 from __future__ import annotations
 
-import os
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -70,7 +68,7 @@ class TestMakePersistedPreview:
         content = "a" * 5_000
         preview = make_persisted_preview(content, tmp_path / "test.txt")
         lines = preview.split("\n")
-        preview_line = [l for l in lines if l.startswith("aaa")]
+        preview_line = [ln for ln in lines if ln.startswith("aaa")]
         assert len(preview_line) == 1
         assert len(preview_line[0]) == 2_000
 
@@ -715,11 +713,11 @@ class TestCleanupToolResults:
         )
 
     def test_collect_referenced_persisted_paths(self, tmp_path):
-        from mewcode.conversation import Message
         from mewcode.context.manager import (
             collect_referenced_persisted_paths,
             make_persisted_preview,
         )
+        from mewcode.conversation import Message
 
         session = tmp_path / "session"
         session.mkdir()
@@ -731,11 +729,11 @@ class TestCleanupToolResults:
         assert collect_referenced_persisted_paths([persisted, plain], session) == {str(f1)}
 
     def test_collect_scans_tool_result_blocks(self, tmp_path):
-        from mewcode.conversation import Message, ToolResultBlock
         from mewcode.context.manager import (
             collect_referenced_persisted_paths,
             make_persisted_preview,
         )
+        from mewcode.conversation import Message, ToolResultBlock
 
         session = tmp_path / "session"
         session.mkdir()

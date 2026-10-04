@@ -4,8 +4,8 @@ import asyncio
 import json
 import logging
 import os
-from urllib.request import Request, urlopen
 from urllib.error import URLError
+from urllib.request import Request, urlopen
 
 from mewcode.hooks.models import Action, ActionResult, HookContext
 
@@ -31,7 +31,7 @@ async def execute_command(action: Action, ctx: HookContext) -> ActionResult:
             stdout, _ = await asyncio.wait_for(
                 proc.communicate(input=stdin_data), timeout=action.timeout
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             await proc.wait()
             return ActionResult(

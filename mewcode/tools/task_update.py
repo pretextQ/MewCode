@@ -23,7 +23,7 @@ class TaskUpdateParams(BaseModel):
 VALID_STATUSES = {"pending", "in_progress", "completed", "blocked"}
 
 
-class TaskUpdateTool(Tool):
+class TaskUpdateTool(Tool[TaskUpdateParams]):
     name = "TaskUpdate"
     description = (
         "Update a shared task's status, assignee, description, or dependencies. "
@@ -39,8 +39,8 @@ class TaskUpdateTool(Tool):
         self._team_name = team_name
 
 
-    async def execute(self, params: BaseModel) -> ToolResult:
-        p: TaskUpdateParams = params  # type: ignore[assignment]
+    async def execute(self, params: TaskUpdateParams) -> ToolResult:
+        p = params
 
         if p.status and p.status not in VALID_STATUSES:
             return ToolResult(

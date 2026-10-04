@@ -200,7 +200,7 @@ class MemoryManager:
         user_sections: list[str],
         project_sections: list[str],
     ) -> None:
-        real_lines = [l for l in lines if l.strip().startswith("- ") and not MemoryManager._is_placeholder(l)]
+        real_lines = [ln for ln in lines if ln.strip().startswith("- ") and not MemoryManager._is_placeholder(ln)]
         if not real_lines:
             return
 

@@ -8,12 +8,11 @@ from mewcode.commands.handlers.mcp import MCP_COMMAND
 from mewcode.commands.handlers.memory import MEMORY_COMMAND
 from mewcode.commands.handlers.permission import PERMISSION_COMMAND
 from mewcode.commands.handlers.plan import PLAN_COMMAND
+from mewcode.commands.handlers.rewind import REWIND_COMMAND
 from mewcode.commands.handlers.session import SESSION_COMMAND
 from mewcode.commands.handlers.skill import SKILL_COMMAND
-from mewcode.commands.handlers.rewind import REWIND_COMMAND
 from mewcode.commands.handlers.status import STATUS_COMMAND
 from mewcode.commands.registry import CommandRegistry
-
 
 ALL_COMMANDS = [
     HELP_COMMAND,

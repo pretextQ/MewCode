@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from textual.widget import Widget
-from textual.reactive import reactive
 from rich.text import Text
+from textual.reactive import reactive
+from textual.widget import Widget
 
 from mewcode.teams.progress import TeammateProgress
 

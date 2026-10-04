@@ -14,11 +14,7 @@ async def handle_memory(ctx: CommandContext) -> None:
     parts = ctx.args.split(None, 1)
     sub = parts[0] if parts else ""
 
-    if sub == "":
-        display = mm.get_display_text()
-        ctx.ui.add_system_message(display)
-
-    elif sub == "list":
+    if sub == "" or sub == "list":
         display = mm.get_display_text()
         ctx.ui.add_system_message(display)
 

@@ -56,7 +56,7 @@ class AgentLoader:
                 continue
             try:
                 raw = item.read_text(encoding="utf-8")
-                from mewcode.agents.parser import parse_frontmatter, _validate_agent_meta
+                from mewcode.agents.parser import _validate_agent_meta, parse_frontmatter
 
                 meta, body = parse_frontmatter(raw)
                 _validate_agent_meta(meta, item.name)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
@@ -8,7 +8,6 @@ from mewcode.tools.base import Tool, ToolResult
 
 if TYPE_CHECKING:
     from mewcode.agent import Agent
-    from mewcode.skills.directory import register_skill_tools
     from mewcode.skills.loader import SkillLoader
 
 
@@ -16,7 +15,7 @@ class LoadSkillParams(BaseModel):
     name: str = Field(description="The name of the skill to load")
 
 
-class LoadSkill(Tool):
+class LoadSkill(Tool[LoadSkillParams]):
     name = "LoadSkill"
     description = (
         "Load and activate a skill by name. "
@@ -43,7 +42,7 @@ class LoadSkill(Tool):
         self._agent = agent
 
 
-    async def execute(self, params: BaseModel) -> ToolResult:
+    async def execute(self, params: LoadSkillParams) -> ToolResult:
         assert isinstance(params, LoadSkillParams)
 
         if self._loader is None or self._agent is None:

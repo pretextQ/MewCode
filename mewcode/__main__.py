@@ -79,7 +79,11 @@ def main() -> None:
 
 async def _run_prompt(config, permission_mode, hook_engine, prompt: str) -> None:
     from mewcode.agent import Agent
+    from mewcode.agents.loader import AgentLoader
+    from mewcode.agents.task_manager import TaskManager
+    from mewcode.agents.trace import TraceManager
     from mewcode.client import create_client, resolve_context_window
+    from mewcode.config import WorktreeConfig
     from mewcode.conversation import ConversationManager
     from mewcode.memory.instructions import load_instructions
     from mewcode.permissions import (
@@ -88,18 +92,13 @@ async def _run_prompt(config, permission_mode, hook_engine, prompt: str) -> None
         PermissionChecker,
         RuleEngine,
     )
+    from mewcode.teams.manager import TeamManager
     from mewcode.tools import create_default_registry
-    from mewcode.agents.loader import AgentLoader
-    from mewcode.agents.task_manager import TaskManager
-    from mewcode.agents.trace import TraceManager
     from mewcode.tools.agent_tool import AgentTool
     from mewcode.tools.impl.tool_search import ToolSearchTool
-    from mewcode.teams.manager import TeamManager
-    from mewcode.teams.models import BackendType
     from mewcode.tools.team_create import TeamCreateTool
     from mewcode.tools.team_delete import TeamDeleteTool
     from mewcode.worktree import WorktreeManager
-    from mewcode.config import WorktreeConfig
 
     provider = config.providers[0]
     client = create_client(provider)

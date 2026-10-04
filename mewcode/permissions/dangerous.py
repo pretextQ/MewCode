@@ -23,8 +23,14 @@ _WINDOWS_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"format\s+[a-z]:", re.IGNORECASE), "格式化磁盘"),
     (re.compile(r"reg\s+add\s+[^\n]*\\currentversion\\run\b", re.IGNORECASE), "写入注册表自启动项"),
     (re.compile(r"certutil\s+[^\n]*-urlcache\b", re.IGNORECASE), "certutil 远程下载"),
-    (re.compile(r"powershell(\.\w+)?\s+[^\n]*-\w*enc(?:oded(?:command)?)?\b", re.IGNORECASE), "PowerShell 编码命令执行"),
-    (re.compile(r"remove-item\b(?=[^\n]*-recurse\b)(?=[^\n]*-force\b)(?=[^\n]*\s[a-z]:\\(?:\s|-|/|$))", re.IGNORECASE), "PowerShell 递归强制删除盘根"),
+    (re.compile(
+        r"powershell(\.\w+)?\s+[^\n]*-\w*enc(?:oded(?:command)?)?\b", re.IGNORECASE
+    ), "PowerShell 编码命令执行"),
+    (re.compile(
+        r"remove-item\b(?=[^\n]*-recurse\b)(?=[^\n]*-force\b)"
+        r"(?=[^\n]*\s[a-z]:\\(?:\s|-|/|$))",
+        re.IGNORECASE,
+    ), "PowerShell 递归强制删除盘根"),
 ]
 
 
@@ -63,10 +69,10 @@ def is_safe_command(command: str) -> bool:
             return False
     if _UNSAFE_PATH_RE.search(trimmed):
         return False
-    for safe in _SAFE_COMMANDS:
-        if trimmed == safe or trimmed.startswith(safe + " "):
-            return True
-    return False
+    return any(
+        trimmed == safe or trimmed.startswith(safe + " ")
+        for safe in _SAFE_COMMANDS
+    )
 
 
 class DangerousCommandDetector:

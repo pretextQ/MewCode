@@ -12,7 +12,6 @@ from mewcode.worktree.models import Worktree, WorktreeSession
 from mewcode.worktree.session import load_worktree_session, save_worktree_session
 from mewcode.worktree.slug import flatten_slug, validate_slug
 
-
 __all__ = [
     "Changes",
     "CleanupResult",

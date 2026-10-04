@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC
+
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
@@ -18,9 +20,9 @@ def _format_size(size: int) -> str:
 
 
 def _relative_time(meta: SessionMeta) -> str:
-    from datetime import datetime, timezone
-    now = datetime.now(timezone.utc)
-    dt = meta.last_active.replace(tzinfo=timezone.utc) if meta.last_active.tzinfo is None else meta.last_active
+    from datetime import datetime
+    now = datetime.now(UTC)
+    dt = meta.last_active.replace(tzinfo=UTC) if meta.last_active.tzinfo is None else meta.last_active
     delta = now - dt
     secs = int(delta.total_seconds())
     if secs < 60:

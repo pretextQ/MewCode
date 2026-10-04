@@ -6,8 +6,9 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any
 
 import pytest
 from pydantic import BaseModel
@@ -36,7 +37,6 @@ from mewcode.tools.base import (
     ToolCallComplete,
     ToolResult,
 )
-
 
 # ---------------------------------------------------------------------------
 # 测试基建
@@ -709,7 +709,6 @@ async def test_hook_command_injection_blocked_via_stdin_json(tmp_path: Path):
     file_path 携带 shell 元字符时，不得在用于安全防护的 hook 中执行第二条
     命令；hook 脚本应从 stdin 读到完整 JSON 上下文。
     """
-    import json as _json
     import sys as _sys
 
     from mewcode.hooks import Action, HookContext
@@ -758,11 +757,15 @@ async def test_bound_tools_resolve_relative_paths_against_work_dir(
     """绕过示例：in-process teammate 的 work_dir 是 worktree，沙箱按 worktree
     校验放行，文件却写进主仓库（§3.7）——绑定后相对路径必须落在 work_dir。"""
     from mewcode.tools.bash import Bash
-    from mewcode.tools.write_file import WriteFile, Params as WriteParams
-    from mewcode.tools.read_file import ReadFile, Params as ReadParams
-    from mewcode.tools.glob import Glob, Params as GlobParams
-    from mewcode.tools.grep import Grep, Params as GrepParams
     from mewcode.tools.bash import Params as BashParams
+    from mewcode.tools.glob import Glob
+    from mewcode.tools.glob import Params as GlobParams
+    from mewcode.tools.grep import Grep
+    from mewcode.tools.grep import Params as GrepParams
+    from mewcode.tools.read_file import Params as ReadParams
+    from mewcode.tools.read_file import ReadFile
+    from mewcode.tools.write_file import Params as WriteParams
+    from mewcode.tools.write_file import WriteFile
 
     repo = tmp_path / "repo"
     wt = tmp_path / "wt"
@@ -822,8 +825,8 @@ async def test_bound_tools_resolve_relative_paths_against_work_dir(
 
 def test_registry_bind_work_dir_preserves_state():
     from mewcode.tools import ToolRegistry
-    from mewcode.tools.write_file import WriteFile
     from mewcode.tools.bash import Bash
+    from mewcode.tools.write_file import WriteFile
 
     reg = ToolRegistry()
     reg.register(WriteFile())
@@ -904,7 +907,8 @@ class TestFileToolWindowsCompat:
         """LF-only 文件 Edit 后字节级行尾不变（win32 全文件 CRLF 化回归）。"""
         import asyncio
 
-        from mewcode.tools.edit_file import EditFile, Params as EditParams
+        from mewcode.tools.edit_file import EditFile
+        from mewcode.tools.edit_file import Params as EditParams
 
         f = tmp_path / "lf.py"
         f.write_bytes(b"a\nb\nc\n")
@@ -919,8 +923,10 @@ class TestFileToolWindowsCompat:
         """GBK 编码文件可读可编辑（严格 utf-8 解码会 UnicodeDecodeError）。"""
         import asyncio
 
-        from mewcode.tools.read_file import ReadFile, Params as ReadParams
-        from mewcode.tools.edit_file import EditFile, Params as EditParams
+        from mewcode.tools.edit_file import EditFile
+        from mewcode.tools.edit_file import Params as EditParams
+        from mewcode.tools.read_file import Params as ReadParams
+        from mewcode.tools.read_file import ReadFile
 
         f = tmp_path / "gbk.txt"
         f.write_bytes("中文内容第一行\n第二行\n".encode("gbk"))
@@ -940,7 +946,8 @@ class TestFileToolWindowsCompat:
     def test_crlf_file_edit_keeps_crlf(self, tmp_path):
         import asyncio
 
-        from mewcode.tools.edit_file import EditFile, Params as EditParams
+        from mewcode.tools.edit_file import EditFile
+        from mewcode.tools.edit_file import Params as EditParams
 
         f = tmp_path / "crlf.txt"
         f.write_bytes(b"a\r\nb\r\nc\r\n")
@@ -957,7 +964,8 @@ class TestFileToolWindowsCompat:
 
         from mewcode.filehistory import FileHistory
         from mewcode.tools.file_state_cache import FileStateCache
-        from mewcode.tools.write_file import WriteFile, Params as WriteParams
+        from mewcode.tools.write_file import Params as WriteParams
+        from mewcode.tools.write_file import WriteFile
 
         f = tmp_path / "x.txt"
         f.write_text("original")
@@ -971,8 +979,9 @@ class TestFileToolWindowsCompat:
         assert history._tracked == {}, history._tracked
 
     def test_negative_offset_rejected_by_validation(self):
-        from mewcode.tools.read_file import Params as ReadParams
         from pydantic import ValidationError
+
+        from mewcode.tools.read_file import Params as ReadParams
 
         with pytest.raises(ValidationError):
             ReadParams.model_validate({"file_path": "x", "offset": -1})
@@ -1016,8 +1025,7 @@ class TestGrepHardening:
     def test_result_cap(self, tmp_path):
         import asyncio
 
-        from mewcode.tools.grep import Grep, Params
-        from mewcode.tools.grep import GREP_MAX_RESULTS
+        from mewcode.tools.grep import GREP_MAX_RESULTS, Grep, Params
 
         for i in range(50):
             (tmp_path / f"f{i:03}.txt").write_text("hit\n" * 10)

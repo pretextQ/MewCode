@@ -17,7 +17,6 @@ import pytest
 from mewcode.hooks import Action, Hook, HookContext, HookEngine, parse_condition
 from mewcode.hooks.engine import OwnedHookEngine
 
-
 # ---------------------------------------------------------------------------
 # HookEngine.spawn：引用保全
 # ---------------------------------------------------------------------------
@@ -241,7 +240,6 @@ def test_parse_still_splits_on_real_operators() -> None:
 async def test_agent_memory_extraction_runs_in_background() -> None:
     from mewcode.agent import Agent
     from mewcode.tools import create_default_registry
-
     from tests.test_agent import MockLLMClient
 
     agent = Agent(MockLLMClient([]), create_default_registry(), "anthropic")
@@ -270,7 +268,6 @@ async def test_agent_memory_extraction_runs_in_background() -> None:
 async def test_agent_cancel_background_tasks() -> None:
     from mewcode.agent import Agent
     from mewcode.tools import create_default_registry
-
     from tests.test_agent import MockLLMClient
 
     agent = Agent(MockLLMClient([]), create_default_registry(), "anthropic")

@@ -19,7 +19,7 @@ class Params(BaseModel):
     new_string: str = Field(description="The replacement string")
 
 
-class EditFile(Tool):
+class EditFile(Tool[Params]):
     name = "EditFile"
     description = (
         "Replace an exact string in a file. The old_string must appear exactly once in the file.\n"
@@ -29,7 +29,12 @@ class EditFile(Tool):
     category = "write"
 
 
-    def __init__(self, file_cache: FileCache | None = None, file_history: Any = None, file_state_cache: FileStateCache | None = None) -> None:
+    def __init__(
+        self,
+        file_cache: FileCache | None = None,
+        file_history: Any = None,
+        file_state_cache: FileStateCache | None = None,
+    ) -> None:
         self._cache = file_cache
         self.file_history = file_history
         self._state_cache = file_state_cache

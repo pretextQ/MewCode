@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 import pytest
 
@@ -12,8 +13,8 @@ from mewcode.agent import (
     ErrorEvent,
     LoopComplete,
     PermissionRequest,
-    RetryEvent,
     PermissionResponse,
+    RetryEvent,
     StreamText,
     ToolResultEvent,
     ToolUseEvent,
@@ -21,9 +22,9 @@ from mewcode.agent import (
     UsageEvent,
     partition_tool_calls,
 )
-from mewcode.prompts import build_environment_context, build_plan_mode_reminder, build_system_prompt
 from mewcode.client import LLMClient
 from mewcode.conversation import ConversationManager
+from mewcode.prompts import build_environment_context, build_plan_mode_reminder, build_system_prompt
 from mewcode.serialization import build_anthropic_messages
 from mewcode.tools import create_default_registry
 from mewcode.tools.base import (

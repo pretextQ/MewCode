@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Coroutine
 from dataclasses import dataclass
-from typing import Coroutine, Any
+from typing import Any
 
 from mewcode.hooks.executors import execute_action
-from mewcode.hooks.models import ActionResult, Hook, HookContext, ToolRejectedError
+from mewcode.hooks.models import Hook, HookContext, ToolRejectedError
 
 log = logging.getLogger(__name__)
 

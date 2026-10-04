@@ -16,7 +16,7 @@ class TaskListParams(BaseModel):
     assignee: str | None = None
 
 
-class TaskListTool(Tool):
+class TaskListTool(Tool[TaskListParams]):
     name = "TaskList"
     description = (
         "List all shared tasks in the team's task board. "
@@ -32,8 +32,8 @@ class TaskListTool(Tool):
         self._team_name = team_name
 
 
-    async def execute(self, params: BaseModel) -> ToolResult:
-        p: TaskListParams = params  # type: ignore[assignment]
+    async def execute(self, params: TaskListParams) -> ToolResult:
+        p = params
 
         store = self._team_manager.get_task_store(self._team_name)
         if store is None:

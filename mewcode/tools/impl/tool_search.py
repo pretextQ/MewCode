@@ -16,7 +16,7 @@ class ToolSearchParams(BaseModel):
     max_results: int = 5
 
 
-class ToolSearchTool(Tool):
+class ToolSearchTool(Tool[ToolSearchParams]):
     name = "ToolSearch"
     description = (
         "Search for and load additional tools that are not immediately available. "
@@ -47,7 +47,7 @@ class ToolSearchTool(Tool):
         }
 
 
-    async def execute(self, params: BaseModel) -> ToolResult:
+    async def execute(self, params: ToolSearchParams) -> ToolResult:
         assert isinstance(params, ToolSearchParams)
         query = params.query
         max_results = params.max_results

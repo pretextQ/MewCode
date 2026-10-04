@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 import pytest
 
@@ -11,7 +12,6 @@ pytest.importorskip("textual")
 from mewcode.client import LLMClient  # noqa: E402
 from mewcode.config import ProviderConfig  # noqa: E402
 from mewcode.conversation import ConversationManager  # noqa: E402
-from mewcode.permissions import PermissionMode  # noqa: E402
 from mewcode.tools.base import StreamEnd, TextDelta  # noqa: E402
 
 
@@ -72,7 +72,7 @@ async def test_stateful_command_rejected_while_streaming(app_factory):
     assert "compact" in _STATEFUL_COMMANDS
 
     app = app_factory(_SlowClient())
-    async with app.run_test() as pilot:
+    async with app.run_test() as _pilot:
         # 不走 agent 循环：直接置流式状态后派发 /clear
         app._streaming = True
         app.agent = type("A", (), {"work_dir": "."})()
@@ -89,7 +89,7 @@ async def test_send_message_reentrancy_guard(app_factory):
     """快速双触发 _send_message：只有第一个实例运行。"""
     client = _SlowClient()
     app = app_factory(client)
-    async with app.run_test() as pilot:
+    async with app.run_test() as _pilot:
         agent = _SlowAgent()
         app.agent = agent
 
@@ -133,11 +133,10 @@ async def test_stream_text_after_tool_use_rebuilds_label(app_factory):
 
     直接驱动事件渲染逻辑：构造序列 [ToolUseEvent 清理 label → StreamText]。
     """
-    from mewcode.agent import RetryEvent
     from mewcode.app import MewCodeApp  # noqa: F401
 
     app = app_factory(_SlowClient())
-    async with app.run_test() as pilot:
+    async with app.run_test() as _pilot:
         app.agent = type(
             "A", (), {
                 "work_dir": ".",
@@ -157,7 +156,6 @@ async def test_stream_text_after_tool_use_rebuilds_label(app_factory):
 async def _retry_then_text_stream():
     """max_tokens 重试路径：RetryEvent 后继续产出 StreamText。"""
     from mewcode.agent import RetryEvent
-    from mewcode.tools.base import ToolCallComplete
 
     yield TextDelta(text="part1 ")
     yield RetryEvent(reason="max_tokens escalation")

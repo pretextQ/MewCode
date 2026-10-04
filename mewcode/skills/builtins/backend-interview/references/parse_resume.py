@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-
 SECTION_PATTERNS = {
     "name": re.compile(r"^#\s*(.+)", re.MULTILINE),
     "tech_stack": re.compile(
@@ -105,12 +104,12 @@ async def execute(file_path: str = "", **kwargs) -> str:
     sections = _extract_sections(content)
 
     lines = [
-        f"## Resume Analysis",
-        f"",
+        "## Resume Analysis",
+        "",
         f"**Name**: {name}",
         f"**Experience**: {years} years",
-        f"",
-        f"### Tech Stack",
+        "",
+        "### Tech Stack",
     ]
 
     if explicit_tech:

@@ -6,8 +6,8 @@ import os
 import random
 import string
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
-from enum import Enum
+from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 from pathlib import Path
 from typing import IO, Any
 
@@ -28,7 +28,7 @@ SESSION_SUMMARY_PROMPT = (
 # ---------------------------------------------------------------------------
 
 
-class RecordType(str, Enum):
+class RecordType(StrEnum):
     SYSTEM_PROMPT = "system_prompt"
     USER = "user"
     ASSISTANT = "assistant"
@@ -78,7 +78,7 @@ class SessionRecord:
 
     @classmethod
     def from_message(cls, message: Message) -> list[SessionRecord]:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         records: list[SessionRecord] = []
 
         if message.tool_results:
@@ -159,7 +159,7 @@ def make_compact_boundary(summary: str, keep: list[Message]) -> SessionRecord:
     return SessionRecord(
         type=RecordType.COMPACT_BOUNDARY,
         content=payload,
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
     )
 
 
@@ -230,7 +230,8 @@ def records_to_messages(records: list[SessionRecord]) -> list[Message]:
             messages.append(
                 Message(
                     role="user",
-                    content="本次会话延续自之前的对话，因上下文空间不足进行了压缩。以下是早期对话的摘要：\n\n" + (record.content or ""),
+                    content="本次会话延续自之前的对话，因上下文空间不足进行了压缩。以下是早期对话的摘要：\n\n"
+                    + (record.content or ""),
                 )
             )
             continue
@@ -241,7 +242,12 @@ def records_to_messages(records: list[SessionRecord]) -> list[Message]:
             # 权威的那一条；但在此展开可以保证 records_to_messages 对任何
             # 直接调用者都保持自洽。
             summary, keep_messages = parse_compact_boundary(record)
-            messages.append(Message(role="user", content="本次会话延续自之前的对话，因上下文空间不足进行了压缩。以下是早期对话的摘要：\n\n" + summary))
+            messages.append(
+            Message(
+                role="user",
+                content="本次会话延续自之前的对话，因上下文空间不足进行了压缩。以下是早期对话的摘要：\n\n" + summary,
+            )
+        )
             messages.extend(keep_messages)
             continue
 
@@ -318,8 +324,8 @@ class SessionMeta:
     summary: str = ""
     message_count: int = 0
     total_tokens: int = 0
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    last_active: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    last_active: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def save(self, path: Path) -> None:
         data = {
@@ -377,7 +383,7 @@ class Session:
         self._file.flush()
 
         self.meta.message_count += 1
-        self.meta.last_active = datetime.now(timezone.utc)
+        self.meta.last_active = datetime.now(UTC)
 
         if not self.meta.title and message.role == "user" and message.content:
             self.meta.title = message.content[:TITLE_MAX_LENGTH]
@@ -393,7 +399,7 @@ class Session:
         """
         self._file.write(record.to_jsonl() + "\n")
         self._file.flush()
-        self.meta.last_active = datetime.now(timezone.utc)
+        self.meta.last_active = datetime.now(UTC)
         self.meta.save(self._sessions_dir / f"{self.session_id}.meta")
 
 
@@ -584,7 +590,7 @@ class SessionManager:
         return deleted
 
     def cleanup(self, max_age_days: int = DEFAULT_MAX_AGE_DAYS) -> int:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+        cutoff = datetime.now(UTC) - timedelta(days=max_age_days)
         removed = 0
 
         for meta_path in list(self._sessions_dir.glob("*.meta")):

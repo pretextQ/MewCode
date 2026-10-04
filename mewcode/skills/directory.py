@@ -3,8 +3,9 @@ from __future__ import annotations
 import importlib.util
 import json
 import logging
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -62,7 +63,7 @@ class _DynamicParams(BaseModel):
     model_config = {"extra": "allow"}
 
 
-class SkillCustomTool(Tool):
+class SkillCustomTool(Tool[BaseModel]):
 
 
     def __init__(

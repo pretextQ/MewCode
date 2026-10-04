@@ -4,10 +4,11 @@ import asyncio
 import logging
 import time
 import uuid
+from collections.abc import AsyncIterator, Callable, Coroutine
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, AsyncIterator, Callable, Coroutine
+from typing import Any
 
 from pydantic import ValidationError
 
@@ -16,7 +17,6 @@ from mewcode.context import (
     CompactBoundary,
     CompactCircuitBreaker,
     CompactEvent,
-    ContentReplacementRecord,
     ContentReplacementState,
     RecoveryState,
     append_replacement_records,
@@ -24,19 +24,15 @@ from mewcode.context import (
     auto_compact,
     create_replacement_state,
     ensure_session_dir,
-    load_replacement_records,
-    reconstruct_replacement_state,
 )
 from mewcode.conversation import ConversationManager, ToolResultBlock, ToolUseBlock
 from mewcode.conversation import ThinkingBlock as ConvThinkingBlock
+from mewcode.hooks import HookContext, HookEngine
 from mewcode.memory.auto_memory import MemoryManager
 from mewcode.permissions import (
-    Decision,
     PermissionChecker,
     PermissionMode,
 )
-from mewcode.hooks import HookContext, HookEngine, ToolRejectedError
-from mewcode.hooks.engine import HookNotification
 from mewcode.prompts import build_environment_context, build_plan_mode_reminder, build_system_prompt
 from mewcode.tools import ToolRegistry
 from mewcode.tools.base import (
@@ -123,7 +119,7 @@ class CompactNotification:
     message: str
     # 结构化 boundary（摘要 + 原文保留尾部），UI/session 层用它持久化 compact_boundary 记录。
     # 失败路径下为 None。
-    boundary: "CompactBoundary | None" = None
+    boundary: CompactBoundary | None = None
 
 
 @dataclass
@@ -202,9 +198,7 @@ class StreamCollector:
                 self.response.thinking_blocks.append(
                     ThinkingBlock(thinking=event.thinking, signature=event.signature)
                 )
-            elif isinstance(event, ToolCallStart):
-                pass
-            elif isinstance(event, ToolCallDelta):
+            elif isinstance(event, (ToolCallStart, ToolCallDelta)):
                 pass
             elif isinstance(event, ToolCallComplete):
                 self.response.tool_calls.append(event)
@@ -354,6 +348,10 @@ class Agent:
         self.coordinator_mode: bool = False
         self.team_name: str = ""
         self._team_manager: Any = None
+        # 由 teams 工具动态写回：team_create 缓存完整工具集，fork 型子代理
+        # 携带分叉时的对话快照。
+        self._full_registry: ToolRegistry | None = None
+        self._fork_conversation: ConversationManager | None = None
         self.notification_fn: Callable[[], list[str]] | None = None
         self.file_history: Any = None
 
@@ -372,8 +370,8 @@ class Agent:
     def _get_plan_path(self) -> Path:
         if self._plan_path_cache is not None:
             return self._plan_path_cache
-        import random
         import datetime
+        import random
         _ADJECTIVES = ["bold", "bright", "calm", "cool", "deep", "fair", "fast", "fine",
                        "glad", "keen", "kind", "lean", "mild", "neat", "pure", "safe",
                        "slim", "soft", "tall", "warm", "wise", "grand", "swift", "vivid"]
@@ -570,7 +568,10 @@ class Agent:
 
             collector = StreamCollector()
             llm_stream = self._stream_with_retry(
-                lambda: self.client.stream(api_conv, system=system, tools=tools)
+                # 默认参数绑定当前迭代的循环变量，防止重试时读到下一迭代值
+                lambda conv=api_conv, sys=system, t=tools: self.client.stream(
+                    conv, system=sys, tools=t
+                )
             )
             async for event in collector.consume(llm_stream):
                 yield event
@@ -1033,7 +1034,7 @@ class Agent:
                 *(self._execute_raw_tool(tc) for _, tc in runnable),
                 return_exceptions=True,
             )
-            for (i, tc), r in zip(runnable, gathered):
+            for (i, tc), r in zip(runnable, gathered, strict=True):
                 if isinstance(r, BaseException):
                     results[i] = _ToolExecResult(
                         tool_id=tc.tool_id,
@@ -1174,7 +1175,7 @@ class Agent:
 
         def _read() -> str | None:
             try:
-                with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                with open(path, encoding="utf-8", errors="replace") as fh:
                     return fh.read(2048)
             except OSError:
                 return None
@@ -1328,7 +1329,10 @@ class Agent:
 
             collector = StreamCollector()
             llm_stream = self._stream_with_retry(
-                lambda: self.client.stream(api_conv, system=system, tools=tools)
+                # 默认参数绑定当前迭代的循环变量，防止重试时读到下一迭代值
+                lambda conv=api_conv, sys=system, t=tools: self.client.stream(
+                    conv, system=sys, tools=t
+                )
             )
             async for _event in collector.consume(llm_stream):
                 pass

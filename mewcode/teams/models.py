@@ -2,15 +2,14 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import asdict, dataclass, field
-from enum import Enum
+from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
-from typing import Optional
 
 from mewcode.teams.progress import TeammateProgress
 
 
-class BackendType(str, Enum):
+class BackendType(StrEnum):
     TMUX = "tmux"
     ITERM2 = "iterm2"
     IN_PROCESS = "in-process"
@@ -25,7 +24,7 @@ class TeammateInfo:
     worktree_path: str
     backend_type: str  # BackendType value
     is_active: bool | None = None
-    progress: Optional[TeammateProgress] = None
+    progress: TeammateProgress | None = None
 
     def to_dict(self) -> dict:
         # Exclude progress (runtime-only, contains threading.Lock)

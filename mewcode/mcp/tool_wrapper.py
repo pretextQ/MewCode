@@ -54,7 +54,7 @@ def _extract_text(content: list[Any]) -> str:
     return "\n".join(parts) if parts else "(no output)"
 
 
-class MCPToolWrapper(Tool):
+class MCPToolWrapper(Tool[BaseModel]):
     def __init__(
         self,
         server_name: str,

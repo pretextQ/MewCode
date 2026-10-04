@@ -19,7 +19,7 @@ class Params(BaseModel):
     limit: int = Field(default=2000, ge=0, description="Maximum number of lines to read")
 
 
-class ReadFile(Tool):
+class ReadFile(Tool[Params]):
     name = "ReadFile"
     description = "Read a file and return its contents with line numbers."
     params_model = Params
