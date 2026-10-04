@@ -11,6 +11,9 @@
 - **网络**：``bridge``（agent 必须能访问 LLM API）或 ``none``（完全隔离，用于
   纯验证类执行）。细粒度 egress 白名单（只放行 LLM API 与 git 远端）需要
   宿主侧 iptables/DOCKER-USER 规则或代理，见 docs/fixes/backlog.md。
+- **内部工具链也在容器里**（M2 W3）：MCP server 配置随最小配置进容器，
+  stdio server 由容器内的 agent 进程自己拉起——宿主上不需要装那些工具，
+  容器退出即全部消失。server 需要的凭据只经环境变量白名单进容器。
 - **可降级**：无容器运行时（或无权限）时 ``available()`` 为假，调用方回退
   M1 直跑模式（验收标准 4）。
 """
@@ -34,6 +37,7 @@ log = logging.getLogger(__name__)
 
 PROBE_TIMEOUT = 30
 IMAGE_BUILD_TIMEOUT = 900
+REQUIREMENTS_TIMEOUT = 120
 CONTAINER_STOP_GRACE = 10
 #: 容器内挂载点
 SRC_MOUNT = "/opt/mewcode"
@@ -80,6 +84,35 @@ def sandbox_user(config: SandboxConfig) -> str:
         if uid != 0:
             return f"{uid}:{os.getgid()}"
     return "1000:1000"
+
+
+def _mcp_config_payload(cfg) -> dict:
+    """把 MCP server 配置转成容器配置里的 YAML 结构（字段与 validator 对齐）。"""
+    payload: dict = {"name": cfg.name, "transport": cfg.transport}
+    if cfg.command:
+        payload["command"] = cfg.command
+        payload["args"] = list(cfg.args)
+    if cfg.url:
+        payload["url"] = cfg.url
+    if cfg.headers:
+        payload["headers"] = dict(cfg.headers)
+    if cfg.env:
+        payload["env"] = dict(cfg.env)
+    if cfg.description:
+        payload["description"] = cfg.description
+    return payload
+
+
+def mcp_env_passthrough(mcp_servers: list | None) -> set[str]:
+    """MCP 配置引用的宿主环境变量名（``${VAR}`` 形式，值不进配置文件）。"""
+    from mewcode.config import find_env_placeholders
+
+    names: set[str] = set()
+    for cfg in mcp_servers or []:
+        for value in list(getattr(cfg, "env", {}).values()) + list(getattr(cfg, "headers", {}).values()):
+            if isinstance(value, str):
+                names |= find_env_placeholders(value)
+    return names
 
 
 class DockerSandbox:
@@ -188,9 +221,20 @@ class DockerSandbox:
         ])
 
     async def mewcode_requirements(self) -> str:
-        """MewCode 的运行依赖（从本仓库的 pyproject/uv.lock 导出，缓存一次）。"""
+        """MewCode 的运行依赖——**按 uv.lock 导出锁定版本**。
+
+        容器里的内核必须与宿主同版本。此前直接读 pyproject 的宽松声明
+        （``mcp>=1.12.0``），容器会解析出 mcp 2.x 而宿主是锁定的 1.27——
+        容器内的 MCP server 一 import 就崩（真机实测踩到）。锁文件在就
+        一律用它；导不出来再退化为宽松声明并记 warning。
+        """
         if self._requirements_cache:
             return self._requirements_cache
+        locked = await self._locked_requirements()
+        if locked:
+            self._requirements_cache = locked
+            return locked
+
         script = (
             "import tomllib, pathlib;"
             "d=tomllib.loads(pathlib.Path('pyproject.toml').read_text(encoding='utf-8'));"
@@ -202,20 +246,59 @@ class DockerSandbox:
         self._requirements_cache = out
         return out
 
-    def image_tag(self, repo_name: str, dockerfile: str, project_requirements: str) -> str:
-        digest = hashlib.sha256((dockerfile + "\n---\n" + project_requirements).encode("utf-8")).hexdigest()[:12]
+    async def _locked_requirements(self) -> str:
+        """``uv export --frozen``：不改锁文件、不装项目本身，只导出依赖钉版。"""
+        code, out = await self._run(
+            [
+                "uv", "export", "--frozen", "--no-dev", "--no-emit-project",
+                "--no-annotate", "--no-header",
+            ],
+            timeout=REQUIREMENTS_TIMEOUT,
+            cwd=self.mewcode_src,
+        )
+        if code != 0 or not out.strip():
+            log.warning(
+                "sandbox: `uv export` unavailable, falling back to unpinned pyproject deps: %s",
+                out.strip()[-300:],
+            )
+            return ""
+        return out
+
+    def image_tag(
+        self,
+        repo_name: str,
+        dockerfile: str,
+        project_requirements: str,
+        mewcode_requirements: str = "",
+    ) -> str:
+        """内容寻址 tag：**依赖内容也算进摘要**。
+
+        只哈希 Dockerfile 的话，锁文件更新后 tag 不变、旧镜像被继续复用——
+        容器里的内核版本就悄悄落后于宿主（真机踩到过的 mcp 2.x 事故正是
+        这一类）。三份内容一起进摘要，任何一份变了就重建。
+        """
+        digest = hashlib.sha256(
+            (
+                dockerfile
+                + "\n--- mewcode deps ---\n"
+                + mewcode_requirements
+                + "\n--- project deps ---\n"
+                + project_requirements
+            ).encode("utf-8")
+        ).hexdigest()[:12]
         safe_repo = "".join(c if c.isalnum() or c in "-_." else "-" for c in repo_name) or "repo"
         return f"{self.config.image_prefix}-{safe_repo}:{digest}"
 
     async def ensure_image(self, repo_name: str, repo_path: str | None = None) -> str:
         """确保项目镜像存在（内容寻址 tag：依赖不变就复用缓存）。"""
         dockerfile = self.dockerfile()
+        mewcode_requirements = await self.mewcode_requirements()
         project_requirements = ""
         if repo_path:
             candidate = Path(repo_path) / "requirements.txt"
             if candidate.is_file():
                 project_requirements = candidate.read_text(encoding="utf-8", errors="replace")
-        tag = self.image_tag(repo_name, dockerfile, project_requirements)
+        tag = self.image_tag(repo_name, dockerfile, project_requirements, mewcode_requirements)
 
         code, _ = await self._run([self.runtime, "image", "inspect", tag], timeout=PROBE_TIMEOUT)
         if code == 0:
@@ -224,7 +307,7 @@ class DockerSandbox:
         context = self.work_root / "build" / tag.replace(":", "_")
         context.mkdir(parents=True, exist_ok=True)
         (context / "Dockerfile").write_text(dockerfile, encoding="utf-8")
-        (context / "mewcode-requirements.txt").write_text(await self.mewcode_requirements(), encoding="utf-8")
+        (context / "mewcode-requirements.txt").write_text(mewcode_requirements, encoding="utf-8")
         (context / "project-requirements.txt").write_text(project_requirements, encoding="utf-8")
 
         log.info("sandbox: building image %s (this can take a while)", tag)
@@ -252,14 +335,17 @@ class DockerSandbox:
         prompt_path: str = "",
         env: dict[str, str] | None = None,
         network: str | None = None,
+        mount_src: bool = False,
     ) -> list[str]:
         """组装 `docker run` 参数（纯函数，便于单测覆盖隔离与限额项）。
 
         ``shell_command`` 是容器内要跑的命令；给了 config/prompt 时同时挂载
-        mewcode 源码与最小配置（agent 模式），否则只挂载 worktree（验证类命令）。
+        mewcode 源码与最小配置（agent 模式）。``mount_src`` 让验证类命令也能
+        拿到只读源码（跑 mewcode 自身的内部工具时需要，例如 MCP server 探活）。
         """
         env = env or {}
         agent_mode = bool(config_path and prompt_path)
+        with_src = agent_mode or mount_src
         args = [self.runtime, "run", "--name", name]
         if not self.config.keep_containers:
             args.append("--rm")
@@ -282,9 +368,12 @@ class DockerSandbox:
         ]
         if agent_mode:
             args += [
-                "-v", f"{self.mewcode_src}:{SRC_MOUNT}:ro",
                 "-v", f"{Path(config_path).resolve()}:{CONFIG_MOUNT}:ro",
                 "-v", f"{Path(prompt_path).resolve()}:{PROMPT_MOUNT}:ro",
+            ]
+        if with_src:
+            args += [
+                "-v", f"{self.mewcode_src}:{SRC_MOUNT}:ro",
                 "-e", f"PYTHONPATH={SRC_MOUNT}",
             ]
         for key, value in sorted(env.items()):
@@ -299,11 +388,19 @@ class DockerSandbox:
             f"--config {CONFIG_MOUNT} --mode dontAsk"
         )
 
-    def write_container_config(self, path: Path, provider_config) -> Path:
-        """写容器用的最小配置：不含任何密钥（key 只经环境变量注入）。"""
+    def write_container_config(
+        self, path: Path, provider_config, mcp_servers: list | None = None
+    ) -> Path:
+        """写容器用的最小配置：不含任何密钥（key 只经环境变量注入）。
+
+        MCP server 配置随配置进容器（M2 W3）：容器内的 agent 由这条路径
+        拿到内部工具链。env 里只写 ``${VAR}`` 占位符，真实值经
+        :meth:`container_env` 白名单透传——配置文件在容器里可读，密钥
+        不能出现在里面。
+        """
         import yaml
 
-        payload = {
+        payload: dict = {
             "providers": [
                 {
                     "name": provider_config.name,
@@ -316,16 +413,26 @@ class DockerSandbox:
             ],
             "permission_mode": "dontAsk",
         }
+        if mcp_servers:
+            payload["mcp_servers"] = [_mcp_config_payload(cfg) for cfg in mcp_servers]
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(yaml.safe_dump(payload, allow_unicode=True, sort_keys=False), encoding="utf-8")
         return path
 
-    def container_env(self, provider_config) -> dict[str, str]:
-        """把白名单里的宿主环境变量透传给容器（LLM key 只走这条路）。"""
+    def container_env(self, provider_config, mcp_servers: list | None = None) -> dict[str, str]:
+        """把白名单里的宿主环境变量透传给容器（LLM key 只走这条路）。
+
+        ``mcp_servers`` 里 ``${VAR}`` 引用的变量名自动进白名单：运营方在
+        配置里显式引用了它，就等于声明"这个名字要进容器"。
+        """
         from mewcode.config import _ENV_KEY_MAP  # noqa: PLC0415 - 与 config 的映射保持一致
 
         env: dict[str, str] = {}
-        needed = {_ENV_KEY_MAP.get(provider_config.protocol, "")} | set(self.config.env_passthrough)
+        needed = (
+            {_ENV_KEY_MAP.get(provider_config.protocol, "")}
+            | set(self.config.env_passthrough)
+            | mcp_env_passthrough(mcp_servers)
+        )
         for key in sorted(k for k in needed if k):
             value = os.environ.get(key, "")
             if value:
@@ -342,6 +449,7 @@ class DockerSandbox:
         repo_name: str = "job",
         timeout: float,
         network: str | None = None,
+        mcp_servers: list | None = None,
     ) -> SandboxRunResult:
         """在容器内跑一次 agent，返回结构化结果（超时则强制杀掉容器）。"""
         if not await self.available():
@@ -352,7 +460,9 @@ class DockerSandbox:
         run_dir.mkdir(parents=True, exist_ok=True)
         prompt_path = run_dir / "prompt.txt"
         prompt_path.write_text(prompt, encoding="utf-8")
-        config_path = self.write_container_config(run_dir / "config.yaml", provider_config)
+        config_path = self.write_container_config(
+            run_dir / "config.yaml", provider_config, mcp_servers=mcp_servers
+        )
 
         image = await self.ensure_image(repo_name, work_dir)
         name = self.container_name(job_id)
@@ -363,7 +473,7 @@ class DockerSandbox:
             shell_command=self.agent_shell_command(),
             config_path=str(config_path),
             prompt_path=str(prompt_path),
-            env=self.container_env(provider_config),
+            env=self.container_env(provider_config, mcp_servers=mcp_servers),
             network=network,
         )
 
@@ -387,8 +497,13 @@ class DockerSandbox:
         repo_name: str = "job",
         timeout: float,
         network: str | None = None,
+        mount_src: bool = False,
     ) -> SandboxRunResult:
-        """在容器里跑一条仓库命令（测试/验证类），只挂载 worktree。"""
+        """在容器里跑一条仓库命令（测试/验证类），只挂载 worktree。
+
+        ``mount_src=True`` 额外只读挂载 mewcode 源码并设 PYTHONPATH——跑
+        mewcode 自身能力（如 MCP server 探活）时用，普通仓库命令不需要。
+        """
         if not await self.available():
             raise SandboxUnavailable(f"container runtime '{self.runtime}' is not usable")
         image = await self.ensure_image(repo_name, work_dir)
@@ -399,6 +514,7 @@ class DockerSandbox:
             work_dir=work_dir,
             shell_command=command,
             network=network,
+            mount_src=mount_src,
         )
         code, out = await self._run(argv, timeout=timeout)
         if code == 124:

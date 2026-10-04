@@ -70,6 +70,9 @@ class AgentRunOutcome:
     tool_calls: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
+    #: 内部工具链使用情况（M2 W3）：PR body 里"这次修复用到了哪些内部系统"的证据
+    mcp_tool_calls: int = 0
+    mcp_tools_used: list[str] = field(default_factory=list)
 
     @property
     def total_tokens(self) -> int:
@@ -318,6 +321,23 @@ class HeadlessAgentRunner:
             hook_engine=self.hook_engine,
         )
 
+    async def _build_agent_with_tools(self, work_dir: str, on_event):
+        """建 agent 并接上内部工具链（只读 MCP，M2 W3）。
+
+        直跑模式下 MCP server 是本进程拉起的 stdio 子进程；注册失败只记
+        事件、不阻塞作业——内部工具是增强项，不是修复的前提。
+        未配置任何 server 时完全不碰注册表（零开销、零行为变化）。
+        """
+        from mewcode.mcp.bootstrap import MCPBootstrapResult, register_mcp_tools
+
+        agent = self._build_agent(work_dir)
+        if not self.config.mcp_servers:
+            return agent, MCPBootstrapResult()
+        result = await register_mcp_tools(agent.registry, self.config.mcp_servers)
+        kind = "mcp_ready" if result.ready else "mcp_error"
+        on_event({"type": kind, "detail": f"direct: {result.summary()}"})
+        return agent, result
+
     async def run(
         self, job: Job, work_dir: str, prompt: str, on_event: Callable[[dict[str, Any]], None]
     ) -> AgentRunOutcome:
@@ -330,13 +350,21 @@ class HeadlessAgentRunner:
     ) -> AgentRunOutcome:
         """容器内跑 agent；容器输出即结构化摘要，直接回读。"""
         on_event({"type": "sandbox", "detail": f"running agent in sandbox for {job.id}"})
+        mcp_servers = list(self.config.mcp_servers or [])
+        if mcp_servers:
+            # MCP server 是**容器内**拉起的 stdio 子进程：宿主看不到它们的连接，
+            # 这里记下"配置了哪些"，使用证据由容器回报的 mcpCalls/mcpTools 补上。
+            on_event({
+                "type": "mcp_ready",
+                "detail": "in-container: servers=" + ",".join(c.name for c in mcp_servers),
+            })
         # 容器自己设一个比 worker 超时略早的止损点：这样超时是"容器被停"而不是
         # 整个 job 被 wait_for 取消——前者能留下容器日志与明确的超时原因。
         timeout = max(60.0, float(self.config.job_timeout_seconds) - 30.0)
         try:
             result = await self.sandbox.run_agent(
                 job.id, work_dir, prompt, self.provider,
-                repo_name=job.repo, timeout=timeout,
+                repo_name=job.repo, timeout=timeout, mcp_servers=mcp_servers,
             )
         except Exception as e:  # 沙箱自身故障：记事件并冒泡（执行链会 escalate）
             on_event({"type": "sandbox_error", "detail": f"{type(e).__name__}: {e}"})
@@ -351,19 +379,26 @@ class HeadlessAgentRunner:
         if result.exit_code != 0 and not result.result_text:
             tail = (result.stderr or result.stdout or "").strip()[-1500:]
             raise RuntimeError(f"sandbox agent exited with {result.exit_code}: {tail}")
+        mcp_calls = int(result.extra.get("mcpCalls", 0) or 0)
+        mcp_tools = [str(name) for name in (result.extra.get("mcpTools") or [])]
+        if mcp_calls:
+            on_event({"type": "mcp_used", "detail": f"{mcp_calls} call(s): {', '.join(mcp_tools)}"})
         return AgentRunOutcome(
             final_text=result.result_text,
             tool_calls=result.tool_calls,
             input_tokens=result.input_tokens,
             output_tokens=result.output_tokens,
+            mcp_tool_calls=mcp_calls,
+            mcp_tools_used=mcp_tools,
         )
 
     async def _run_direct(
         self, job: Job, work_dir: str, prompt: str, on_event: Callable[[dict[str, Any]], None]
     ) -> AgentRunOutcome:
         from mewcode.conversation import ConversationManager
+        from mewcode.mcp.bootstrap import close_mcp
 
-        agent = self._build_agent(work_dir)
+        agent, mcp_result = await self._build_agent_with_tools(work_dir, on_event)
         outcome = AgentRunOutcome()
         budget = self.config.token_budget
 
@@ -381,14 +416,26 @@ class HeadlessAgentRunner:
                     )
             elif etype == "tool_use":
                 outcome.tool_calls += 1
+                name = str(event.get("toolName") or "")
+                if name.startswith("mcp_"):
+                    outcome.mcp_tool_calls += 1
+                    if name not in outcome.mcp_tools_used:
+                        outcome.mcp_tools_used.append(name)
 
         try:
             outcome.final_text = await agent.run_to_completion(
                 prompt, ConversationManager(), event_callback=_callback
             )
         finally:
-            # 显式收尾：agent 可能留下后台任务（子代理 / fire-and-forget）
+            # 显式收尾：agent 可能留下后台任务（子代理 / fire-and-forget），
+            # MCP 侧还挂着 stdio 子进程——都不能依赖进程退出兜底（仓库已知坑）
             await agent.cancel_background_tasks()
+            await close_mcp(mcp_result)
+        if outcome.mcp_tool_calls:
+            on_event({
+                "type": "mcp_used",
+                "detail": f"{outcome.mcp_tool_calls} call(s): {', '.join(outcome.mcp_tools_used)}",
+            })
         return outcome
 
 
@@ -562,6 +609,9 @@ class ExecutionChain:
                 baseline=baseline.output if baseline else "",
                 feedback=feedback,
                 skills=self._skill_bodies(work_dir),
+                mcp_servers=[
+                    (cfg.name, cfg.description) for cfg in (self.config.mcp_servers or [])
+                ],
             )
             if attempt == 1:
                 await self._event(job.id, "agent_prompt", prompt)
@@ -731,6 +781,9 @@ class ExecutionChain:
             elif etype == "usage":
                 usage = event.get("usage") or {}
                 detail = f"in={usage.get('inputTokens', 0)} out={usage.get('outputTokens', 0)}"
+            elif etype in ("mcp_ready", "mcp_error", "mcp_used"):
+                # 内部工具链的关键节点：注册结果与使用次数进审计（PR body 的证据）
+                detail = str(event.get("detail", ""))[:500]
             else:
                 return
             tasks.append(asyncio.create_task(self._event(job.id, f"agent_{etype}", detail)))

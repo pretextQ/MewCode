@@ -134,12 +134,16 @@ def build_alert_prompt(
     baseline: str = "",
     feedback: str = "",
     skills: dict[str, str] | None = None,
+    mcp_servers: list[tuple[str, str]] | None = None,
 ) -> str:
-    """组装交给 agent 的首轮指令（M1 通用 SOP + M2 规范注入）。
+    """组装交给 agent 的首轮指令（M1 通用 SOP + M2 规范注入 + 内部工具链）。
 
     ``feedback`` 用于验证失败后的重试：把上一轮的测试输出交给 agent，
     否则它会重复同样的修复思路（这正是有界重试存在的意义）。
     ``skills`` 是内联的规范正文（见 :func:`load_skill_bodies`）。
+    ``mcp_servers`` 是 (名字, 说明) 列表：内部工具在工具表里可见，但没人
+    告诉 agent "日志不在告警里、要去查"——它就可能直接猜。这一段就是那句
+    提醒，只描述"能用什么"，不规定"必须用"。
     """
     context = render_alert_context(job)
     logs = extract_logs(job)
@@ -172,6 +176,24 @@ def build_alert_prompt(
 
     for name, body in (skills or {}).items():
         sections += ["", f"## Organization skill: {name}", body]
+
+    if mcp_servers:
+        sections += [
+            "",
+            "## Internal tools (read-only MCP servers)",
+            "Besides your built-in tools you have read-only access to internal systems:",
+        ]
+        for name, description in mcp_servers:
+            line = f"- `{name}`"
+            if description:
+                line += f" — {description}"
+            sections.append(line)
+        sections += [
+            "Their tools appear in your tool list as `mcp_<server>_<tool>`",
+            "(e.g. `mcp_logs_query_logs`). Use them when the alert evidence above is",
+            "not enough to localise the problem — do not guess what the internal",
+            "systems would show if you can simply look.",
+        ]
 
     sections += [
         "",

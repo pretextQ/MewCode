@@ -93,11 +93,24 @@ def resolve_env_vars(value: str) -> str:
     return _ENV_VAR_RE.sub(lambda m: os.environ.get(m.group(1), m.group(0)), value)
 
 
+def find_env_placeholders(value: str) -> set[str]:
+    """取出 ``${VAR}`` 里引用的变量名。
+
+    容器透传白名单用它：MCP 配置里写了 ``${GITHUB_TOKEN}``，容器里就得有
+    这个名字——但值只经容器环境变量注入，绝不落进配置文件（配置文件在
+    容器里是可读的，密钥不能在里面）。
+    """
+    return set(_ENV_VAR_RE.findall(value))
+
+
 # MCP stdio 子进程按白名单继承主机环境变量：Windows 上缺 SystemRoot /
 # COMSPEC / TEMP 会导致 npx 等 stdio server 起不来；白名单之外（如
 # *_API_KEY）不泄漏给子进程。
+# PYTHONPATH 属于"怎么跑 Python"而不是密钥：沙箱容器里 mewcode 源码就挂在
+# PYTHONPATH 上，子进程丢掉它就会 ModuleNotFoundError 直接退出（真机踩到）。
 _CHILD_ENV_ALLOWLIST = (
     "PATH",
+    "PYTHONPATH",
     "SystemRoot",
     "COMSPEC",
     "TEMP",
@@ -132,6 +145,9 @@ class MCPServerConfig:
     headers: dict[str, str] = field(default_factory=dict)
     env: dict[str, str] = field(default_factory=dict)
     transport: str = "stdio"
+    #: 一句话说明这个内部系统是干什么的——无人值守的 agent 看不到人，
+    #: 只能靠这句话判断该不该用它的工具（M2 W3 注入服务提示词）。
+    description: str = ""
 
 
     @property
@@ -226,6 +242,9 @@ class ServiceConfig:
     vcs: VCSConfig = field(default_factory=VCSConfig)
     repos: dict[str, RepoConfig] = field(default_factory=dict)
     sandbox: SandboxConfig = field(default_factory=SandboxConfig)
+    #: 内部工具链（M2 W3）：只读 MCP server。直跑时在服务进程内连接；沙箱
+    #: 模式下随最小配置写进容器、在容器内连接（见 service/sandbox.py）。
+    mcp_servers: list[MCPServerConfig] = field(default_factory=list)
 
 
 @dataclass
@@ -273,6 +292,7 @@ def _load_single_file(path: Path) -> AppConfig:
             headers=s["headers"],
             env=s["env"],
             transport=s["transport"],
+            description=s.get("description", ""),
         )
         for s in validated["mcp_servers"]
     ]
@@ -339,6 +359,19 @@ def _load_single_file(path: Path) -> AppConfig:
             )
             for name, entry in svc["repos"].items()
         },
+        mcp_servers=[
+            MCPServerConfig(
+                name=s["name"],
+                command=s["command"],
+                args=s["args"],
+                url=s["url"],
+                headers=s["headers"],
+                env=s["env"],
+                transport=s["transport"],
+                description=s.get("description", ""),
+            )
+            for s in svc["mcp_servers"]
+        ],
     )
 
     return AppConfig(

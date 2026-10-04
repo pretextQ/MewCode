@@ -254,6 +254,47 @@ class TestImage:
         tag_without = sandbox.image_tag("demo", sandbox.dockerfile(), "")
         assert tag_with_req != tag_without
 
+    def test_image_tag_changes_with_mewcode_requirements(self, tmp_path: Path):
+        """内核依赖进摘要：锁文件一变就必须重建镜像。
+
+        反例（真机踩到）：只哈希 Dockerfile 时，宿主升级了 mcp 而容器继续
+        复用旧镜像，容器内的内核版本悄悄落后。
+        """
+        sandbox, _ = make_sandbox(tmp_path)
+        dockerfile = sandbox.dockerfile()
+        base = sandbox.image_tag("demo", dockerfile, "")
+        bumped = sandbox.image_tag("demo", dockerfile, "", "mcp==1.27.0\n")
+        assert base != bumped
+
+    @pytest.mark.asyncio
+    async def test_mewcode_requirements_prefer_locked_export(self, tmp_path: Path):
+        sandbox, _ = make_sandbox(tmp_path)
+        calls: list[list[str]] = []
+
+        async def fake_run(argv, timeout, cwd=None):
+            calls.append(argv)
+            return 0, "mcp==1.27.0\nhttpx==0.28.1\n"
+
+        sandbox._run = fake_run  # type: ignore[method-assign]
+        reqs = await sandbox.mewcode_requirements()
+        assert reqs == "mcp==1.27.0\nhttpx==0.28.1\n"
+        assert calls[0][:2] == ["uv", "export"]
+        # 导出是只读操作：不能改锁文件
+        assert "--frozen" in calls[0]
+
+    @pytest.mark.asyncio
+    async def test_mewcode_requirements_fall_back_when_uv_missing(self, tmp_path: Path):
+        sandbox, _ = make_sandbox(tmp_path)
+
+        async def fake_run(argv, timeout, cwd=None):
+            if argv[0] == "uv":
+                return 1, "(cannot spawn uv: [Errno 2])"
+            return 0, "textual>=2.1.0\nmcp>=1.12.0\n"
+
+        sandbox._run = fake_run  # type: ignore[method-assign]
+        reqs = await sandbox.mewcode_requirements()
+        assert "mcp>=1.12.0" in reqs
+
     def test_dockerfile_installs_mewcode_and_project_deps(self, tmp_path: Path):
         sandbox, _ = make_sandbox(tmp_path)
         dockerfile = sandbox.dockerfile()

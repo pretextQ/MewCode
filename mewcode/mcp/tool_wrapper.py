@@ -54,6 +54,16 @@ def _extract_text(content: list[Any]) -> str:
     return "\n".join(parts) if parts else "(no output)"
 
 
+def is_read_only_tool(tool_def: mcp_types.Tool) -> bool:
+    """MCP 标准的只读声明（``annotations.readOnlyHint``）。
+
+    服务模式据此决定要不要把工具递给 agent：没有显式声明的工具一律按
+    "可能写" 处理——宁可少给能力，也不要给错权限。
+    """
+    annotations = getattr(tool_def, "annotations", None)
+    return bool(getattr(annotations, "readOnlyHint", False))
+
+
 class MCPToolWrapper(Tool[BaseModel]):
     def __init__(
         self,
@@ -66,8 +76,10 @@ class MCPToolWrapper(Tool[BaseModel]):
         self._client = client
         self.name = f"mcp_{server_name}_{tool_def.name}"
         self.description = tool_def.description or tool_def.name
-        self.category = "command"
-        self.is_concurrency_safe = False
+        # 只读工具按 read 归类（与内置工具一致：不产生副作用）；未声明的一律
+        # 按 command 归类，权限管线里更严格。
+        self.category = "read" if is_read_only_tool(tool_def) else "command"
+        self.is_concurrency_safe = self.category == "read"
         self.should_defer = True
         self.params_model = _build_params_model(
             tool_def.name, tool_def.inputSchema

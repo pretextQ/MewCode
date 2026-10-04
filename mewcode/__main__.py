@@ -237,6 +237,7 @@ async def _run_prompt(config, permission_mode, hook_engine, prompt: str, output_
     from mewcode.client import create_client, resolve_context_window
     from mewcode.config import WorktreeConfig
     from mewcode.conversation import ConversationManager
+    from mewcode.mcp.bootstrap import close_mcp, register_mcp_tools
     from mewcode.memory.instructions import load_instructions
     from mewcode.permissions import (
         DangerousCommandDetector,
@@ -273,6 +274,15 @@ async def _run_prompt(config, permission_mode, hook_engine, prompt: str, output_
 
     instructions = load_instructions(work_dir)
     registry = create_default_registry()
+    # M2 W3：内部工具链（只读 MCP）。无头模式的语义与 TUI 不同：工具直接可见
+    # （defer=False，无人值守不存在"先 ToolSearch"的余地）、只挂只读工具、
+    # 连不上只记日志。沙箱容器内跑的就是这条路径（--config 带 mcp_servers）。
+    mcp_result = await register_mcp_tools(registry, config.mcp_servers)
+    if mcp_result.server_names:
+        _mcp_log = logging.getLogger("mewcode.mcp")
+        _mcp_log.info("MCP bootstrap: %s", mcp_result.summary())
+        for _error in mcp_result.errors:
+            _mcp_log.warning("MCP unavailable: %s", _error)
     registry.register(ToolSearchTool(registry, protocol=provider.protocol))
 
     agent = Agent(
@@ -334,37 +344,47 @@ async def _run_prompt(config, permission_mode, hook_engine, prompt: str, output_
     agent.notification_fn = drain_mailbox_only
 
     conv = ConversationManager()
-    counters = {"tool_calls": 0}
+    counters = {"tool_calls": 0, "mcp_calls": 0}
+    mcp_tools_used: set[str] = set()
     json_mode = output_format == "json"
 
     def _on_event(event: dict) -> None:
         if event.get("type") == "tool_use":
             counters["tool_calls"] += 1
+            name = str(event.get("toolName") or "")
+            # MCP 工具的注册名是 mcp_<server>_<tool>（见 mcp/tool_wrapper.py）
+            if name.startswith("mcp_"):
+                counters["mcp_calls"] += 1
+                mcp_tools_used.add(name)
 
-    if json_mode:
-        # JSON 模式只输出最后一份摘要，中间过程不落 stdout
-        last_result = await agent.run_to_completion(prompt, conv, event_callback=_on_event)
-    else:
-        last_result = await agent.run_to_completion(prompt, conv)
-        print(last_result, flush=True)
+    try:
+        if json_mode:
+            # JSON 模式只输出最后一份摘要，中间过程不落 stdout
+            last_result = await agent.run_to_completion(prompt, conv, event_callback=_on_event)
+        else:
+            last_result = await agent.run_to_completion(prompt, conv)
+            print(last_result, flush=True)
 
-    # 门控改为 TaskManager 的公开接口：仅用 AgentTool 后台任务（无 team）
-    # 的运行此前会直接 return，asyncio.run 退出时在途任务被整体取消
-    for _ in range(90):
-        notes = drain_notifications()
-        if notes:
-            for note in notes:
-                conv.add_system_reminder(note)
-            last_result = await agent.run_to_completion(
-                "Teammate notifications received. Process them and continue.", conv,
-                event_callback=_on_event if json_mode else None,
-            )
-            if not json_mode:
-                print(last_result, flush=True)
-            continue
-        if not task_manager.has_pending_work():
-            break
-        await asyncio.sleep(2)
+        # 门控改为 TaskManager 的公开接口：仅用 AgentTool 后台任务（无 team）
+        # 的运行此前会直接 return，asyncio.run 退出时在途任务被整体取消
+        for _ in range(90):
+            notes = drain_notifications()
+            if notes:
+                for note in notes:
+                    conv.add_system_reminder(note)
+                last_result = await agent.run_to_completion(
+                    "Teammate notifications received. Process them and continue.", conv,
+                    event_callback=_on_event if json_mode else None,
+                )
+                if not json_mode:
+                    print(last_result, flush=True)
+                continue
+            if not task_manager.has_pending_work():
+                break
+            await asyncio.sleep(2)
+    finally:
+        # 显式收尾 MCP stdio 子进程：不能依赖进程退出兜底（仓库已知坑）
+        await close_mcp(mcp_result)
 
     if json_mode:
         # 机器可读摘要：服务层（含容器内沙箱执行）依赖它回读 agent 结果与用量
@@ -375,6 +395,9 @@ async def _run_prompt(config, permission_mode, hook_engine, prompt: str, output_
                 "outputTokens": agent.total_output_tokens,
             },
             "toolCalls": counters["tool_calls"],
+            # M2 W3：内部工具链的使用证据（服务层据此写 job 审计与 PR body）
+            "mcpCalls": counters["mcp_calls"],
+            "mcpTools": sorted(mcp_tools_used),
             "sessionId": agent.session_id,
         }
         print(json.dumps(payload, ensure_ascii=False), flush=True)

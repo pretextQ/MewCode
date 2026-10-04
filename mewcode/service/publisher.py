@@ -71,7 +71,12 @@ def build_pr_title(job: Job) -> str:
     return f"[MewCode] {title}"
 
 
-def build_pr_body(job: Job, context: ExecutionContext, timeline: list[tuple[str, str, str]]) -> str:
+def build_pr_body(
+    job: Job,
+    context: ExecutionContext,
+    timeline: list[tuple[str, str, str]],
+    mcp_servers: list[str] | None = None,
+) -> str:
     """拼装 PR body（结构化模板，见 W4.2）。"""
     report = parse_agent_report(context.agent.final_text)
     root_cause = report.get("ROOT CAUSE") or (context.agent.final_text or "").strip() or "(agent 未给出结论)"
@@ -145,6 +150,19 @@ def build_pr_body(job: Job, context: ExecutionContext, timeline: list[tuple[str,
             context.verify_test.output[-2000:], "```", "", "</details>",
         ]
 
+    configured_mcp = [name for name in (mcp_servers or []) if name]
+    if configured_mcp or context.agent.mcp_tool_calls:
+        lines += ["", "## 内部工具链（只读 MCP）", ""]
+        if configured_mcp:
+            lines.append("- 已配置：" + ", ".join(f"`{name}`" for name in configured_mcp))
+        if context.agent.mcp_tool_calls:
+            used = ", ".join(f"`{name}`" for name in context.agent.mcp_tools_used)
+            lines.append(f"- 本次使用：{context.agent.mcp_tool_calls} 次调用（{used}）")
+        else:
+            lines.append("- 本次使用：未使用（告警证据已足够定位问题）")
+        lines.append("")
+        lines.append("> 内部工具均声明只读（MCP readOnlyHint）：可查询，不可修改外部系统。")
+
     lines += ["", "## 审计记录", "", f"- 修复尝试次数：{context.attempts}", ""]
     entries = filter_timeline(timeline)
     if entries:
@@ -185,7 +203,9 @@ class PullRequestPublisher:
 
         slug = await self.vcs.resolve_repo_slug(context.work_dir)
         timeline = [(e.ts, e.kind, e.detail) for e in await self.store.events(job.id)]
-        body = build_pr_body(job, context, timeline)
+        body = build_pr_body(
+            job, context, timeline, mcp_servers=[cfg.name for cfg in self.config.mcp_servers]
+        )
 
         existing = await self.vcs.find_open_pr(slug, branch)
         if existing is not None:

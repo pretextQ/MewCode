@@ -169,6 +169,9 @@ def validate_mcp_servers(raw_mcp: list | None) -> list[dict]:
                 "headers": entry.get("headers", {}),
                 "env": entry.get("env", {}),
                 "transport": transport,
+                "description": _optional_str(
+                    entry.get("description", ""), f"MCP server '{name}'.description"
+                ),
             }
         )
 
@@ -318,6 +321,7 @@ def validate_service(raw_service: dict | None) -> dict:
         "repo_label": "repository",
         "skills": [],
         "token_budget": 0,
+        "mcp_servers": [],
         "notify": {"type": "none", "webhook_url": "", "timeout_seconds": 10},
         # 沙箱默认值同样走校验器：两条返回路径（有/无 service 段）必须给出同一份默认值
         "sandbox": _validate_sandbox(None),
@@ -340,7 +344,11 @@ def validate_service(raw_service: dict | None) -> dict:
 
     merged = {
         **defaults,
-        **{k: v for k, v in raw_service.items() if k not in ("notify", "vcs", "repos", "sandbox")},
+        **{
+            k: v
+            for k, v in raw_service.items()
+            if k not in ("notify", "vcs", "repos", "sandbox", "mcp_servers")
+        },
     }
 
     host = _optional_str(merged["host"], "service.host")
@@ -417,6 +425,7 @@ def validate_service(raw_service: dict | None) -> dict:
         "repo_label": _optional_str(merged["repo_label"], "service.repo_label") or "repository",
         "skills": skills,
         "token_budget": token_budget,
+        "mcp_servers": validate_mcp_servers(raw_service.get("mcp_servers")),
         "notify": notify,
         "vcs": vcs,
         "repos": repos,

@@ -108,6 +108,14 @@ class TestBuildChildEnv:
         assert "ANTHROPIC_API_KEY" not in env
         assert env["FOO"] == "bar"
 
+    def test_inherits_pythonpath(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # 沙箱容器里 mewcode 源码挂在 PYTHONPATH 上：子进程丢掉它就会
+        # ModuleNotFoundError 直接退出（真机踩到）。它属于"怎么跑 Python"，
+        # 不是密钥，应当继承。
+        monkeypatch.setenv("PYTHONPATH", "/opt/mewcode")
+        env = build_child_env({"FOO": "bar"})
+        assert env["PYTHONPATH"] == "/opt/mewcode"
+
     def test_empty_declared_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # F3.11: 白名单继承。清空白名单变量后只剩声明的 env。
         for key in ("PATH", "SystemRoot", "COMSPEC", "TEMP", "TMP", "HOME",
