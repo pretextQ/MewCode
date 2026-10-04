@@ -500,6 +500,10 @@ class TestHookEngine:
         engine = HookEngine([h])
         ctx = HookContext(event_name="post_tool_use")
         await engine.run_hooks("post_tool_use", ctx)
+        # async hook 的子进程仍在跑：显式取消，不留任务给 asyncio.run 收尾，
+        # 否则 subprocess transport 清理在部分平台（CI runner）上会挂起
+        await engine.cancel_background()
+        assert engine._bg_tasks == set()
 
 # ---------------------------------------------------------------------------
 # Agent 循环集成

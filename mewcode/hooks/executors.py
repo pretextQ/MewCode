@@ -20,6 +20,7 @@ async def execute_command(action: Action, ctx: HookContext) -> ActionResult:
     else:
         command = ctx.expand_shellsafe(action.command)
     stdin_data = json.dumps(ctx.to_payload(), ensure_ascii=False).encode("utf-8")
+    proc = None
     try:
         proc = await asyncio.create_subprocess_shell(
             command,
@@ -40,6 +41,11 @@ async def execute_command(action: Action, ctx: HookContext) -> ActionResult:
             )
         output = stdout.decode(errors="replace").strip() if stdout else ""
         return ActionResult(output=output, success=proc.returncode == 0)
+    except asyncio.CancelledError:
+        # 引擎收尾取消后台 hook 任务时，子进程不能无人看管地悬挂
+        if proc is not None and proc.returncode is None:
+            proc.kill()
+        raise
     except Exception as e:
         return ActionResult(output=f"Command execution error: {e}", success=False)
 
