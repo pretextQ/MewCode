@@ -4,7 +4,12 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
+
+if TYPE_CHECKING:
+    from mewcode.agent import Agent
+    from mewcode.conversation import ConversationManager
+    from mewcode.memory import MemoryManager, Session, SessionManager
 
 
 class CommandType(StrEnum):
@@ -26,13 +31,14 @@ class UIController(Protocol):
 @dataclass
 class CommandContext:
     args: str
-    agent: Any
-    conversation: Any
-    session: Any
-    session_manager: Any
-    memory_manager: Any
+    agent: Agent
+    conversation: ConversationManager
+    session: Session | None
+    session_manager: SessionManager
+    memory_manager: MemoryManager
     ui: UIController
-    config: Any
+    # App 注入的命令侧回调集合（registry/set_session/...），键集合开放。
+    config: dict[str, Any]
 
 
 CommandHandler = Callable[[CommandContext], Awaitable[None]]
