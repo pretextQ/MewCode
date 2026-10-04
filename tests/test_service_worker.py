@@ -36,15 +36,29 @@ async def make_job(store: JobStore, fingerprint: str = "fp"):
 class TestConcurrency:
     @pytest.mark.asyncio
     async def test_concurrency_cap_respected(self, tmp_path: Path):
+        """两个消费者必须真的并行，且上限不被突破。
+
+        断言不赌 sleep 的时序（Windows CI 上 `peak == 2` 的采样式断言偶发假失败）：
+        用握手让两个消费者在 handler 里相遇——只有真并发才能相遇，遇不上就是
+        "上限没被突破但没有并行"或"上限被突破了"，都会明确失败。
+        """
         async with open_store(tmp_path / "jobs.db") as store:
             running = 0
             peak = 0
+            two_in_flight = asyncio.Event()
 
             async def handler(job):
                 nonlocal running, peak
                 running += 1
                 peak = max(peak, running)
-                await asyncio.sleep(0.05)
+                if running >= 2:
+                    two_in_flight.set()
+                try:
+                    # 等第二个消费者也进 handler（真并发的证据）；超时不是错误，
+                    # 由下面的 peak 断言给出明确结论
+                    await asyncio.wait_for(two_in_flight.wait(), timeout=1)
+                except TimeoutError:
+                    pass
                 running -= 1
 
             pool = WorkerPool(store, handler, concurrency=2)
@@ -53,10 +67,12 @@ class TestConcurrency:
                 for i in range(6):
                     job = await make_job(store, fingerprint=f"fp-{i}")
                     await pool.submit(job.id)
-                await asyncio.wait_for(pool._queue.join(), timeout=5)
+                await asyncio.wait_for(pool._queue.join(), timeout=10)
             finally:
                 await pool.stop(drain_timeout=1)
-            assert peak == 2
+
+            assert peak <= 2, f"并发上限被突破：peak={peak}"
+            assert peak == 2, "两个消费者没有并行过（握手超时）"
 
     @pytest.mark.asyncio
     async def test_submit_before_start_rejected(self, tmp_path: Path):
