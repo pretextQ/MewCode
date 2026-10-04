@@ -777,3 +777,125 @@ class TestWorktreeBinding:
         result = await bash.execute(bash.params_model(command='cat marker.txt'))
         assert "inside" in result.output
         assert not result.is_error
+
+
+# =========================================================================
+# I. 企业规范注入（M2 W2）：skill 内联进提示词 + 自查结论进 PR body
+# =========================================================================
+
+class TestSkillInjection:
+    def test_builtin_skills_exist_and_parse(self):
+        from mewcode.skills.loader import SkillLoader
+
+        skills = SkillLoader(".").load_all()
+        for name in ("incident-triage", "org-code-style"):
+            assert name in skills, f"missing builtin skill {name}"
+            assert skills[name].prompt_body.strip()
+
+    def test_prompt_embeds_skill_bodies(self, tmp_path: Path):
+        from mewcode.service.jobs import Job
+        from mewcode.service.sop import build_alert_prompt, load_skill_bodies
+
+        bodies = load_skill_bodies(str(tmp_path), ["incident-triage", "org-code-style"])
+        assert set(bodies) == {"incident-triage", "org-code-style"}
+
+        job = Job(id="job-1", fingerprint="f", repo="demo", severity="critical", status="received",
+                  title="5xx", payload={"source": "manual", "summary": "x"})
+        prompt = build_alert_prompt(job, str(tmp_path), skills=bodies)
+        assert "Organization skill: incident-triage" in prompt
+        assert "Organization skill: org-code-style" in prompt
+        assert "SELF-CHECK" in prompt                     # 要求输出自查段落
+        assert "先让问题可复现" in prompt                  # 正文真的内联进来了
+
+    def test_repo_skill_overrides_builtin(self, tmp_path: Path):
+        """.mewcode/skills/ 同名文件覆盖内置（复用既有三级加载优先级）。"""
+        from mewcode.service.sop import load_skill_bodies
+
+        override = tmp_path / ".mewcode" / "skills"
+        override.mkdir(parents=True)
+        (override / "org-code-style.md").write_text(
+            "---\nname: org-code-style\ndescription: 团队自己的规范\n---\n\n公司规范：必须写测试。\n",
+            encoding="utf-8",
+        )
+        bodies = load_skill_bodies(str(tmp_path), ["org-code-style"])
+        assert "公司规范：必须写测试。" in bodies["org-code-style"]
+        assert "团队代码规范自查清单" not in bodies["org-code-style"]
+
+    def test_skills_can_be_disabled(self, tmp_path: Path):
+        from mewcode.service.jobs import Job
+        from mewcode.service.sop import build_alert_prompt, load_skill_bodies
+
+        job = Job(id="job-1", fingerprint="f", repo="demo", severity="critical", status="received",
+                  title="5xx", payload={"source": "manual", "summary": "x"})
+        prompt = build_alert_prompt(job, str(tmp_path), skills=load_skill_bodies(str(tmp_path), []))
+        assert "Organization skill" not in prompt
+        assert "SELF-CHECK" not in prompt
+
+    def test_missing_skill_is_skipped_gracefully(self, tmp_path: Path):
+        from mewcode.service.sop import load_skill_bodies
+
+        bodies = load_skill_bodies(str(tmp_path), ["org-code-style", "no-such-skill"])
+        assert set(bodies) == {"org-code-style"}
+
+    @pytest.mark.asyncio
+    async def test_chain_passes_skills_into_prompt(self, tmp_path: Path, demo_repo: Path):
+        async with chain_env(tmp_path, demo_repo, publisher=FakePublisher()) as (store, chain, runner, _):
+            job = await make_job(store)
+            await chain(job)
+            prompt = runner.calls[0]["prompt"]
+            assert "Organization skill: org-code-style" in prompt
+
+    @pytest.mark.asyncio
+    async def test_config_can_restrict_skills(self, tmp_path: Path, demo_repo: Path):
+        config = ServiceConfig(
+            data_dir=str(tmp_path / "state"),
+            skills=["incident-triage"],
+            repos={"demo": RepoConfig(name="demo", path=str(demo_repo), test_command=_test_command())},
+        )
+        async with chain_env(tmp_path, demo_repo, publisher=FakePublisher(), config=config) as (store, chain, runner, _):
+            job = await make_job(store)
+            await chain(job)
+            prompt = runner.calls[0]["prompt"]
+            assert "Organization skill: incident-triage" in prompt
+            assert "Organization skill: org-code-style" not in prompt   # 未启用的不注入
+            assert "- `SELF-CHECK:`" not in prompt
+
+
+class TestSelfCheckInPRBody:
+    def make_ctx(self, final_text: str):
+        from mewcode.service.execution import ExecutionContext
+
+        return ExecutionContext(
+            repo=RepoConfig(name="demo", path="/srv/demo", test_command="pytest -q"),
+            work_dir="/tmp/wt",
+            prompt="p",
+            agent=AgentRunOutcome(final_text=final_text),
+            changed_files=["app.py"],
+            diff="+1/-1",
+            baseline_test=None,
+            verify_test=None,
+        )
+
+    def make_job(self):
+        from mewcode.service.jobs import Job
+
+        return Job(id="job-1", fingerprint="f", repo="demo", severity="critical",
+                   status="pr_opened", title="5xx", payload={"source": "manual", "summary": "s"})
+
+    def test_self_check_section_rendered(self):
+        from mewcode.service.publisher import build_pr_body
+
+        ctx = self.make_ctx(
+            "ROOT CAUSE: sign error\nFIX: fixed add()\nVERIFICATION: ran tests\n"
+            "SELF-CHECK:\n- [x] errors handled\n- [ ] not met: no new test\n"
+        )
+        body = build_pr_body(self.make_job(), ctx, [])
+        assert "## 规范自查（org-code-style）" in body
+        assert "- [x] errors handled" in body
+        assert "未满足项" in body          # 提醒 review 者重点看未满足项
+
+    def test_no_self_check_no_section(self):
+        from mewcode.service.publisher import build_pr_body
+
+        body = build_pr_body(self.make_job(), self.make_ctx("ROOT CAUSE: a\nFIX: b"), [])
+        assert "规范自查" not in body

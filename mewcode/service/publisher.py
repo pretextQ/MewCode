@@ -32,10 +32,10 @@ COMMIT_EXCLUDES: tuple[str, ...] = tuple(
     for spec in (f":(exclude,glob){_dir}/**", f":(exclude,glob)**/{_dir}/**")
 )
 
-_REPORT_KEYS = r"(?:ROOT CAUSE|FIX|VERIFICATION)"
+_REPORT_KEYS = r"(?:ROOT CAUSE|FIX|VERIFICATION|SELF\-CHECK)"
 _SECTION_RE = re.compile(
-    r"^(?:#+\s*)?(ROOT CAUSE|FIX|VERIFICATION)\s*:\s*(?P<body>.*?)"
-    r"(?=^(?:#+\s*)?(?:ROOT CAUSE|FIX|VERIFICATION)\s*:|\Z)",
+    r"^(?:#+\s*)?(ROOT CAUSE|FIX|VERIFICATION|SELF\-CHECK)\s*:\s*(?P<body>.*?)"
+    r"(?=^(?:#+\s*)?(?:ROOT CAUSE|FIX|VERIFICATION|SELF\-CHECK)\s*:|\Z)",
     re.IGNORECASE | re.MULTILINE | re.DOTALL,
 )
 
@@ -123,6 +123,17 @@ def build_pr_body(job: Job, context: ExecutionContext, timeline: list[tuple[str,
     lines.append(_row("修复后", context.verify_test))
     if verification:
         lines += ["", f"agent 自述的验证过程：{verification}"]
+
+    self_check = report.get("SELF-CHECK")
+    if self_check:
+        lines += [
+            "",
+            "## 规范自查（org-code-style）",
+            "",
+            self_check,
+            "",
+            "> 自查由 agent 完成、未经过人工核对；review 时请重点看未满足项。",
+        ]
     if context.baseline_test is not None and context.baseline_test.output:
         lines += [
             "", "<details><summary>修复前测试输出</summary>", "", "```",

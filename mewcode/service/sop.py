@@ -7,12 +7,40 @@ job 记录结构化生成，见 W4 —— 不让 LLM 自由发挥）。
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from .jobs import Job
 
+log = logging.getLogger(__name__)
+
 #: 单次注入的日志/描述上限，防止把整个告警风暴塞进首轮上下文
 MAX_CONTEXT_CHARS = 6000
+
+#: 服务默认启用的规范类 skill（可被 service.skills 覆盖；团队用自己的
+#: .mewcode/skills/ 同名文件即可替换，加载优先级 仓库 > 用户 > 内置）
+DEFAULT_SKILLS = ("incident-triage", "org-code-style")
+
+
+def load_skill_bodies(work_dir: str, names: list[str] | tuple[str, ...]) -> dict[str, str]:
+    """按加载优先级取出 skill 正文（仓库自带 > 用户级 > 内置）。
+
+    服务层把正文**内联**进首轮提示词：这样直跑与容器两种执行模式行为一致，
+    不依赖模型记得去调用 Skill 工具（无人值守下要的是确定性）。
+    """
+    from mewcode.skills.loader import SkillLoader
+
+    try:
+        available = SkillLoader(work_dir).load_all()
+    except Exception as e:  # 加载失败退化为"没有 skill"，不能让作业停摆
+        log.warning("skill loading failed for %s: %s", work_dir, e)
+        return {}
+    bodies: dict[str, str] = {}
+    for name in names:
+        skill = available.get(name)
+        if skill is not None and skill.prompt_body.strip():
+            bodies[name] = skill.prompt_body.strip()
+    return bodies
 
 
 def _truncate(text: str, limit: int = MAX_CONTEXT_CHARS) -> str:
@@ -100,12 +128,18 @@ def has_actionable_context(job: Job) -> tuple[bool, str]:
 
 
 def build_alert_prompt(
-    job: Job, repo_path: str, test_command: str = "", baseline: str = "", feedback: str = ""
+    job: Job,
+    repo_path: str,
+    test_command: str = "",
+    baseline: str = "",
+    feedback: str = "",
+    skills: dict[str, str] | None = None,
 ) -> str:
-    """组装交给 agent 的首轮指令（M1 通用 SOP）。
+    """组装交给 agent 的首轮指令（M1 通用 SOP + M2 规范注入）。
 
     ``feedback`` 用于验证失败后的重试：把上一轮的测试输出交给 agent，
     否则它会重复同样的修复思路（这正是有界重试存在的意义）。
+    ``skills`` 是内联的规范正文（见 :func:`load_skill_bodies`）。
     """
     context = render_alert_context(job)
     logs = extract_logs(job)
@@ -136,6 +170,9 @@ def build_alert_prompt(
             "Analyse why the previous attempt failed before changing anything again.",
         ]
 
+    for name, body in (skills or {}).items():
+        sections += ["", f"## Organization skill: {name}", body]
+
     sections += [
         "",
         "## Your job",
@@ -160,6 +197,13 @@ def build_alert_prompt(
         "- `ROOT CAUSE:` what actually broke and why",
         "- `FIX:` what you changed (files and the essence of each change)",
         "- `VERIFICATION:` the command(s) you ran and the observed result",
-        "If you did not fix anything, say why under `ROOT CAUSE:` and leave `FIX:` empty.",
     ]
+    if "org-code-style" in (skills or {}):
+        sections.append(
+            "- `SELF-CHECK:` the org-code-style checklist, one line per item "
+            "(`- [x] ok` or `- [ ] not met: why`); this goes into the PR description"
+        )
+    sections.append(
+        "If you did not fix anything, say why under `ROOT CAUSE:` and leave `FIX:` empty."
+    )
     return "\n".join(sections)

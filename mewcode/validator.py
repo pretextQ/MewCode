@@ -316,6 +316,7 @@ def validate_service(raw_service: dict | None) -> dict:
         "dedup_window_seconds": 1800,
         "data_dir": ".mewcode/service",
         "repo_label": "repository",
+        "skills": [],
         "token_budget": 0,
         "notify": {"type": "none", "webhook_url": "", "timeout_seconds": 10},
         # 沙箱默认值同样走校验器：两条返回路径（有/无 service 段）必须给出同一份默认值
@@ -352,6 +353,10 @@ def validate_service(raw_service: dict | None) -> dict:
     dedup_window = _positive_int(merged["dedup_window_seconds"], "service.dedup_window_seconds")
     # 0 = 不设预算（M1 默认）；正数 = 单 job token 上限
     token_budget = _positive_int(merged["token_budget"], "service.token_budget", minimum=0)
+
+    skills = merged["skills"]
+    if not isinstance(skills, list) or not all(isinstance(x, str) for x in skills):
+        raise ConfigError("'service.skills' must be a list of skill names")
 
     # notify 段
     raw_notify = raw_service.get("notify") or {}
@@ -410,6 +415,7 @@ def validate_service(raw_service: dict | None) -> dict:
         "dedup_window_seconds": dedup_window,
         "data_dir": _optional_str(merged["data_dir"], "service.data_dir"),
         "repo_label": _optional_str(merged["repo_label"], "service.repo_label") or "repository",
+        "skills": skills,
         "token_budget": token_budget,
         "notify": notify,
         "vcs": vcs,
