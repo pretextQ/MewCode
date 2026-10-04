@@ -252,6 +252,49 @@ async def _terminate_process_tree(proc: asyncio.subprocess.Process) -> None:
             pass
 
 
+def _absorb_cancellation(exc: BaseException) -> str:
+    """明确"吃掉"一次取消（PEP 678 的配套语义：吞掉就要 uncancel）。
+
+    返回取消的摘要文本，供审计记录使用。不 uncancel 的话任务会一直带着
+    "cancelling" 计数，后面的 wait_for / timeout 语义会被这枚陈旧计数干扰。
+    """
+    task = asyncio.current_task()
+    if task is not None and hasattr(task, "uncancel"):
+        task.uncancel()
+    return f"{type(exc).__name__}: {exc}"
+
+
+async def shutdown_agent_resources(agent: Any, mcp_result: Any) -> list[str]:
+    """显式收尾 agent 后台任务与 MCP 连接；返回收尾窗口里吞掉的取消摘要。
+
+    MCP 的 stdio 传输基于 anyio cancel scope：收尾时它会取消宿主任务，且**投递
+    点不确定**——真机实测（两个 server = 两个作用域）其中一次投递落在收尾之后的
+    第一个 await 上，顺着 CancelledError 把执行链和 worker 消费者一起打死
+    （服务活着却不再消费任何 job）。
+
+    收尾必须完成，所以收尾窗口里的取消一律记下来，不让它逃逸；调用方把摘要写进
+    审计。真取消（服务关停）由调用方的 finally 之后继续传播——worker 侧还有
+    队列哨兵兜底（worker.stop），吞掉一次不会把关停卡住。
+    """
+    absorbed: list[str] = []
+    try:
+        await agent.cancel_background_tasks()
+    except asyncio.CancelledError as e:
+        absorbed.append(_absorb_cancellation(e))
+    try:
+        from mewcode.mcp.bootstrap import close_mcp
+
+        await close_mcp(mcp_result)  # 契约"永不抛出"；这层保险不打折
+    except asyncio.CancelledError as e:  # pragma: no cover - close_mcp 已吞过一层
+        absorbed.append(_absorb_cancellation(e))
+    # 收尾之后的第一个 await：迟到的投递在这里显形（真机实测点）
+    try:
+        await asyncio.sleep(0)
+    except asyncio.CancelledError as e:
+        absorbed.append(_absorb_cancellation(e))
+    return absorbed
+
+
 class TestRunner:
     """在 worktree 内执行仓库测试命令，返回结构化结果。
 
@@ -482,7 +525,6 @@ class HeadlessAgentRunner:
         self, job: Job, work_dir: str, prompt: str, on_event: Callable[[dict[str, Any]], None]
     ) -> AgentRunOutcome:
         from mewcode.conversation import ConversationManager
-        from mewcode.mcp.bootstrap import close_mcp
 
         agent, mcp_result = await self._build_agent_with_tools(work_dir, on_event)
         outcome = AgentRunOutcome()
@@ -514,9 +556,15 @@ class HeadlessAgentRunner:
             )
         finally:
             # 显式收尾：agent 可能留下后台任务（子代理 / fire-and-forget），
-            # MCP 侧还挂着 stdio 子进程——都不能依赖进程退出兜底（仓库已知坑）
-            await agent.cancel_background_tasks()
-            await close_mcp(mcp_result)
+            # MCP 侧还挂着 stdio 子进程——都不能依赖进程退出兜底（仓库已知坑）。
+            # 收尾窗口里任何一次"取消"都记成事件（MCP 的作用域取消会漏到这里，
+            # 见 shutdown_agent_resources 的说明），不让它改写作业的结果语义。
+            absorbed = await shutdown_agent_resources(agent, mcp_result)
+            if absorbed:
+                on_event({
+                    "type": "teardown_cancellation",
+                    "detail": "; ".join(absorbed)[:500],
+                })
         if outcome.mcp_tool_calls:
             on_event({
                 "type": "mcp_used",
@@ -947,8 +995,9 @@ class ExecutionChain:
             elif etype == "usage":
                 usage = event.get("usage") or {}
                 detail = f"in={usage.get('inputTokens', 0)} out={usage.get('outputTokens', 0)}"
-            elif etype in ("mcp_ready", "mcp_error", "mcp_used"):
-                # 内部工具链的关键节点：注册结果与使用次数进审计（PR body 的证据）
+            elif etype in ("mcp_ready", "mcp_error", "mcp_used", "teardown_cancellation"):
+                # 内部工具链的关键节点与收尾异常：进审计（前者是 PR 证据，
+                # 后者解释"这次运行有没有被收尾的取消打扰"）
                 detail = str(event.get("detail", ""))[:500]
             else:
                 return

@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import subprocess
 import sys
 from contextlib import asynccontextmanager
@@ -652,6 +653,38 @@ class TestHeadlessRunnerBudget:
         with pytest.raises(RuntimeError):
             await runner.run(job, str(tmp_path), "prompt", lambda e: None)
         assert cancelled["done"] is True
+
+    @pytest.mark.asyncio
+    async def test_teardown_cancellation_is_absorbed_and_recorded(self, tmp_path: Path):
+        """MCP 收尾留下的"迟到取消"不能改写作业结果（真机踩到：它打死了执行链）。
+
+        anyio 作用域在 MCP 收尾时取消宿主任务，投递点可能落在收尾之后的第一个
+        await 上——直跑模式下这条链直接打死 worker 消费者。收尾边界必须吃掉它
+        并留下审计记录。
+        """
+        from mewcode.config import ProviderConfig
+        from mewcode.service.jobs import Job
+
+        config = ServiceConfig()
+        provider = ProviderConfig(name="t", protocol="openai", base_url="http://x", model="m", api_key="k")
+        runner = HeadlessAgentRunner(config, provider)
+
+        class LeakyAgent:
+            async def run_to_completion(self, prompt, conversation=None, event_callback=None):
+                return "ROOT CAUSE: x\nFIX: y"
+
+            async def cancel_background_tasks(self):
+                # 模拟 anyio 作用域：取消投递落在收尾之后的第一个 await 上
+                asyncio.get_running_loop().call_soon(asyncio.current_task().cancel)
+
+        runner._build_agent = lambda work_dir: LeakyAgent()  # type: ignore[method-assign]
+        events: list[dict] = []
+        job = Job(id="job-1", fingerprint="f", repo="demo", severity="w", status="fixing", payload={})
+        outcome = await runner.run(job, str(tmp_path), "prompt", events.append)
+
+        assert outcome.final_text.startswith("ROOT CAUSE")  # 结果不被改写
+        teardown = [e for e in events if e.get("type") == "teardown_cancellation"]
+        assert teardown and "CancelledError" in teardown[0]["detail"]
 
 
 # =========================================================================
