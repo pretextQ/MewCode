@@ -60,12 +60,12 @@ async def _serve(service, host: str, port: int, recover: bool = True) -> None:
 
     from mewcode.service.api import create_app
     from mewcode.service.runtime import ServiceRuntime, unconfigured_handler
+    from mewcode.service.triggers import build_adapters
 
     runtime = ServiceRuntime(service, handler=unconfigured_handler)
     await runtime.start(recover=recover)
 
-    adapters: dict = {}  # W2 接入 alertmanager / manual 适配器
-    app = create_app(runtime, adapters)
+    app = create_app(runtime, build_adapters(service))
 
     runner = web.AppRunner(app)
     await runner.setup()

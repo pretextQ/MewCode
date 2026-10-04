@@ -182,6 +182,8 @@ class ServiceConfig:
     webhook_token: str = field(default="", repr=False)
     dedup_window_seconds: int = 1800
     data_dir: str = ".mewcode/service"
+    #: 告警 label 中承载仓库名的键（Alertmanager adapter 使用）
+    repo_label: str = "repository"
     #: 单 job token 预算，0 = 不限制（M1 默认；M3 的成本熔断复用此字段）
     token_budget: int = 0
     notify: NotifyConfig = field(default_factory=NotifyConfig)
@@ -255,6 +257,7 @@ def _load_single_file(path: Path) -> AppConfig:
         webhook_token=svc["webhook_token"],
         dedup_window_seconds=svc["dedup_window_seconds"],
         data_dir=svc["data_dir"],
+        repo_label=svc["repo_label"],
         token_budget=svc["token_budget"],
         notify=NotifyConfig(
             type=svc["notify"]["type"],

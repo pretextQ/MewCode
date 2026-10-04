@@ -267,6 +267,7 @@ def validate_service(raw_service: dict | None) -> dict:
         "webhook_token": "",
         "dedup_window_seconds": 1800,
         "data_dir": ".mewcode/service",
+        "repo_label": "repository",
         "token_budget": 0,
         "notify": {"type": "none", "webhook_url": "", "timeout_seconds": 10},
         "vcs": {
@@ -346,6 +347,7 @@ def validate_service(raw_service: dict | None) -> dict:
         "webhook_token": _optional_str(merged["webhook_token"], "service.webhook_token"),
         "dedup_window_seconds": dedup_window,
         "data_dir": _optional_str(merged["data_dir"], "service.data_dir"),
+        "repo_label": _optional_str(merged["repo_label"], "service.repo_label") or "repository",
         "token_budget": token_budget,
         "notify": notify,
         "vcs": vcs,

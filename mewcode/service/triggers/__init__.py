@@ -4,6 +4,30 @@
 真正的落库/去重/入队由 :class:`mewcode.service.runtime.ServiceRuntime` 负责。
 """
 
-from .base import JobDraft, TriggerAdapter
+from __future__ import annotations
 
-__all__ = ["JobDraft", "TriggerAdapter"]
+from typing import Any
+
+from .alertmanager import AlertmanagerAdapter
+from .base import JobDraft, ParseResult, TriggerAdapter, TriggerError
+from .manual import ManualAdapter
+
+__all__ = [
+    "AlertmanagerAdapter",
+    "JobDraft",
+    "ManualAdapter",
+    "ParseResult",
+    "TriggerAdapter",
+    "TriggerError",
+    "build_adapters",
+]
+
+
+def build_adapters(service_config: Any) -> dict[str, TriggerAdapter]:
+    """按配置装配适配器（HTTP 入口按 source 名取用）。"""
+    return {
+        "alert": AlertmanagerAdapter(
+            service_config.repos, repo_label=service_config.repo_label or "repository"
+        ),
+        "manual": ManualAdapter(service_config.repos),
+    }

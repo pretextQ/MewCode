@@ -19,18 +19,34 @@ class JobDraft:
     title: str = ""
     severity: str = "warning"
     payload: dict[str, Any] = field(default_factory=dict)
-    #: 归一化过程中的非致命问题（如 payload 里没有可用的仓库标签）
+    #: 归一化过程中的非致命问题（如 severity 取值未知）
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ParseResult:
+    """一次解析的完整结果。
+
+    批量告警里部分条目不可路由是常态（缺 label、非 firing、仓库不在路由表），
+    这些必须**显式**出现在 ``skipped`` 里而不是静默丢弃——"告警为什么没修"
+    必须能从 HTTP 响应与审计里回答。
+    """
+
+    drafts: list[JobDraft] = field(default_factory=list)
+    #: 未被受理的条目及原因（人类可读）
+    skipped: list[str] = field(default_factory=list)
+    #: 跟 drafts 一起流转的非致命提醒
     warnings: list[str] = field(default_factory=list)
 
 
 class TriggerAdapter(Protocol):
-    """把某触发源的原始 payload 转成 Job 草案列表。
+    """把某触发源的原始 payload 转成 JobDraft 列表。
 
-    Alertmanager 一次 POST 可携带多条 alerts，因此返回列表；实现必须是
+    Alertmanager 一次 POST 可携带多条 alerts，因此是列表；实现必须是
     纯转换：不访问网络、不落库、不做去重（去重在 runtime 统一做）。
     """
 
-    def parse(self, payload: dict[str, Any]) -> list[JobDraft]: ...
+    def parse(self, payload: dict[str, Any]) -> ParseResult: ...
 
 
 class TriggerError(Exception):

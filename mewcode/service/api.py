@@ -97,11 +97,18 @@ def create_app(
         if adapter is None:
             return web.json_response({"error": f"no adapter configured for '{source}'"}, status=503)
         try:
-            drafts = adapter.parse(payload)
+            parsed = adapter.parse(payload)
         except TriggerError as e:
             return web.json_response({"error": str(e)}, status=400)
-        result = await runtime.intake(drafts)
-        return web.json_response(result.as_dict(), status=202)
+        result = await runtime.intake(parsed.drafts)
+        body = result.as_dict()
+        # 批量告警里被跳过的条目必须可见：这是"告警为什么没被修"的唯一答复处
+        body["skipped"] = parsed.skipped
+        body["warnings"] = parsed.warnings + body["warnings"]
+        if not result.accepted and not result.deduped and parsed.skipped:
+            # 全部条目都不可受理：用 4xx 让上游/告警系统看到异常，而不是假装 202
+            return web.json_response(body, status=422)
+        return web.json_response(body, status=202)
 
     async def post_alert(request: web.Request) -> web.Response:
         return await handle_webhook(request, "alert")

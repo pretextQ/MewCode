@@ -17,7 +17,7 @@ from mewcode.config import ServiceConfig
 from mewcode.service.api import create_app
 from mewcode.service.jobs import JobStore
 from mewcode.service.runtime import ServiceRuntime
-from mewcode.service.triggers.base import JobDraft, TriggerError
+from mewcode.service.triggers.base import JobDraft, ParseResult, TriggerError
 
 
 class StubAdapter:
@@ -27,7 +27,7 @@ class StubAdapter:
         self.fail = fail
         self.seen: list[dict] = []
 
-    def parse(self, payload: dict) -> list[JobDraft]:
+    def parse(self, payload: dict) -> ParseResult:
         self.seen.append(payload)
         if self.fail:
             raise TriggerError("no usable alert in payload")
@@ -42,7 +42,7 @@ class StubAdapter:
                     payload=item,
                 )
             )
-        return drafts
+        return ParseResult(drafts=drafts, skipped=payload.get("skipped", []))
 
 
 @asynccontextmanager
