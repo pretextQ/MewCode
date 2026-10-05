@@ -796,6 +796,9 @@ class ExecutionChain:
                 return None
 
             await self.store.update(job.id, result=outcome.final_text[:MAX_EVIDENCE_CHARS])
+            # token 用量进 jobs 表的累计列（M3 的 /metrics 与成本报告从这里读）；
+            # agent_finished 审计事件保留每次 attempt 的明细，两处同源不冲突
+            await self.store.add_usage(job.id, outcome.input_tokens, outcome.output_tokens)
             await self._event(
                 job.id,
                 "agent_finished",

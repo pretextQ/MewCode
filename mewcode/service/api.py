@@ -1,10 +1,13 @@
 """无头服务的 HTTP 入口（aiohttp）。
 
-对外只暴露四类端点（架构文档第三节）：
+对外暴露的端点：
 - ``POST /webhook/alert``  告警源 webhook（Alertmanager 等，经适配器归一化）
 - ``POST /webhook/manual`` 手动触发（本地 JSON，demo 与测试用）
 - ``GET  /healthz``        健康检查（队列深度、在途数、状态分布）
 - ``GET  /jobs``           调试用 job 查询
+- ``GET  /metrics``        Prometheus 指标（M3 W1）
+- ``GET  /jobs/{id}/report`` 单 job 复盘报告（M3 W1）
+- ``GET  /costs``          按仓库/模型聚合的 token 成本（M3 W1）
 
 鉴权：配置了 ``service.webhook_token`` 时，写端点要求
 ``X-MewCode-Token`` 头（或 ``Authorization: Bearer``），常数时间比较。
@@ -21,7 +24,8 @@ from typing import Any
 
 from aiohttp import web
 
-from .jobs import Job
+from .jobs import Job, JobNotFound
+from .metrics import collect_metrics, cost_report, job_report, render_prometheus
 from .runtime import ServiceRuntime
 from .triggers.base import TriggerAdapter, TriggerError
 
@@ -61,8 +65,13 @@ def create_app(
     adapters: dict[str, TriggerAdapter],
     *,
     max_body_bytes: int = DEFAULT_MAX_BODY_BYTES,
+    model: str = "",
 ) -> web.Application:
-    """组装 aiohttp 应用。``adapters`` 至少包含 ``alert`` 与 ``manual``。"""
+    """组装 aiohttp 应用。``adapters`` 至少包含 ``alert`` 与 ``manual``。
+
+    ``model`` 是服务实际使用的 LLM 模型名（``config.providers[0].model``），
+    作为 token 成本指标的 label 暴露；空则记 unknown。
+    """
     token = runtime.config.webhook_token
     if not token:
         log.warning("service.webhook_token is empty: endpoints accept unauthenticated requests")
@@ -139,9 +148,34 @@ def create_app(
         jobs = await runtime.store.list_jobs(status=status_filter, limit=limit)
         return web.json_response({"jobs": [_job_summary(j) for j in jobs]})
 
+    async def metrics(request: web.Request) -> web.Response:
+        snapshot = await collect_metrics(runtime.store)
+        body = render_prometheus(snapshot, model=model)
+        # Prometheus 约定的完整 Content-Type；body 已编码，避免 aiohttp 二次拼 charset
+        return web.Response(
+            body=body.encode("utf-8"),
+            headers={"Content-Type": "text/plain; version=0.0.4; charset=utf-8"},
+        )
+
+    async def single_job_report(request: web.Request) -> web.Response:
+        job_id = request.match_info["job_id"]
+        try:
+            report = await job_report(runtime.store, job_id)
+        except JobNotFound:
+            return web.json_response({"error": f"job not found: {job_id}"}, status=404)
+        return web.json_response(report)
+
+    async def costs(request: web.Request) -> web.Response:
+        repo_filter = request.query.get("repo") or None
+        report = await cost_report(runtime.store, model=model, repo=repo_filter)
+        return web.json_response(report)
+
     app = web.Application(middlewares=[auth_middleware], client_max_size=max_body_bytes)
     app.router.add_post("/webhook/alert", post_alert)
     app.router.add_post("/webhook/manual", post_manual)
     app.router.add_get("/healthz", healthz)
     app.router.add_get("/jobs", list_jobs)
+    app.router.add_get("/jobs/{job_id}/report", single_job_report)
+    app.router.add_get("/metrics", metrics)
+    app.router.add_get("/costs", costs)
     return app

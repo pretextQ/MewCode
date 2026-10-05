@@ -166,10 +166,12 @@ class TestAuth:
 
     @pytest.mark.asyncio
     async def test_read_endpoints_open_even_with_token(self, tmp_path: Path):
-        """healthz / jobs 是运维只读端点，不加 token（不含敏感数据）。"""
+        """healthz / jobs / metrics / costs 是运维只读端点，不加 token（不含敏感数据）。"""
         async with service_env(tmp_path, token="s3cret", alert_adapter=StubAdapter()) as (_, client):
             assert (await client.get("/healthz")).status == 200
             assert (await client.get("/jobs")).status == 200
+            assert (await client.get("/metrics")).status == 200
+            assert (await client.get("/costs")).status == 200
 
     @pytest.mark.asyncio
     async def test_no_token_configured_accepts(self, tmp_path: Path):

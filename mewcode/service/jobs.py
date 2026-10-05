@@ -93,6 +93,18 @@ class JobEvent:
 
 
 @dataclass
+class TransitionRecord:
+    """一条状态转移轨迹（transition / recovery_reset 事件的解析结果）。"""
+
+    job_id: str
+    ts: str
+    kind: str
+    from_state: str
+    to_state: str
+    reason: str = ""
+
+
+@dataclass
 class Job:
     id: str
     fingerprint: str
@@ -107,6 +119,9 @@ class Job:
     ci_status: str = ""
     last_error: str = ""
     result: str = ""
+    #: 累计 token 用量（M3 W1）：执行链在每次 agent 运行后经 add_usage 累加
+    tokens_in: int = 0
+    tokens_out: int = 0
     created_at: str = ""
     updated_at: str = ""
 
@@ -135,6 +150,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     ci_status   TEXT NOT NULL DEFAULT '',
     last_error  TEXT NOT NULL DEFAULT '',
     result      TEXT NOT NULL DEFAULT '',
+    tokens_in   INTEGER NOT NULL DEFAULT 0,
+    tokens_out  INTEGER NOT NULL DEFAULT 0,
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL
 );
@@ -172,6 +189,8 @@ def _row_to_job(row: sqlite3.Row) -> Job:
         ci_status=row["ci_status"],
         last_error=row["last_error"],
         result=row["result"],
+        tokens_in=row["tokens_in"],
+        tokens_out=row["tokens_out"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
@@ -204,6 +223,12 @@ class JobStore:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA foreign_keys=ON")
             conn.executescript(_SCHEMA)
+            # 旧库迁移（M3 W1 的 token 列晚于表结构出现）：CREATE TABLE IF NOT EXISTS
+            # 不会补已有表的列，只能显式 ALTER。列存在性以 PRAGMA 为准。
+            existing = {r[1] for r in conn.execute("PRAGMA table_info(jobs)")}
+            for column in ("tokens_in", "tokens_out"):
+                if column not in existing:
+                    conn.execute(f"ALTER TABLE jobs ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0")
             conn.commit()
             return conn
 
@@ -332,6 +357,8 @@ class JobStore:
                     ci_status=current.ci_status if ci_status is None else ci_status,
                     last_error=current.last_error if last_error is None else last_error,
                     result=current.result if result is None else result,
+                    tokens_in=current.tokens_in,
+                    tokens_out=current.tokens_out,
                     created_at=current.created_at,
                     updated_at=now,
                 )
@@ -405,6 +432,29 @@ class JobStore:
 
             await asyncio.to_thread(_do)
 
+    async def add_usage(self, job_id: str, input_tokens: int, output_tokens: int) -> None:
+        """累计一次 agent 运行的 token 用量（多次 attempt 在 SQL 侧累加）。
+
+        不触碰 ``updated_at``：用量记账不是生命周期变化，不能挪动状态轨迹
+        的时间戳语义（时长指标全部由状态时间戳推导）。
+        """
+        if input_tokens <= 0 and output_tokens <= 0:
+            return
+        async with self._lock:
+            conn = self._require_conn()
+
+            def _do() -> None:
+                cur = conn.execute(
+                    "UPDATE jobs SET tokens_in = tokens_in + ?, tokens_out = tokens_out + ?"
+                    " WHERE id = ?",
+                    (input_tokens, output_tokens, job_id),
+                )
+                if cur.rowcount == 0:
+                    raise JobNotFound(job_id)
+                conn.commit()
+
+            await asyncio.to_thread(_do)
+
     async def reset_for_recovery(self, job_id: str, reason: str = "") -> Job:
         """把中断在途的 job 回退到 ``received``（服务重启恢复专用）。
 
@@ -473,6 +523,46 @@ class JobStore:
                     JobEvent(seq=r["seq"], job_id=r["job_id"], ts=r["ts"], kind=r["kind"], detail=r["detail"])
                     for r in rows
                 ]
+
+            return await asyncio.to_thread(_do)
+
+    async def transition_history(self) -> list[TransitionRecord]:
+        """全部 job 的状态转移轨迹（指标时长与复盘报告时间线的共同数据源）。
+
+        detail 格式由本模块的 ``transition()`` / ``reset_for_recovery()`` 产生
+        （``from -> to(: reason)``），解析留在同一处生产者模块里。
+        """
+        async with self._lock:
+            conn = self._require_conn()
+
+            def _do() -> list[TransitionRecord]:
+                rows = conn.execute(
+                    "SELECT job_id, ts, kind, detail FROM job_events"
+                    " WHERE kind IN ('transition', 'recovery_reset') ORDER BY seq"
+                ).fetchall()
+                records: list[TransitionRecord] = []
+                for r in rows:
+                    detail = r["detail"]
+                    arrow = detail.find(" -> ")
+                    if arrow < 0:
+                        continue
+                    from_state = detail[:arrow].strip()
+                    rest = detail[arrow + 4:]
+                    if ": " in rest:
+                        to_state, reason = rest.split(": ", 1)
+                    else:
+                        to_state, reason = rest, ""
+                    records.append(
+                        TransitionRecord(
+                            job_id=r["job_id"],
+                            ts=r["ts"],
+                            kind=r["kind"],
+                            from_state=from_state,
+                            to_state=to_state.strip(),
+                            reason=reason,
+                        )
+                    )
+                return records
 
             return await asyncio.to_thread(_do)
 

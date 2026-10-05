@@ -122,7 +122,7 @@ async def _serve(service, host: str, port: int, recover: bool = True) -> None:
     )
     await runtime.start(recover=recover)
 
-    app = create_app(runtime, build_adapters(service))
+    app = create_app(runtime, build_adapters(service), model=provider.model)
 
     http_runner = web.AppRunner(app)
     await http_runner.setup()
