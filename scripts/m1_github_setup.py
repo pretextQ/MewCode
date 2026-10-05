@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import urllib.error
@@ -24,10 +25,19 @@ import urllib.request
 
 
 def read_token_from_credential_helper(host: str = "github.com") -> str:
+    # GCM 非交互：多账号机器上裸 credential fill 会弹 "Select an account"
+    # 挂死 headless 进程（与服务的凭证读取同款修法，见执行记录 15）。
+    env = {
+        **os.environ,
+        "GCM_INTERACTIVE": "never",
+        "GCM_PROVIDER": "generic",
+        "GIT_TERMINAL_PROMPT": "0",
+    }
     proc = subprocess.run(
         ["git", "credential", "fill"],
         input=f"protocol=https\nhost={host}\n\n".encode(),
         capture_output=True,
+        env=env,
     )
     if proc.returncode != 0:
         return ""
