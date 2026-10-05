@@ -241,10 +241,3 @@ Windows 是一等公民运行平台，已知边界（GBK 编码读取、行尾�
 见 [guides/windows-platform-notes.md](guides/windows-platform-notes.md)。
 权限分层语义见 [guides/permission-semantics.md](guides/permission-semantics.md)，
 hook stdin JSON 契约见 [guides/hook-contract.md](guides/hook-contract.md)。
-
-## 路线图
-
-- [x] 内核加固：权限与安全、核心正确性、平台特性、质量基建（42 项系统性修复）
-- [x] M1：无头服务化 + 告警驱动闭环（真机验收：模拟告警 → 无人干预 → PR + CI 绿）
-- [x] M2：企业能力层——Docker 沙箱、企业规范 Skill 包、只读内部工具链（MCP）、自起测试环境集成验证
-- [x] M3：运营化——`/metrics` 指标与 job 复盘报告、多仓库策略、评估集回放（提示词变更前后可量化对比，实测见上）
