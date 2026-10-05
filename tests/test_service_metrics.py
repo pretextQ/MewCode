@@ -283,7 +283,11 @@ class TestCollectAndRender:
 
 class TestJobReport:
     @pytest.mark.asyncio
-    async def test_report_projects_full_audit_trail(self, tmp_path: Path):
+    async def test_report_projects_full_audit_trail(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        # utc_now 只有秒级精度：created_at 与转移事件跨秒边界时，0 秒时长会被
+        # 算成 1.0（CI 上偶发红）。冻结时钟，让"同秒完成 → 0 但有定义"成为
+        # 确定性断言；时长语义本身（秒差推导、None 口径）由其余用例覆盖。
+        monkeypatch.setattr("mewcode.service.jobs.utc_now", lambda: "2026-10-05T08:00:00Z")
         store = JobStore(tmp_path / "jobs.db")
         await store.connect()
         try:
@@ -335,7 +339,9 @@ class TestJobReport:
             await store.close()
 
     @pytest.mark.asyncio
-    async def test_report_of_escalated_job_carries_reason(self, tmp_path: Path):
+    async def test_report_of_escalated_job_carries_reason(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        # 同 test_report_projects_full_audit_trail：冻结时钟避免跨秒边界 flake
+        monkeypatch.setattr("mewcode.service.jobs.utc_now", lambda: "2026-10-05T08:00:00Z")
         store = JobStore(tmp_path / "jobs.db")
         await store.connect()
         try:
