@@ -114,7 +114,7 @@ def create_app(
         # 批量告警里被跳过的条目必须可见：这是"告警为什么没被修"的唯一答复处
         body["skipped"] = parsed.skipped
         body["warnings"] = parsed.warnings + body["warnings"]
-        if not result.accepted and not result.deduped and parsed.skipped:
+        if not result.accepted and not result.deduped and (parsed.skipped or result.rejected):
             # 全部条目都不可受理：用 4xx 让上游/告警系统看到异常，而不是假装 202
             return web.json_response(body, status=422)
         return web.json_response(body, status=202)

@@ -34,6 +34,7 @@ from mewcode.config import RepoConfig, ServiceConfig
 
 from . import sop
 from .jobs import InvalidTransition, Job, JobStore
+from .policy import PolicyError, RepoPolicy, RepoPolicyLoader
 
 log = logging.getLogger(__name__)
 
@@ -68,6 +69,20 @@ def commit_excludes() -> list[str]:
 
 #: 提交时使用的固定排除清单（publisher 直接引用；语义与 :func:`commit_excludes` 一致）
 COMMIT_EXCLUDES: tuple[str, ...] = tuple(commit_excludes())
+
+
+def policy_event_detail(policy: RepoPolicy) -> str:
+    """policy_applied 审计事件的摘要：覆盖了什么、来自哪个文件。"""
+    parts = [f"source={policy.source}"]
+    if policy.target_branch:
+        parts.append(f"target_branch={policy.target_branch}")
+    if policy.token_budget:
+        parts.append(f"token_budget={policy.token_budget}")
+    if policy.severities:
+        parts.append("severities=" + ",".join(policy.severities))
+    if policy.notify is not None:
+        parts.append(f"notify={policy.notify.type}")
+    return " ".join(parts)
 
 
 class TokenBudgetExceeded(Exception):
@@ -207,6 +222,9 @@ class ExecutionContext:
     attempts: int = 1
     #: 集成验证结果（M2 W4）；None = 仓库没有 compose 文件、这一步不适用
     integration: IntegrationOutcome | None = None
+    #: 目标分支（M3 W2 仓库策略）：worktree 基线与 PR base 共用；空 = publisher
+    #: 回落到服务配置 vcs.base_branch
+    target_branch: str = ""
 
     def diff_stat(self) -> str:
         added = sum(
@@ -385,11 +403,13 @@ class HeadlessAgentRunner:
         provider: Any,
         hook_engine: Any = None,
         sandbox: Any = None,
+        policy_loader: RepoPolicyLoader | None = None,
     ) -> None:
         self.config = config
         self.provider = provider
         self.hook_engine = hook_engine
         self.sandbox = sandbox
+        self.policy_loader = policy_loader
         self._sandbox_decision: bool | None = None
         #: 直跑模式下承载 MCP 生命周期的一次性子任务（强引用防 GC；
         #: 见 _run_direct 的隔离说明）
@@ -467,12 +487,27 @@ class HeadlessAgentRunner:
     async def run(
         self, job: Job, work_dir: str, prompt: str, on_event: Callable[[dict[str, Any]], None]
     ) -> AgentRunOutcome:
+        # 预算在动手前解析：策略文件坏掉在这里就暴露（PolicyError → 执行链
+        # escalate），而不是等 agent 跑了一半才发现配置读不了。
+        budget = self._resolve_token_budget(job)
         if await self._use_sandbox():
-            return await self._run_in_sandbox(job, work_dir, prompt, on_event)
-        return await self._run_direct(job, work_dir, prompt, on_event)
+            return await self._run_in_sandbox(job, work_dir, prompt, on_event, budget)
+        return await self._run_direct(job, work_dir, prompt, on_event, budget)
+
+    def _resolve_token_budget(self, job: Job) -> int:
+        """token 预算解析：仓库策略 > 服务配置（0 = 不限）。"""
+        if self.policy_loader is None:
+            return self.config.token_budget
+        policy = self.policy_loader.load(job.repo)  # PolicyError 原样上抛
+        return policy.token_budget or self.config.token_budget
 
     async def _run_in_sandbox(
-        self, job: Job, work_dir: str, prompt: str, on_event: Callable[[dict[str, Any]], None]
+        self,
+        job: Job,
+        work_dir: str,
+        prompt: str,
+        on_event: Callable[[dict[str, Any]], None],
+        budget: int,
     ) -> AgentRunOutcome:
         """容器内跑 agent；容器输出即结构化摘要，直接回读。"""
         on_event({"type": "sandbox", "detail": f"running agent in sandbox for {job.id}"})
@@ -500,6 +535,13 @@ class HeadlessAgentRunner:
             "type": "usage",
             "usage": {"inputTokens": result.input_tokens, "outputTokens": result.output_tokens},
         })
+        # 沙箱模式做不到中途熔断（容器已经跑完）：事后门禁拦住"超预算的修复"
+        # 进 PR——用量已经发生，但成果不带走，证据留在 escalate 记录里。
+        if budget and result.input_tokens + result.output_tokens > budget:
+            raise TokenBudgetExceeded(
+                f"token budget {budget} exceeded in sandbox "
+                f"({result.input_tokens} in + {result.output_tokens} out)"
+            )
         if result.timed_out:
             raise TimeoutError(f"sandbox agent run timed out after {timeout:.0f}s")
         if result.exit_code != 0 and not result.result_text:
@@ -519,7 +561,12 @@ class HeadlessAgentRunner:
         )
 
     async def _run_direct(
-        self, job: Job, work_dir: str, prompt: str, on_event: Callable[[dict[str, Any]], None]
+        self,
+        job: Job,
+        work_dir: str,
+        prompt: str,
+        on_event: Callable[[dict[str, Any]], None],
+        budget: int,
     ) -> AgentRunOutcome:
         """直跑模式：有 MCP 时把整段跑进一次性子任务（任务隔离）。
 
@@ -535,9 +582,9 @@ class HeadlessAgentRunner:
         没配 MCP 时不隔离（零行为变化）。
         """
         if not self.config.mcp_servers:
-            return await self._run_direct_body(job, work_dir, prompt, on_event)
+            return await self._run_direct_body(job, work_dir, prompt, on_event, budget)
 
-        task = asyncio.ensure_future(self._run_direct_body(job, work_dir, prompt, on_event))
+        task = asyncio.ensure_future(self._run_direct_body(job, work_dir, prompt, on_event, budget))
         self._isolated_tasks.add(task)  # 强引用：事件循环只持弱引用
         task.add_done_callback(self._isolated_tasks.discard)
         try:
@@ -549,13 +596,17 @@ class HeadlessAgentRunner:
             raise
 
     async def _run_direct_body(
-        self, job: Job, work_dir: str, prompt: str, on_event: Callable[[dict[str, Any]], None]
+        self,
+        job: Job,
+        work_dir: str,
+        prompt: str,
+        on_event: Callable[[dict[str, Any]], None],
+        budget: int,
     ) -> AgentRunOutcome:
         from mewcode.conversation import ConversationManager
 
         agent, mcp_result = await self._build_agent_with_tools(work_dir, on_event)
         outcome = AgentRunOutcome()
-        budget = self.config.token_budget
 
         def _callback(event: dict[str, Any]) -> None:
             on_event(event)
@@ -616,6 +667,7 @@ class ExecutionChain:
         integration_verifier: IntegrationVerifier | None = None,
         notifier: Any = None,
         worktree_manager_factory: Callable[[str], Any] | None = None,
+        policy_loader: RepoPolicyLoader | None = None,
     ) -> None:
         self.config = config
         self.store = store
@@ -626,6 +678,7 @@ class ExecutionChain:
         self.integration_verifier = integration_verifier
         self.notifier = notifier
         self._worktree_manager_factory = worktree_manager_factory
+        self.policy_loader = policy_loader or RepoPolicyLoader(config.repos)
         self._managers: dict[str, Any] = {}
         self._event_tasks: dict[str, list[asyncio.Task[Any]]] = {}
 
@@ -698,6 +751,16 @@ class ExecutionChain:
             )
             return
 
+        # 仓库策略（M3 W2）：解析失败 = 宁可不修也不带病运行，直接 escalate
+        try:
+            policy = self.policy_loader.load(job.repo)
+        except PolicyError as e:
+            await self._escalate(job.id, f"repo policy unreadable: {e}")
+            return
+        target_branch = policy.target_branch
+        if policy.overrides_anything:
+            await self._event(job.id, "policy_applied", policy_event_detail(policy))
+
         # --- triaging：信息不足就不下手（不产生垃圾 PR） ---
         if await self._transition(job.id, "triaging", reason="starting alert triage") is None:
             return
@@ -714,7 +777,9 @@ class ExecutionChain:
         # --- reproducing：建隔离工作区 + 基线测试 ---
         try:
             manager = self._worktree_manager(repo_root)
-            worktree = await manager.create(job.id, base_branch=repo.base_branch or "HEAD")
+            worktree = await manager.create(
+                job.id, base_branch=target_branch or repo.base_branch or "HEAD"
+            )
         except Exception as e:
             await self._escalate(job.id, f"worktree creation failed: {type(e).__name__}: {e}")
             return
@@ -730,7 +795,9 @@ class ExecutionChain:
         # 重试预算仍由状态机的 attempts 上限强制（超限由内层 escalate）。
         feedback = ""
         while True:
-            context = await self._fix_and_verify(job, repo, worktree, baseline, feedback)
+            context = await self._fix_and_verify(
+                job, repo, worktree, baseline, feedback, target_branch
+            )
             if context is None:
                 return
 
@@ -753,6 +820,7 @@ class ExecutionChain:
         worktree: Any,
         baseline: TestOutcome | None,
         feedback: str,
+        target_branch: str,
     ) -> ExecutionContext | None:
         """有界修复-验证循环。返回证据上下文；任何失败路径都返回 None（已收尾）。"""
         work_dir = worktree.path
@@ -862,6 +930,7 @@ class ExecutionChain:
                     verify_test=verify,
                     attempts=attempt,
                     integration=integration,
+                    target_branch=target_branch,
                 )
 
             # 单测失败：记录后重试（是否允许重试由状态机的 attempts 上限决定）

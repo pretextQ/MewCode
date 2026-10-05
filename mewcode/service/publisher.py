@@ -264,7 +264,11 @@ class PullRequestPublisher:
             info = existing
             events = [("pr_updated", f"PR #{existing.number} refreshed after retry: {existing.url}")]
         else:
-            info = await self.vcs.create_pr(slug, branch, build_pr_title(job), body)
+            # base 用仓库策略解析出的目标分支（M3 W2）；空 = vcs 层回落服务配置。
+            # 它来自仓库方写的 policy.yaml，webhook payload 永远碰不到这里。
+            info = await self.vcs.create_pr(
+                slug, branch, build_pr_title(job), body, base=context.target_branch
+            )
             events = [("pr_created", f"PR #{info.number} at {info.url} (base={info.base_branch})")]
 
         return PublishResult(pr_url=info.url, branch=branch, extra_events=events)

@@ -15,6 +15,7 @@ from typing import Any
 from mewcode.config import NotifyConfig
 
 from .jobs import Job, JobStore
+from .policy import RepoPolicyLoader
 
 log = logging.getLogger(__name__)
 
@@ -135,3 +136,29 @@ def build_notifier(config: NotifyConfig, store: JobStore | None = None, transpor
     if config.type == "none" or not config.webhook_url:
         return NullNotifier()
     return WebhookNotifier(config, store, transport=transport)
+
+
+class RepoPolicyNotifier:
+    """按仓库策略路由通知渠道（M3 W2）：policy.notify > 服务级 notify。
+
+    包装默认 notifier：job 所属仓库的策略声明了 notify 段时用策略渠道，
+    否则走默认。策略读取失败时上抛 PolicyError——调用方对通知本就有
+    catch-all（记 warning、不影响主流程），而"读不出策略就悄悄换渠道"
+    等于把"策略失效"掩盖掉，宁可不发。
+    """
+
+    def __init__(
+        self, default: Any, loader: RepoPolicyLoader, store: JobStore | None = None
+    ) -> None:
+        self._default = default
+        self._loader = loader
+        self._store = store
+
+    def notifier_for(self, repo: str) -> Any:
+        policy = self._loader.load(repo)  # PolicyError 原样上抛
+        if policy.notify is None:
+            return self._default
+        return build_notifier(policy.notify, self._store)
+
+    async def notify_job_event(self, job: Job, phase: str, detail: str = "") -> None:
+        await self.notifier_for(job.repo).notify_job_event(job, phase, detail)

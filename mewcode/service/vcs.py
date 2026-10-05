@@ -78,7 +78,7 @@ class VCSProvider(Protocol):
     async def find_open_pr(self, repo_slug: str, head_branch: str) -> PRInfo | None: ...
 
     async def create_pr(
-        self, repo_slug: str, head_branch: str, title: str, body: str
+        self, repo_slug: str, head_branch: str, title: str, body: str, base: str = ""
     ) -> PRInfo: ...
 
     async def update_pr_body(self, repo_slug: str, number: int, body: str) -> None: ...
@@ -336,9 +336,17 @@ class GitHubVCS:
             head_branch=head_branch, base_branch=(pr.get("base") or {}).get("ref", ""),
         )
 
-    async def create_pr(self, repo_slug: str, head_branch: str, title: str, body: str) -> PRInfo:
-        """开 PR——base 分支硬取自配置，任何调用方都无法把它指到别处。"""
-        base = self.config.base_branch
+    async def create_pr(
+        self, repo_slug: str, head_branch: str, title: str, body: str, base: str = ""
+    ) -> PRInfo:
+        """开 PR。
+
+        ``base`` 允许调用方显式指定目标分支（M3 W2：仓库策略的 target_branch，
+        经 publisher 传入）；缺省仍取服务配置。webhook payload 永远到不了这里
+        ——M1 的安全红线（base 不可被告警内容改写）不变：策略文件是仓库方写的
+        配置，不是告警数据。
+        """
+        base = base or self.config.base_branch
         if not base:
             raise VCSError("service.vcs.base_branch is not configured")
         data = await self._api(

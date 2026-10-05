@@ -486,7 +486,7 @@ class TestRunnerIntegration:
 
         called: dict = {}
 
-        async def fake_direct(job, work_dir, prompt, on_event):
+        async def fake_direct(job, work_dir, prompt, on_event, budget):
             called["direct"] = True
             return ex.AgentRunOutcome(final_text="direct mode", tool_calls=1, input_tokens=2, output_tokens=3)
 
@@ -508,7 +508,7 @@ class TestRunnerIntegration:
         runner = HeadlessAgentRunner(config, PROVIDER, sandbox=sandbox)
         calls = {"n": 0}
 
-        async def fake_direct(job, work_dir, prompt, on_event):
+        async def fake_direct(job, work_dir, prompt, on_event, budget):
             calls["n"] += 1
             return runner.__class__.__mro__[0].__dict__ and __import__(
                 "mewcode.service.execution", fromlist=["AgentRunOutcome"]

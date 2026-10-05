@@ -19,6 +19,7 @@ from typing import Any
 from mewcode.config import ServiceConfig
 
 from .jobs import Job, JobStore
+from .policy import PolicyError, RepoPolicyLoader
 from .triggers.base import JobDraft
 from .worker import JobHandler, WorkerPool
 
@@ -32,12 +33,16 @@ class IntakeResult:
     accepted: list[Job] = field(default_factory=list)
     deduped: list[Job] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    #: 被仓库策略拒收的告警（repo/fingerprint/title/reason）——
+    #: "告警为什么没被修"必须在响应里可回答（M3 W2 触发路由）
+    rejected: list[dict[str, str]] = field(default_factory=list)
 
     def as_dict(self) -> dict:
         return {
             "accepted": [{"id": j.id, "status": j.status, "repo": j.repo} for j in self.accepted],
             "deduped": [{"id": j.id, "status": j.status, "repo": j.repo} for j in self.deduped],
             "warnings": self.warnings,
+            "rejected": self.rejected,
         }
 
 
@@ -50,12 +55,14 @@ class ServiceRuntime:
         repo_root: str | Path | None = None,
         worktree_cleanup_cutoff_hours: int | None = 24,
         notifier: Any = None,
+        policy_loader: RepoPolicyLoader | None = None,
     ) -> None:
         self.config = config
         self._handler = handler
         data_dir = Path(repo_root or ".") / config.data_dir
         self.store = store or JobStore(data_dir / "jobs.db")
         self.notifier = notifier
+        self.policy_loader = policy_loader or RepoPolicyLoader(config.repos)
         self.pool = WorkerPool(
             store=self.store,
             handler=handler,
@@ -117,6 +124,36 @@ class ServiceRuntime:
         result = IntakeResult()
         for draft in drafts:
             result.warnings.extend(draft.warnings)
+            # 策略在门口判定：不匹配的告警拒收（响应里给原因），不建 job、
+            # 也不进去重——路由语义优先于"告警又响了一次"的证据合并
+            try:
+                policy = self.policy_loader.load(draft.repo)
+            except PolicyError as e:
+                result.rejected.append(
+                    {
+                        "repo": draft.repo,
+                        "fingerprint": draft.fingerprint,
+                        "title": draft.title,
+                        "reason": f"repo policy unreadable: {e}",
+                    }
+                )
+                log.warning("rejected alert for %s: %s", draft.repo, e)
+                continue
+            if not policy.accepts(draft.severity):
+                reason = (
+                    f"repo policy only accepts severities: "
+                    f"{', '.join(policy.severities)} (got '{draft.severity}')"
+                )
+                result.rejected.append(
+                    {
+                        "repo": draft.repo,
+                        "fingerprint": draft.fingerprint,
+                        "title": draft.title,
+                        "reason": reason,
+                    }
+                )
+                log.info("rejected alert for %s: %s", draft.repo, reason)
+                continue
             existing = await self.store.find_open_by_fingerprint(
                 draft.repo, draft.fingerprint, self.config.dedup_window_seconds
             )

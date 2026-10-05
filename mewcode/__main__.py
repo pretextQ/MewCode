@@ -64,7 +64,8 @@ async def _serve(service, host: str, port: int, recover: bool = True) -> None:
     from mewcode.service.compose import ComposeVerifier
     from mewcode.service.execution import ExecutionChain, HeadlessAgentRunner, SandboxTestRunner
     from mewcode.service.jobs import JobStore
-    from mewcode.service.notify import build_notifier
+    from mewcode.service.notify import RepoPolicyNotifier, build_notifier
+    from mewcode.service.policy import RepoPolicyLoader
     from mewcode.service.publisher import GitHubCIGate, PullRequestPublisher
     from mewcode.service.runtime import ServiceRuntime
     from mewcode.service.sandbox import DockerSandbox
@@ -87,7 +88,10 @@ async def _serve(service, host: str, port: int, recover: bool = True) -> None:
     store = JobStore(Path(service.data_dir) / "jobs.db")
     await store.connect()
 
-    notifier = build_notifier(service.notify, store)
+    # 仓库策略（M3 W2）：一份 loader 三处共用（intake 路由 / 执行链 / runner），
+    # 通知经 RepoPolicyNotifier 按仓库路由到策略渠道。
+    policy_loader = RepoPolicyLoader(service.repos)
+    notifier = RepoPolicyNotifier(build_notifier(service.notify, store), policy_loader, store)
     # 沙箱（M2 W1）：容器不可用时 HeadlessAgentRunner / SandboxTestRunner 自动回退直跑
     sandbox = None
     if service.sandbox.enabled:
@@ -96,7 +100,11 @@ async def _serve(service, host: str, port: int, recover: bool = True) -> None:
             service.sandbox, mewcode_src=mewcode_src, work_root=str(Path(service.data_dir) / "sandbox")
         )
     runner = HeadlessAgentRunner(
-        service, provider, hook_engine=HookEngine(hooks) if hooks else None, sandbox=sandbox
+        service,
+        provider,
+        hook_engine=HookEngine(hooks) if hooks else None,
+        sandbox=sandbox,
+        policy_loader=policy_loader,
     )
     vcs = GitHubVCS(service.vcs) if service.vcs.provider == "github" else None
     default_repo = next(iter(service.repos), "job")
@@ -112,6 +120,7 @@ async def _serve(service, host: str, port: int, recover: bool = True) -> None:
         ci_gate=GitHubCIGate(vcs) if vcs else None,
         integration_verifier=integration_verifier,
         notifier=notifier,
+        policy_loader=policy_loader,
     )
     runtime = ServiceRuntime(
         service,
@@ -119,6 +128,7 @@ async def _serve(service, host: str, port: int, recover: bool = True) -> None:
         store=store,
         worktree_cleanup_cutoff_hours=config.worktree.stale_cutoff_hours,
         notifier=notifier,
+        policy_loader=policy_loader,
     )
     await runtime.start(recover=recover)
 
