@@ -1,0 +1,50 @@
+........................................................................ [  5%]
+........................................................................ [ 11%]
+........................................................................ [ 17%]
+........................................................................ [ 23%]
+........................................................................ [ 29%]
+........................................................s............... [ 35%]
+...............s..................................................ssssss [ 41%]
+ssssssss................................................................ [ 47%]
+........................................................................ [ 53%]
+........................................................................ [ 59%]
+..........F............................................................. [ 65%]
+........................................................................ [ 71%]
+...................................................................s.... [ 77%]
+........................................................................ [ 83%]
+........................................................................ [ 89%]
+........................................................................ [ 95%]
+......................................................                   [100%]
+================================== FAILURES ===================================
+_____________ TestJobReport.test_report_projects_full_audit_trail _____________
+
+self = <test_service_metrics.TestJobReport object at 0x00000160F4F21010>
+tmp_path = WindowsPath('C:/Users/runneradmin/AppData/Local/Temp/pytest-of-runneradmin/pytest-0/test_report_projects_full_audi0')
+
+    @pytest.mark.asyncio
+    async def test_report_projects_full_audit_trail(self, tmp_path: Path):
+        store = JobStore(tmp_path / "jobs.db")
+        await store.connect()
+        try:
+            j1, _, _ = await seed_store(store)
+            report = await job_report(store, j1)
+    
+            assert report["job"]["id"] == j1
+            assert report["job"]["status"] == "merged"
+            assert report["job"]["tokens"] == {"input": 120, "output": 80, "total": 200}
+    
+            # \u72b6\u6001\u8f68\u8ff9\uff1a\u4ece received \u4e00\u8def\u5230 merged\uff0creason \u88ab\u89e3\u6790\u51fa\u6765
+            assert [t["to"] for t in report["trajectory"]] == [
+                "triaging", "reproducing", "fixing", "verifying",
+                "pr_opened", "ci_gate", "human_review", "merged",
+            ]
+            assert report["trajectory"][-1]["reason"] == "approved by review"
+    
+            # timing\uff1a\u540c\u79d2\u5185\u5b8c\u6210 \u2192 \u6570\u503c\u4e3a 0 \u4f46\u6709\u5b9a\u4e49
+>           assert report["timing"]["alert_to_pr_seconds"] == 0.0
+E           assert 1.0 == 0.0
+
+tests\test_service_metrics.py:305: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_service_metrics.py::TestJobReport::test_report_projects_full_audit_trail - assert 1.0 == 0.0
+1 failed, 1188 passed, 17 skipped in 157.57s (0:02:37)
