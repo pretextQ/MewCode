@@ -3,7 +3,7 @@
 [![CI](https://github.com/pretextQ/MewCode/actions/workflows/ci.yml/badge.svg)](https://github.com/pretextQ/MewCode/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 
-**MewCode 是一个 AI Coding Agent，也是一套告警驱动的自动化开发服务**：同一个 agent 内核，既能作为交互式 CLI 帮你写代码，也能以无头服务的形式常驻——线上告警自动触发，agent 在 OS 级沙箱里定位 bug、写修复、跑测试（含自起 docker-compose 依赖环境的集成验证），以 PR 形式交给人工 review。**人审 PR 是唯一必经的人工点，服务没有任何 merge 权限。**
+**MewCode 是一个 AI Coding Agent，也是一套告警驱动的自动化开发服务**：同一个 agent 内核，既能作为交互式 CLI 帮你写代码，也能以无头服务的形式常驻——线上告警自动触发，agent 在 OS 级沙箱里定位 bug、写修复、跑测试（含自起 docker-compose 依赖环境的集成验证），以 PR 形式交给人工 review。**人审 PR 是唯一必经的人工点，服务没有任何 merge 权限。**服务暴露 Prometheus 指标与逐单复盘报告，评估集回放让每次提示词/内核改动都能量化对比。
 
 ```
 告警(Alertmanager) ─▶ 服务层 ─▶ 每 job 隔离单元 ─▶ PR + CI 门禁 ─▶ 人工 review
@@ -18,6 +18,7 @@
 
 - **告警进来，PR 出去，全程无人干预**——真实 demo 仓库（[pretextQ/mewcode-alert-demo](https://github.com/pretextQ/mewcode-alert-demo)）里保留着历次无人值守运行的 PR，每份 PR body 都是结构化证据链：告警摘要、根因分析、修复说明、测试前后对比、集成验证结果、规范自查。可从 [PR #5](https://github.com/pretextQ/mewcode-alert-demo/pull/5) 看起。
 - **修不好就诚实升级**：重试次数有上限，超限进入 escalate 并附上已尝试的分析，绝不产生垃圾 PR；验证不过的修复不会被发布。
+- **运营可量化**：评估集回放实测（三类真机 bug × 前后两轮，6 单全部无人值守跑通）——修复 PR 成功率 100%，告警→PR 中位 25–26 秒（p90 29–43 秒），单 job token 7.7k–10.8k；给代码规范加一条"可追溯注释"规则后，PR diff 的规则命中从 0/3 变 3/3 而成功率与成本不变（详见[评估集回放](#运营化指标复盘与评估集回放)）。
 
 ## 核心特性
 
@@ -29,7 +30,9 @@
 **服务化（headless）**
 - Alertmanager webhook / 手动 JSON 触发，SQLite JobStore + 显式状态机 + 指纹去重，优雅退出与重启恢复
 - 每 job 独立 git worktree；修复-验证循环有界（默认最多 3 次，超限 escalate）
+- **多仓库策略**：`<repo>/.mewcode/policy.yaml` 声明触发严重度路由 / 目标分支 / 本仓 token 预算 / 通知渠道（仓库级 > 服务配置 > 默认；按 job 现读、改文件即生效；损坏的策略快速失败而非静默回退）
 - PR body 由服务层结构化拼装，review 者不看 agent 日志也能做判断
+- **运营端点**：`/metrics`（Prometheus 文本：状态/仓库计数、alert→PR 直方图、token 成本）、`/jobs/{id}/report`（单 job JSON 复盘）、`/costs`（按仓库聚合 token，只报数量不换算金额）
 
 **无人值守的信任层**
 - **Docker 沙箱**：agent 在容器内执行（非 root、`--cap-drop=ALL`、`no-new-privileges`、只读根文件系统、CPU/内存/PID 限额、硬超时强杀）；依赖按锁文件钉版构建，镜像 tag 内容寻址
@@ -128,6 +131,58 @@ uv run python scripts/m1_demo.py alert --port 9300 --repo demo --bug null_deref
 
 失败路径同样是设计的一部分：信息不足的告警在 triaging 即 escalate（不硬修）、agent 无改动收敛为 `cant_repro`、验证/CI 失败带输出重试至上限、重复告警在窗口内去重合并、服务重启后未完结 job 自动恢复（等人工的 job 不会被重复重跑）。
 
+### 3. 多仓库策略（可选）
+
+每个仓库可以在自己的 checkout 里放一份 `<repo>/.mewcode/policy.yaml`，声明与全服务默认不同的行为（仓库级 > 服务配置 > 默认；按 job 现读，改文件即生效、无需重启；损坏的策略一律快速失败——intake 拒收给原因、执行链 escalate，绝不静默回退）：
+
+```yaml
+# <repo>/.mewcode/policy.yaml
+triggers:
+  severities: [critical]   # 触发路由：清单外的严重度在 intake 拒收（422 + 原因）
+target_branch: develop     # worktree 基线与 PR base 同时走它
+token_budget: 50000        # 本仓预算（直跑中途熔断 + 沙箱事后门禁）
+notify:
+  type: slack              # 本仓通知渠道（覆盖服务级）
+  webhook_url: ${SLACK_WEBHOOK}
+```
+
+## 运营化：指标、复盘与评估集回放
+
+服务暴露三个只读端点（与 healthz 同口径，无需 token）：
+
+| 端点 | 内容 |
+|---|---|
+| `GET /metrics` | Prometheus 文本格式：jobs 总量（按状态/仓库）、`mewcode_alert_to_pr_seconds` 直方图（MTTR 核心）、merged/escalate 计数、按仓库的 token 成本 |
+| `GET /jobs/{id}/report` | 单 job JSON 复盘：状态轨迹、逐 attempt token、工具统计、验证证据、MCP 调用、升级原因 |
+| `GET /costs?repo=` | 按仓库聚合的 token 成本（诚实口径：只报 provider 原始数量，不换算金额） |
+
+**评估集回放**——改了提示词 / skill / 内核之后跑一轮，就能拿到成功率 / MTTR / 成本的前后对比：
+
+```bash
+uv run mewcode serve --port 9300
+
+# 基线：三类真机 bug 用例（config_error / null_deref / unhandled_timeout）批量回放
+uv run python scripts/m3_replay.py --label baseline --fingerprint-prefix replay-1 \
+    --repo-path /path/to/demo-repo
+
+# 改一处 skill 规则后重跑：必须换 fingerprint 前缀（服务端 1800s 去重窗口），带 --compare 出 A/B 对比
+uv run python scripts/m3_replay.py --label after --fingerprint-prefix replay-2 \
+    --repo-path /path/to/demo-repo --compare docs/evolution/replay/baseline.json
+```
+
+脚本在每单告警发送前先把 demo 仓重置到该 bug 的现场并推 main（保证 PR diff 恰好是"bug→修复"），轮询 job 到 `human_review`/终态，再拉取 PR diff 统计规范标记（默认找 `# fix(...)` 追溯注释，可换正则），输出 JSON+Markdown 报告。
+
+2026-10-05 真机实测（3 用例 × 前后两轮，证据为 [PR #12–#17](https://github.com/pretextQ/mewcode-alert-demo/pulls)，CI 全绿）：
+
+| 指标 | 基线 | org-code-style 加"可追溯注释"规则后 |
+|---|---|---|
+| 修复 PR 成功率 | 3/3 | 3/3 |
+| alert→PR 中位 / p90 | 25s / 29s | 26s / 43s |
+| token 总量（3 单） | 27,159 | 27,257 |
+| 规范标记命中（PR diff） | 0/3 | **3/3** |
+
+诚实口径：每轮 n=3；p90 波动来自单样本（19s→43s），不解读为趋势；token 为 provider 原始计数。
+
 ## 信任模型（无人值守为什么可信）
 
 | 层 | 机制 |
@@ -160,16 +215,20 @@ mewcode/
     ├── compose.py      #   自起测试环境（compose 依赖 + 容器内集成测试）
     ├── publisher.py    #   PR 证据链拼装 + CI 门禁
     ├── vcs.py          #   GitHub REST（branch / push / PR / checks）
-    └── notify.py       #   钉钉 / 企微 / Slack webhook 通知
+    ├── notify.py       #   钉钉 / 企微 / Slack webhook 通知
+    ├── metrics.py      #   /metrics + /jobs/{id}/report + /costs（M3）
+    ├── policy.py       #   仓库级策略文件解析与四生效点（M3）
+    └── ...
 scripts/
 ├── m1_demo.py          # demo 仓库构建 + 模拟告警发送
-└── m1_github_setup.py  # demo 仓库一键建仓
+├── m1_github_setup.py  # demo 仓库一键建仓
+└── m3_replay.py        # 评估集回放：批量告警 → 报告（成功率/MTTR/token）+ A/B 对比
 ```
 
 ## 测试
 
 ```bash
-uv run pytest                                          # 全量套件（1100+ 用例）
+uv run pytest                                          # 全量套件（1180+ 用例）
 MEWCODE_DOCKER_TESTS=1 uv run pytest tests/test_sandbox_live.py   # 真机容器测试（需 Docker）
 ```
 
@@ -188,4 +247,4 @@ hook stdin JSON 契约见 [guides/hook-contract.md](guides/hook-contract.md)。
 - [x] 内核加固：权限与安全、核心正确性、平台特性、质量基建（42 项系统性修复）
 - [x] M1：无头服务化 + 告警驱动闭环（真机验收：模拟告警 → 无人干预 → PR + CI 绿）
 - [x] M2：企业能力层——Docker 沙箱、企业规范 Skill 包、只读内部工具链（MCP）、自起测试环境集成验证
-- [ ] M3：运营化——`/metrics` 指标与 job 复盘报告、多仓库策略、评估集回放（提示词变更前后可量化对比）
+- [x] M3：运营化——`/metrics` 指标与 job 复盘报告、多仓库策略、评估集回放（提示词变更前后可量化对比，实测见上）
