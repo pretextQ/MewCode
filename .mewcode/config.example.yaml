@@ -52,7 +52,7 @@ mcp_servers:
 #   concurrency: 3             # 同时在跑的 job 数
 #   job_timeout_seconds: 1800
 #   drain_timeout_seconds: 60  # 优雅退出等待在途 job 的上限
-#   webhook_token: "${MEWCODE_WEBHOOK_TOKEN}"
+#   webhook_token: "${MEWCODE_WEBHOOK_TOKEN}" # 保护 webhook、jobs、metrics、costs；healthz 匿名仅返回 status
 #   dedup_window_seconds: 1800 # 同指纹告警去重窗口
 #   data_dir: .mewcode/service # jobs.db 等运行时状态
 #   token_budget: 0            # 单 job token 预算，0 = 不限

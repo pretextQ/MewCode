@@ -149,7 +149,10 @@ notify:
 
 ## 运营化：指标、复盘与评估集回放
 
-服务暴露三个只读端点（与 healthz 同口径，无需 token）：
+服务暴露三个只读端点。配置 `service.webhook_token` 后，webhook、jobs、复盘、metrics 和 costs 均要求
+`X-MewCode-Token` 或 `Authorization: Bearer` 鉴权。只有 `/healthz` 可匿名访问，匿名响应仅含
+`status`，带有效 token 才附带队列、在途任务及状态计数。未配置 token 时仅允许回环监听。
+Prometheus 抓取需配置相同 Bearer 凭证；demo/回放脚本通过 `--token` 传入凭证，勿把真实值写进仓库。
 
 | 端点 | 内容 |
 |---|---|

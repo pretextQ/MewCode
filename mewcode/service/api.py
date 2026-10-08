@@ -3,13 +3,13 @@
 对外暴露的端点：
 - ``POST /webhook/alert``  告警源 webhook（Alertmanager 等，经适配器归一化）
 - ``POST /webhook/manual`` 手动触发（本地 JSON，demo 与测试用）
-- ``GET  /healthz``        健康检查（队列深度、在途数、状态分布）
+- ``GET  /healthz``        匿名最小健康检查；认证后附运维详情
 - ``GET  /jobs``           调试用 job 查询
 - ``GET  /metrics``        Prometheus 指标（M3 W1）
 - ``GET  /jobs/{id}/report`` 单 job 复盘报告（M3 W1）
 - ``GET  /costs``          按仓库/模型聚合的 token 成本（M3 W1）
 
-鉴权：配置了 ``service.webhook_token`` 时，写端点要求
+鉴权：配置了 ``service.webhook_token`` 时，除最小健康检查外所有端点要求
 ``X-MewCode-Token`` 头（或 ``Authorization: Bearer``），常数时间比较。
 未配置 token 时放行——只允许监听回环地址，这个约束在 CLI 入口处强制
 （见 ``mewcode/__main__.py``：非回环监听 + 无 token 直接拒绝启动）。
@@ -57,7 +57,7 @@ def _token_ok(request: web.Request, expected: str) -> bool:
         auth = request.headers.get("Authorization", "")
         if auth.startswith("Bearer "):
             provided = auth[len("Bearer "):]
-    return bool(provided) and hmac.compare_digest(provided, expected)
+    return bool(provided) and hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8"))
 
 
 def create_app(
@@ -78,7 +78,8 @@ def create_app(
 
     @web.middleware
     async def auth_middleware(request: web.Request, handler):
-        if request.path.startswith("/webhook/") and token and not _token_ok(request, token):
+        # 默认保护所有路径：新增端点不会因漏进路径清单而裸露。
+        if request.path != "/healthz" and token and not _token_ok(request, token):
             return web.json_response({"error": "unauthorized"}, status=401)
         return await handler(request)
 
@@ -126,16 +127,14 @@ def create_app(
         return await handle_webhook(request, "manual")
 
     async def healthz(request: web.Request) -> web.Response:
-        counts = await runtime.store.count_by_status()
-        payload = {
-            "status": "ok",
-            "queue_depth": runtime.pool.queue_depth,
-            "in_flight": len(runtime.pool.in_flight),
-            "jobs_by_status": counts,
-        }
         status = 200 if runtime.pool.running else 503
-        if status != 200:
-            payload["status"] = "stopping"
+        payload: dict[str, Any] = {"status": "ok" if status == 200 else "stopping"}
+        if token and _token_ok(request, token):
+            payload.update({
+                "queue_depth": runtime.pool.queue_depth,
+                "in_flight": len(runtime.pool.in_flight),
+                "jobs_by_status": await runtime.store.count_by_status(),
+            })
         return web.json_response(payload, status=status)
 
     async def list_jobs(request: web.Request) -> web.Response:

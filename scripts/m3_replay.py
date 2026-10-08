@@ -467,7 +467,7 @@ def main(argv: list[str]) -> int:
         log("hint: start it with `uv run mewcode serve --port <port>`")
         return 2
     model = ""
-    status, body = http_request(f"{base_url}/costs", timeout=10)
+    status, body = http_request(f"{base_url}/costs", token=args.token, timeout=10)
     if status == 200:
         try:
             model = json.loads(body).get("model", "")
@@ -568,9 +568,9 @@ def main(argv: list[str]) -> int:
         finally:
             rows.append(row)
 
-    status, metrics_text = http_request(f"{base_url}/metrics", timeout=30)
+    status, metrics_text = http_request(f"{base_url}/metrics", token=args.token, timeout=30)
     metrics_snapshot = metrics_text if status == 200 else f"metrics unavailable: HTTP {status}"
-    status, costs_body = http_request(f"{base_url}/costs", timeout=30)
+    status, costs_body = http_request(f"{base_url}/costs", token=args.token, timeout=30)
     try:
         costs_snapshot = json.loads(costs_body) if status == 200 else {"error": costs_body[:300]}
     except ValueError:

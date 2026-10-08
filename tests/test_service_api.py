@@ -165,19 +165,57 @@ class TestAuth:
             assert resp.status == 202
 
     @pytest.mark.asyncio
-    async def test_read_endpoints_open_even_with_token(self, tmp_path: Path):
-        """healthz / jobs / metrics / costs 是运维只读端点，不加 token（不含敏感数据）。"""
-        async with service_env(tmp_path, token="s3cret", alert_adapter=StubAdapter()) as (_, client):
-            assert (await client.get("/healthz")).status == 200
-            assert (await client.get("/jobs")).status == 200
-            assert (await client.get("/metrics")).status == 200
-            assert (await client.get("/costs")).status == 200
+    @pytest.mark.parametrize("headers", [{}, {"X-MewCode-Token": "guess"}, {"Authorization": "Bearer 错误"}])
+    async def test_read_endpoints_require_token(self, tmp_path: Path, headers):
+        async with service_env(tmp_path, token="s3cret", alert_adapter=StubAdapter()) as (runtime, client):
+            job = await runtime.store.create_job("fp-private", "private", title="internal incident")
+            await runtime.store.update(job.id, result="private agent output")
+            for path in ("/jobs", f"/jobs/{job.id}/report", "/metrics", "/costs", "/jobs?limit=1"):
+                resp = await client.get(path, headers=headers)
+                assert resp.status == 401
+                assert await resp.json() == {"error": "unauthorized"}
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("headers", [
+        {"X-MewCode-Token": "s3cret"}, {"Authorization": "Bearer s3cret"},
+    ])
+    async def test_authenticated_read_endpoints(self, tmp_path: Path, headers):
+        async with service_env(tmp_path, token="s3cret") as (runtime, client):
+            job = await runtime.store.create_job("fp-private", "private")
+            for path in ("/jobs", f"/jobs/{job.id}/report", "/metrics", "/costs"):
+                assert (await client.get(path, headers=headers)).status == 200
+            body = await (await client.get(f"/jobs/{job.id}/report", headers=headers)).json()
+            assert body["job"]["id"] == job.id
+
+    @pytest.mark.asyncio
+    async def test_anonymous_health_is_minimal_even_when_stopping(self, tmp_path: Path):
+        async with service_env(tmp_path, token="s3cret") as (runtime, client):
+            for headers in ({}, {"X-MewCode-Token": "guess"}):
+                resp = await client.get("/healthz", headers=headers)
+                assert resp.status == 200
+                assert await resp.json() == {"status": "ok"}
+            await runtime.pool.stop()
+            resp = await client.get("/healthz")
+            assert resp.status == 503
+            assert await resp.json() == {"status": "stopping"}
+
+    @pytest.mark.asyncio
+    async def test_path_variants_do_not_bypass_auth(self, tmp_path: Path):
+        async with service_env(tmp_path, token="s3cret") as (_, client):
+            for path in ("/%6aobs", "/jobs/", "/%2fjobs", "/healthz/", "/unknown", "/jobs/nope/report"):
+                assert (await client.get(path)).status == 401
+            assert (await client.head("/jobs")).status == 401
+            assert (await client.post("/webhook/manual", json={})).status == 401
+            assert (await client.get("/unknown", headers={"X-MewCode-Token": "s3cret"})).status == 404
 
     @pytest.mark.asyncio
     async def test_no_token_configured_accepts(self, tmp_path: Path):
         async with service_env(tmp_path, alert_adapter=StubAdapter()) as (_, client):
             resp = await client.post("/webhook/alert", json={"drafts": []})
             assert resp.status == 202
+            for path in ("/jobs", "/metrics", "/costs"):
+                assert (await client.get(path)).status == 200
+            assert await (await client.get("/healthz")).json() == {"status": "ok"}
 
 
 # =========================================================================
@@ -233,11 +271,12 @@ class TestPayloadValidation:
 class TestObservability:
     @pytest.mark.asyncio
     async def test_healthz_reports_queue_and_counts(self, tmp_path: Path):
-        async with service_env(tmp_path, alert_adapter=StubAdapter()) as (runtime, client):
-            await client.post("/webhook/alert", json={"drafts": [{"fingerprint": "fp-h"}]})
+        async with service_env(tmp_path, token="s3cret", alert_adapter=StubAdapter()) as (runtime, client):
+            headers = {"Authorization": "Bearer s3cret"}
+            await client.post("/webhook/alert", json={"drafts": [{"fingerprint": "fp-h"}]}, headers=headers)
             await wait_settled(runtime)
 
-            body = await (await client.get("/healthz")).json()
+            body = await (await client.get("/healthz", headers=headers)).json()
             assert body["status"] == "ok"
             assert body["queue_depth"] == 0
             assert body["jobs_by_status"].get("escalate") == 1
