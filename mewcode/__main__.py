@@ -92,7 +92,7 @@ async def _serve(service, host: str, port: int, recover: bool = True) -> None:
     # 通知经 RepoPolicyNotifier 按仓库路由到策略渠道。
     policy_loader = RepoPolicyLoader(service.repos)
     notifier = RepoPolicyNotifier(build_notifier(service.notify, store), policy_loader, store)
-    # 沙箱（M2 W1）：容器不可用时 HeadlessAgentRunner / SandboxTestRunner 自动回退直跑
+    # 沙箱默认 fail-closed；只有显式配置才能回退宿主。
     sandbox = None
     if service.sandbox.enabled:
         mewcode_src = str(Path(__file__).resolve().parent.parent)
@@ -115,7 +115,9 @@ async def _serve(service, host: str, port: int, recover: bool = True) -> None:
         service,
         store,
         runner,
-        test_runner=SandboxTestRunner(sandbox, repo_name=default_repo) if sandbox else None,
+        test_runner=SandboxTestRunner(
+            sandbox, repo_name=default_repo, allow_host_fallback=service.sandbox.allow_host_fallback
+        ) if sandbox else None,
         publisher=PullRequestPublisher(vcs, store, service) if vcs else None,
         ci_gate=GitHubCIGate(vcs) if vcs else None,
         integration_verifier=integration_verifier,

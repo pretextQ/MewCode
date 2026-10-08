@@ -147,6 +147,25 @@ async def make_job(store: JobStore, **payload_overrides):
 
 class TestHappyPath:
     @pytest.mark.asyncio
+    async def test_unavailable_sandbox_escalates_before_host_tests(self, tmp_path: Path, demo_repo: Path):
+        from unittest.mock import AsyncMock
+
+        from mewcode.service.execution import SandboxTestRunner
+
+        async with chain_env(tmp_path, demo_repo) as (store, chain, runner, _):
+            sandbox = AsyncMock()
+            sandbox.available.return_value = False
+            fallback = AsyncMock()
+            chain.test_runner = SandboxTestRunner(sandbox, fallback=fallback)
+            job = await make_job(store)
+            await chain(job)
+            final = await store.get_or_raise(job.id)
+            assert final.status == "escalate"
+            assert "refusing host test execution" in final.last_error
+            fallback.run.assert_not_awaited()
+            assert runner.calls == []
+
+    @pytest.mark.asyncio
     async def test_full_chain_reaches_pr_opened(self, tmp_path: Path, demo_repo: Path):
         publisher = FakePublisher()
         async with chain_env(tmp_path, demo_repo, publisher=publisher) as (store, chain, runner, _):
@@ -613,6 +632,7 @@ class TestHeadlessRunnerBudget:
         from mewcode.config import ProviderConfig
 
         config = ServiceConfig(token_budget=100)
+        config.sandbox.enabled = False  # 本组测试显式验证宿主 agent 路径
         provider = ProviderConfig(name="t", protocol="openai", base_url="http://x", model="m", api_key="k")
         runner = HeadlessAgentRunner(config, provider)
 
@@ -638,6 +658,7 @@ class TestHeadlessRunnerBudget:
 
         config = ServiceConfig()
         provider = ProviderConfig(name="t", protocol="openai", base_url="http://x", model="m", api_key="k")
+        config.sandbox.enabled = False
         runner = HeadlessAgentRunner(config, provider)
         cancelled = {"done": False}
 
@@ -666,6 +687,7 @@ class TestHeadlessRunnerBudget:
         from mewcode.service.jobs import Job
 
         config = ServiceConfig(mcp_servers=[MCPServerConfig(name="x", command="noop")])
+        config.sandbox.enabled = False
         provider = ProviderConfig(name="t", protocol="openai", base_url="http://x", model="m", api_key="k")
         runner = HeadlessAgentRunner(config, provider)
 

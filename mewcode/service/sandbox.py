@@ -14,8 +14,8 @@
 - **内部工具链也在容器里**（M2 W3）：MCP server 配置随最小配置进容器，
   stdio server 由容器内的 agent 进程自己拉起——宿主上不需要装那些工具，
   容器退出即全部消失。server 需要的凭据只经环境变量白名单进容器。
-- **可降级**：无容器运行时（或无权限）时 ``available()`` 为假，调用方回退
-  M1 直跑模式（验收标准 4）。
+- **默认拒绝降级**：运行时不可用时 ``available()`` 为假，调用方默认拒绝执行；
+  只有显式开启 ``allow_host_fallback`` 才能在无 OS 隔离的宿主执行。
 """
 
 from __future__ import annotations

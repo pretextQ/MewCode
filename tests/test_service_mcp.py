@@ -252,6 +252,7 @@ class _FakeAgent:
 
 
 def _runner(config: ServiceConfig) -> HeadlessAgentRunner:
+    config.sandbox.enabled = False  # 本组验证显式直跑的 MCP 生命周期
     return HeadlessAgentRunner(config, PROVIDER)
 
 

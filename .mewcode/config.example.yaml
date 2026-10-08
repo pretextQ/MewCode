@@ -70,8 +70,9 @@ mcp_servers:
 #       url: https://github.com/acme/demo.git
 #       base_branch: main
 #       test_command: "python test_app.py"
-#   sandbox:                   # M2：每 job 一容器；无 docker 时自动回退直跑
+#   sandbox:                   # 每 job 一容器；无运行时默认拒绝执行
 #     enabled: true
+#     allow_host_fallback: false # 显式 true 才允许无 OS 隔离的宿主降级
 #     runtime: docker          # docker | podman
 #     base_image: python:3.12-slim
 #     network: bridge          # bridge（agent 需访问 LLM API）| none（完全隔离）

@@ -496,6 +496,7 @@ def make_runner(tmp_path: Path, policy: str | None, service_budget: int = 0) -> 
         repos={"demo": RepoConfig(name="demo", path=str(repo))},
     )
     provider = ProviderConfig(name="t", protocol="openai", base_url="http://x", model="m", api_key="k")
+    config.sandbox.enabled = False  # 在宿主假 agent 中验证预算回调
     return HeadlessAgentRunner(config, provider, policy_loader=RepoPolicyLoader(config.repos))
 
 
@@ -558,6 +559,7 @@ class TestRunnerTokenBudget:
                 )
 
         runner.sandbox = FakeSandbox()  # type: ignore[method-assign]
+        runner.config.sandbox.enabled = True
         with pytest.raises(TokenBudgetExceeded):
             await runner.run(make_job(), str(tmp_path), "p", events.append)
         # 用量证据先于熔断落事件——escalate 的记录里看得到这次花了多少

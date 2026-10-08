@@ -260,6 +260,7 @@ def _validate_sandbox(raw: dict | None) -> dict:
     """校验 ``service.sandbox`` 段（M2 W1 Docker 沙箱执行器）。"""
     defaults: dict = {
         "enabled": True,
+        "allow_host_fallback": False,
         "runtime": "docker",
         "base_image": "python:3.12-slim",
         "image_prefix": "mewcode-sandbox",
@@ -280,6 +281,9 @@ def _validate_sandbox(raw: dict | None) -> dict:
     merged = {**defaults, **raw}
 
     merged["enabled"] = validate_bool_field(merged["enabled"], "service.sandbox.enabled")
+    merged["allow_host_fallback"] = validate_bool_field(
+        merged["allow_host_fallback"], "service.sandbox.allow_host_fallback"
+    )
     merged["keep_containers"] = validate_bool_field(
         merged["keep_containers"], "service.sandbox.keep_containers"
     )

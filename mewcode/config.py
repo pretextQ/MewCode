@@ -204,6 +204,8 @@ class SandboxConfig:
     """Docker 沙箱执行器配置（M2 W1）。"""
 
     enabled: bool = True
+    #: 容器不可用时允许宿主执行（无 OS 隔离）；必须显式开启
+    allow_host_fallback: bool = False
     #: 容器运行时（docker / podman 均可，命令结构一致）
     runtime: str = "docker"
     base_image: str = "python:3.12-slim"
@@ -341,6 +343,7 @@ def _load_single_file(path: Path) -> AppConfig:
         ),
         sandbox=SandboxConfig(
             enabled=sbx["enabled"],
+            allow_host_fallback=sbx["allow_host_fallback"],
             runtime=sbx["runtime"],
             base_image=sbx["base_image"],
             image_prefix=sbx["image_prefix"],

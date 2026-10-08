@@ -35,6 +35,7 @@ from mewcode.config import RepoConfig, ServiceConfig
 from . import sop
 from .jobs import InvalidTransition, Job, JobStore
 from .policy import PolicyError, RepoPolicy, RepoPolicyLoader
+from .sandbox import SandboxUnavailable
 
 log = logging.getLogger(__name__)
 
@@ -345,13 +346,17 @@ class TestRunner:
 class SandboxTestRunner:
     """在容器里跑仓库测试命令（M2：验证阶段也隔离——它执行的是仓库代码）。
 
-    容器不可用时回退宿主直跑（M1 行为），并在事件里留下降级记录。
+    容器不可用时默认拒绝执行；只有显式允许时才能回退宿主。
     """
 
-    def __init__(self, sandbox: Any, *, repo_name: str = "job", fallback: TestRunner | None = None) -> None:
+    def __init__(
+        self, sandbox: Any, *, repo_name: str = "job", fallback: TestRunner | None = None,
+        allow_host_fallback: bool = False,
+    ) -> None:
         self.sandbox = sandbox
         self.repo_name = repo_name
         self.fallback = fallback or TestRunner()
+        self.allow_host_fallback = allow_host_fallback
 
     async def run(self, work_dir: str, command: str, timeout: float) -> TestOutcome:
         if not command:
@@ -359,11 +364,15 @@ class SandboxTestRunner:
         try:
             available = await self.sandbox.available()
         except Exception as e:  # pragma: no cover - 探测异常按不可用处理
-            log.warning("sandbox probe failed (%s); running tests on the host", e)
+            log.warning("sandbox probe failed: %s", e)
             available = False
         if not available:
+            if not self.allow_host_fallback:
+                raise SandboxUnavailable("sandbox runtime unavailable; refusing host test execution")
             log.warning("sandbox unavailable; running `%s` on the host", command)
-            return await self.fallback.run(work_dir, command, timeout)
+            outcome = await self.fallback.run(work_dir, command, timeout)
+            outcome.output = "(host fallback explicitly enabled; no OS sandbox)\n" + outcome.output
+            return outcome
 
         result = await self.sandbox.run_command(
             self.repo_name, work_dir, command, repo_name=self.repo_name, timeout=timeout
@@ -386,9 +395,8 @@ class HeadlessAgentRunner:
 
     两种执行模式：
     - **沙箱模式（M2）**：agent 在容器内跑（``mewcode -p --output-format json``），
-      OS 级隔离覆盖文件/进程/网络；容器不可用时**自动回退**直跑并记 warning
-      （M2 验收标准 4）。
-    - **直跑模式（M1）**：在宿主进程内跑 agent 内核。
+      OS 级隔离覆盖文件/进程/网络；容器不可用时默认拒绝执行。
+    - **直跑模式（M1）**：显式禁用沙箱或允许 fallback，在宿主进程内跑 agent 内核。
 
     权限语义（架构文档决策 4，两种模式一致）：
     - ``PermissionMode.DONT_ASK``：无人值守下没有"询问"的语义，ask 一律视为允许；
@@ -416,17 +424,19 @@ class HeadlessAgentRunner:
         self._isolated_tasks: set[asyncio.Task[Any]] = set()
 
     async def _use_sandbox(self) -> bool:
-        """是否走沙箱（探测一次并缓存；不可用只警告一次，不阻塞作业）。"""
-        if self.sandbox is None or not self.config.sandbox.enabled:
+        """探测一次并缓存；默认 fail-closed，不隐式切换宿主执行。"""
+        if not self.config.sandbox.enabled:
             return False
         if self._sandbox_decision is None:
-            available = await self.sandbox.available()
+            available = self.sandbox is not None and await self.sandbox.available()
             self._sandbox_decision = available
-            if not available:
+            if not available and self.config.sandbox.allow_host_fallback:
                 log.warning(
                     "sandbox enabled but the container runtime is unavailable; "
                     "falling back to direct execution (M1 mode)"
                 )
+        if not self._sandbox_decision and not self.config.sandbox.allow_host_fallback:
+            raise SandboxUnavailable("sandbox runtime unavailable; refusing host agent execution")
         return bool(self._sandbox_decision)
 
     def _build_agent(self, work_dir: str):
@@ -492,6 +502,7 @@ class HeadlessAgentRunner:
         budget = self._resolve_token_budget(job)
         if await self._use_sandbox():
             return await self._run_in_sandbox(job, work_dir, prompt, on_event, budget)
+        on_event({"type": "execution_mode", "detail": "host execution explicitly enabled; no OS sandbox"})
         return await self._run_direct(job, work_dir, prompt, on_event, budget)
 
     def _resolve_token_budget(self, job: Job) -> int:
@@ -740,6 +751,8 @@ class ExecutionChain:
     async def __call__(self, job: Job) -> None:
         try:
             await self._run_chain(job)
+        except SandboxUnavailable as e:
+            await self._escalate(job.id, f"sandbox unavailable: {e}")
         finally:
             await self._drain_event_tasks(job.id)
 
@@ -1092,7 +1105,7 @@ class ExecutionChain:
             elif etype == "usage":
                 usage = event.get("usage") or {}
                 detail = f"in={usage.get('inputTokens', 0)} out={usage.get('outputTokens', 0)}"
-            elif etype in ("mcp_ready", "mcp_error", "mcp_used", "teardown_cancellation"):
+            elif etype in ("mcp_ready", "mcp_error", "mcp_used", "teardown_cancellation", "execution_mode"):
                 # 内部工具链的关键节点与收尾异常：进审计（前者是 PR 证据，
                 # 后者解释"这次运行有没有被收尾的取消打扰"）
                 detail = str(event.get("detail", ""))[:500]

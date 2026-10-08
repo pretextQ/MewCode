@@ -203,7 +203,20 @@ class TestSandboxConfig:
         """没有 service 段时（early return 路径）沙箱默认值必须同样可用。"""
         cfg = load_config(write_config(tmp_path))
         assert cfg.service.sandbox.enabled is True
+        assert cfg.service.sandbox.allow_host_fallback is False
         assert cfg.service.sandbox.base_image
+
+    @pytest.mark.parametrize("value", [True, False])
+    def test_host_fallback_loads_end_to_end(self, tmp_path: Path, value: bool):
+        cfg = load_config(write_config(tmp_path, (
+            "service:\n  sandbox:\n    allow_host_fallback: " + str(value).lower() + "\n"
+        )))
+        assert cfg.service.sandbox.allow_host_fallback is value
+
+    @pytest.mark.parametrize("value", [1, "true", [], None])
+    def test_host_fallback_rejects_non_booleans(self, value):
+        with pytest.raises(ConfigError, match="allow_host_fallback"):
+            validate_service({"sandbox": {"allow_host_fallback": value}})
 
     def test_section_loads(self, tmp_path: Path):
         cfg = load_config(write_config(tmp_path, (

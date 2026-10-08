@@ -448,7 +448,7 @@ class TestOutputParsing:
 # =========================================================================
 
 class TestRunnerIntegration:
-    """HeadlessAgentRunner 的沙箱分支与自动降级（M2 验收标准 4）。"""
+    """HeadlessAgentRunner 的沙箱分支与显式降级。"""
 
     def make_runner(self, tmp_path: Path, sandbox):
         from mewcode.config import ServiceConfig
@@ -475,7 +475,7 @@ class TestRunnerIntegration:
 
     @pytest.mark.asyncio
     async def test_fallback_to_direct_when_unavailable(self, tmp_path: Path, monkeypatch):
-        """无容器运行时 -> 直跑 M1 模式（并留下 warning），作业不失败。"""
+        """显式允许 fallback 后，无运行时可直跑并留下 warning。"""
         from mewcode.service import execution as ex
         from mewcode.service.jobs import Job
 
@@ -485,6 +485,7 @@ class TestRunnerIntegration:
         runner = self.make_runner(tmp_path, sandbox)
 
         called: dict = {}
+        runner.config.sandbox.allow_host_fallback = True
 
         async def fake_direct(job, work_dir, prompt, on_event, budget):
             called["direct"] = True
@@ -576,7 +577,7 @@ class TestSandboxTestRunner:
         sandbox = DockerSandbox(
             SandboxConfig(), mewcode_src=str(tmp_path), runtime_bin=str(tmp_path / "nope")
         )
-        runner = SandboxTestRunner(sandbox, repo_name="demo")
+        runner = SandboxTestRunner(sandbox, repo_name="demo", allow_host_fallback=True)
         outcome = await runner.run(str(tmp_path), f'"{sys.executable}" -c "print(42)"', 30)
         assert outcome.exit_code == 0 and "42" in outcome.output   # 宿主直跑兜底
 

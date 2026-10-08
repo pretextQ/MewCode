@@ -107,7 +107,8 @@ service:
       # 仓库带 docker-compose.yml 时可选：起依赖后跑集成测试
       integration_test_command: python test_integration.py
   sandbox:
-    enabled: true               # 无 Docker 时自动回退宿主直跑并记 warning
+    enabled: true               # 无 Docker 时拒绝执行并 escalate
+    allow_host_fallback: false   # 显式 true 才允许宿主降级（无 OS 隔离）
   mcp_servers:                  # 内部工具链（服务模式只挂只读工具）
     - name: logs
       command: python
