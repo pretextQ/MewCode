@@ -874,13 +874,15 @@ class TestWorktreeBinding:
 
         provider = ProviderConfig(name="t", protocol="openai", base_url="http://x", model="m", api_key="k")
         runner = HeadlessAgentRunner(ServiceConfig(), provider)
-        worktree = tmp_path / "wt"
+        worktree = tmp_path / "wt with spaces"
         worktree.mkdir()
         (worktree / "marker.txt").write_text("inside", encoding="utf-8")
 
         agent = runner._build_agent(str(worktree))
         bash = agent.registry.get("Bash")
-        result = await bash.execute(bash.params_model(command='cat marker.txt'))
+        result = await bash.execute(bash.params_model(
+            command=f'"{sys.executable}" -c "from pathlib import Path; print(Path(\'marker.txt\').read_text())"'
+        ))
         assert "inside" in result.output
         assert not result.is_error
 

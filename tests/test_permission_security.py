@@ -816,12 +816,12 @@ async def test_bound_tools_resolve_relative_paths_against_work_dir(
 
     # Bash 的 cwd 落在 work_dir
     bound_bash = Bash().bind(str(wt))
-    r = await bound_bash.execute(BashParams.model_validate({"command": "pwd"}))
+    r = await bound_bash.execute(BashParams.model_validate({
+        "command": f'"{sys.executable}" -c "import os; print(os.getcwd())"'
+    }))
     assert not r.is_error
-    # Git Bash (MSYS) 会把 Windows 路径显示为 /tmp/... 形式，按目录名断言
     last_line = r.output.strip().splitlines()[-1]
-    assert last_line.endswith("wt"), last_line
-    assert not last_line.endswith("repo"), last_line
+    assert Path(last_line).resolve() == wt.resolve()
 
     # Glob/Grep 的搜索根以 work_dir 为基准
     bound_glob = Glob().bind(str(wt))

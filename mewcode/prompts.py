@@ -6,6 +6,8 @@ import platform
 from dataclasses import dataclass
 from datetime import datetime
 
+from mewcode.shell import shell_description
+
 
 @dataclass
 class PromptSection:
@@ -152,6 +154,7 @@ def environment_section(work_dir: str) -> PromptSection:
         "# Environment",
         f" - Working directory: {work_dir}",
         f" - Platform: {platform.system()} {platform.release()}",
+        f" - Command shell (Bash tool and command hooks): {shell_description()}",
         f" - Date: {datetime.now().strftime('%Y-%m-%d')}",
     ]
     return PromptSection(name="Environment", priority=70, content="\n".join(lines))

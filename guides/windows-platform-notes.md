@@ -3,6 +3,15 @@
 Windows 是 MewCode 的一等公民运行平台（CI 在 windows-latest 与
 ubuntu-latest 双平台跑全量测试）。本文记录平台相关的行为约定与已知边界。
 
+## 命令 shell
+
+`Bash` 是兼容保留的工具名，不代表所有平台都运行 Bash。Windows 命令工具和
+command hook 使用系统命令 shell（`COMSPEC`，通常为 `cmd.exe`）；POSIX 使用
+`/bin/sh`，不保证支持 Bash 扩展。模型的工具描述和环境提示会给出实际平台契约。
+Windows 使用 `cd`、`type` 等 cmd 语法，不能假设 `pwd`、`cat`、`sleep` 存在；
+PowerShell 命令必须显式调用 PowerShell。带空格的解释器和路径需要引号。
+不自动安装或根据 PATH 上的 Bash 改变执行 shell；权限规则与危险检测继续生效。
+
 ## 编码
 
 - 文件读写不走系统默认编码：`tools/base.py` 的 `detect_encoding` 按

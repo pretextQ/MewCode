@@ -252,9 +252,11 @@ class TestCommandExecutor:
 
     @pytest.mark.asyncio
     async def test_timeout(self):
+        import sys
+
         from mewcode.hooks.executors import execute_command
 
-        action = Action(type="command", command="sleep 10", timeout=1)
+        action = Action(type="command", command=f'"{sys.executable}" -c "import time; time.sleep(2)"', timeout=1)
         ctx = HookContext()
         result = await execute_command(action, ctx)
         assert result.success is False

@@ -5,6 +5,7 @@ import asyncio
 
 from pydantic import BaseModel, Field
 
+from mewcode.shell import shell_description
 from mewcode.tools.base import Tool, ToolResult
 
 MAX_TIMEOUT = 600
@@ -17,7 +18,7 @@ class Params(BaseModel):
 
 class Bash(Tool[Params]):
     name = "Bash"
-    description = "Execute a shell command and return stdout and stderr."
+    description = "Execute a command and return stdout and stderr. Shell: " + shell_description()
     params_model = Params
     category = "command"
 
