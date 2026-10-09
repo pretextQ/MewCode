@@ -273,27 +273,74 @@ class JobStore:
         )
 
         def _insert(conn: sqlite3.Connection) -> None:
-            conn.execute(
-                "INSERT INTO jobs (id, fingerprint, repo, severity, title, payload, status,"
-                " attempts, branch, pr_url, ci_status, last_error, result, created_at, updated_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    job.id, job.fingerprint, job.repo, job.severity, job.title,
-                    json.dumps(job.payload, ensure_ascii=False), job.status, job.attempts,
-                    job.branch, job.pr_url, job.ci_status, job.last_error, job.result,
-                    job.created_at, job.updated_at,
-                ),
-            )
-            conn.execute(
-                "INSERT INTO job_events (job_id, ts, kind, detail) VALUES (?, ?, ?, ?)",
-                (job.id, job.created_at, "created", f"status={job.status} repo={job.repo}"),
-            )
-            conn.commit()
+            with conn:
+                self._insert_job(conn, job)
 
         async with self._lock:
             await asyncio.to_thread(_insert, self._require_conn())
         log.info("job created id=%s repo=%s status=%s", job.id, repo, status)
         return job
+
+    @staticmethod
+    def _insert_job(conn: sqlite3.Connection, job: Job) -> None:
+        conn.execute(
+            "INSERT INTO jobs (id, fingerprint, repo, severity, title, payload, status,"
+            " attempts, branch, pr_url, ci_status, last_error, result, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                job.id, job.fingerprint, job.repo, job.severity, job.title,
+                json.dumps(job.payload, ensure_ascii=False), job.status, job.attempts,
+                job.branch, job.pr_url, job.ci_status, job.last_error, job.result,
+                job.created_at, job.updated_at,
+            ),
+        )
+        conn.execute(
+            "INSERT INTO job_events (job_id, ts, kind, detail) VALUES (?, ?, ?, ?)",
+            (job.id, job.created_at, "created", f"status={job.status} repo={job.repo}"),
+        )
+
+    async def accept_job(
+        self, fingerprint: str, repo: str, window_seconds: int, *,
+        severity: str = "warning", title: str = "", payload: dict | None = None,
+    ) -> tuple[Job, bool]:
+        """Atomically find/create an incident and append its intake audit event.
+
+        BEGIN IMMEDIATE serializes the read/write decision across connections,
+        not just coroutines using this store. No permanent uniqueness constraint:
+        completed or expired incidents may legitimately fire again.
+        """
+        async with self._lock:
+            conn = self._require_conn()
+
+            def _accept() -> tuple[Job, bool]:
+                with conn:
+                    conn.execute("BEGIN IMMEDIATE")
+                    existing = self._find_open(conn, repo, fingerprint, window_seconds)
+                    if existing is not None:
+                        conn.execute(
+                            "INSERT INTO job_events (job_id, ts, kind, detail) VALUES (?, ?, ?, ?)",
+                            (existing.id, utc_now(), "deduped", f"duplicate alert merged (fingerprint={fingerprint})"),
+                        )
+                        return existing, False
+                    now = utc_now()
+                    job = Job(
+                        id=f"job-{uuid.uuid4().hex[:12]}", fingerprint=fingerprint, repo=repo,
+                        severity=severity, title=title, payload=payload or {}, status="received",
+                        created_at=now, updated_at=now,
+                    )
+                    self._insert_job(conn, job)
+                    return job, True
+
+            # A cancelled await cannot release the connection lock while its
+            # thread still owns a database transaction.
+            task = asyncio.create_task(asyncio.to_thread(_accept))
+            try:
+                return await asyncio.shield(task)
+            except asyncio.CancelledError:
+                try:
+                    await task
+                finally:
+                    raise
 
     async def transition(
         self,
@@ -626,30 +673,28 @@ class JobStore:
         用于"同一告警重复触发只更新已有 job"（架构文档第四节）。
         窗口按 ``updated_at`` 计算——已完结 job 不再拦截新告警。
         """
+        async with self._lock:
+            return await asyncio.to_thread(
+                self._find_open, self._require_conn(), repo, fingerprint, window_seconds
+            )
+
+    @staticmethod
+    def _find_open(conn: sqlite3.Connection, repo: str, fingerprint: str, window_seconds: int) -> Job | None:
         if not fingerprint:
             return None
         cutoff = datetime.now(UTC).timestamp() - window_seconds
-
-        async with self._lock:
-            conn = self._require_conn()
-
-            def _do() -> Job | None:
-                placeholders = ", ".join("?" for _ in TERMINAL_STATES)
-                rows = conn.execute(
-                    f"SELECT * FROM jobs WHERE repo = ? AND fingerprint = ?"
-                    f" AND status NOT IN ({placeholders}) ORDER BY created_at DESC",
-                    (repo, fingerprint, *sorted(TERMINAL_STATES)),
-                ).fetchall()
-                for row in rows:
-                    job = _row_to_job(row)
-                    try:
-                        ts = datetime.strptime(job.updated_at, "%Y-%m-%dT%H:%M:%SZ").replace(
-                            tzinfo=UTC
-                        ).timestamp()
-                    except ValueError:
-                        return job
-                    if ts >= cutoff:
-                        return job
-                return None
-
-            return await asyncio.to_thread(_do)
+        placeholders = ", ".join("?" for _ in TERMINAL_STATES)
+        rows = conn.execute(
+            f"SELECT * FROM jobs WHERE repo = ? AND fingerprint = ?"
+            f" AND status NOT IN ({placeholders}) ORDER BY created_at DESC",
+            (repo, fingerprint, *sorted(TERMINAL_STATES)),
+        ).fetchall()
+        for row in rows:
+            job = _row_to_job(row)
+            try:
+                ts = datetime.strptime(job.updated_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC).timestamp()
+            except ValueError:
+                return job
+            if ts >= cutoff:
+                return job
+        return None

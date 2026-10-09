@@ -154,24 +154,18 @@ class ServiceRuntime:
                 )
                 log.info("rejected alert for %s: %s", draft.repo, reason)
                 continue
-            existing = await self.store.find_open_by_fingerprint(
-                draft.repo, draft.fingerprint, self.config.dedup_window_seconds
-            )
-            if existing is not None:
-                await self.store.add_event(
-                    existing.id, "deduped", f"duplicate alert merged (fingerprint={draft.fingerprint})"
-                )
-                result.deduped.append(existing)
-                log.info("job %s: merged duplicate alert (fingerprint=%s)", existing.id, draft.fingerprint)
-                continue
-
-            job = await self.store.create_job(
+            job, created = await self.store.accept_job(
                 fingerprint=draft.fingerprint,
                 repo=draft.repo,
+                window_seconds=self.config.dedup_window_seconds,
                 severity=draft.severity,
                 title=draft.title,
                 payload=draft.payload,
             )
+            if not created:
+                result.deduped.append(job)
+                log.info("job %s: merged duplicate alert (fingerprint=%s)", job.id, draft.fingerprint)
+                continue
             if self.pool.running:
                 await self.pool.submit(job.id)
             result.accepted.append(job)
