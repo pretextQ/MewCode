@@ -118,6 +118,8 @@ async def test_cancelled_intake_keeps_connection_locked_until_transaction_finish
         await asyncio.wait_for(entered.wait(), 2)
         task.cancel()
         await asyncio.sleep(0)
+        task.cancel()
+        await asyncio.sleep(0)
         assert store._lock.locked()
         assert not task.done()
         release.set()
@@ -129,4 +131,9 @@ async def test_cancelled_intake_keeps_connection_locked_until_transaction_finish
     finally:
         release.set()
         await asyncio.gather(task, return_exceptions=True)
+        # A failing regression must not close SQLite while its worker writes.
+        deadline = loop.time() + 5
+        while store._require_conn().in_transaction and loop.time() < deadline:
+            await asyncio.sleep(0.01)
+        assert not store._require_conn().in_transaction
         await store.close()

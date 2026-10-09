@@ -336,11 +336,16 @@ class JobStore:
             task = asyncio.create_task(asyncio.to_thread(_accept))
             try:
                 return await asyncio.shield(task)
-            except asyncio.CancelledError:
+            except asyncio.CancelledError as cancellation:
+                while not task.done():
+                    try:
+                        await asyncio.shield(task)
+                    except asyncio.CancelledError:
+                        continue
                 try:
-                    await task
+                    task.result()
                 finally:
-                    raise
+                    raise cancellation
 
     async def transition(
         self,
