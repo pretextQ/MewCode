@@ -8,6 +8,7 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from mewcode.hooks.models import Action, ActionResult, HookContext
+from mewcode.processes import create_shell_process, kill_process_tree, release_process
 
 log = logging.getLogger(__name__)
 
@@ -22,7 +23,7 @@ async def execute_command(action: Action, ctx: HookContext) -> ActionResult:
     stdin_data = json.dumps(ctx.to_payload(), ensure_ascii=False).encode("utf-8")
     proc = None
     try:
-        proc = await asyncio.create_subprocess_shell(
+        proc = await create_shell_process(
             command,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
@@ -33,8 +34,7 @@ async def execute_command(action: Action, ctx: HookContext) -> ActionResult:
                 proc.communicate(input=stdin_data), timeout=action.timeout
             )
         except TimeoutError:
-            proc.kill()
-            await proc.wait()
+            await kill_process_tree(proc)
             return ActionResult(
                 output=f"Command timed out after {action.timeout}s: {command}",
                 success=False,
@@ -43,11 +43,13 @@ async def execute_command(action: Action, ctx: HookContext) -> ActionResult:
         return ActionResult(output=output, success=proc.returncode == 0)
     except asyncio.CancelledError:
         # 引擎收尾取消后台 hook 任务时，子进程不能无人看管地悬挂
-        if proc is not None and proc.returncode is None:
-            proc.kill()
+        if proc is not None:
+            await kill_process_tree(proc)
         raise
     except Exception as e:
         return ActionResult(output=f"Command execution error: {e}", success=False)
+    finally:
+        release_process(proc)
 
 
 async def execute_prompt(action: Action, ctx: HookContext) -> ActionResult:

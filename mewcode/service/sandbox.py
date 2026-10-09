@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from mewcode.config import SandboxConfig
+from mewcode.processes import create_exec_process, kill_process_tree, release_process
 
 log = logging.getLogger(__name__)
 
@@ -53,37 +54,6 @@ class SandboxUnavailable(SandboxError):
     """容器运行时不可用（未安装 / daemon 未运行 / 无权限）。"""
 
 
-async def kill_process_tree(proc: asyncio.subprocess.Process) -> None:
-    """显式收尾子进程树——不能依赖事件循环退出兜底（仓库已知坑）。
-
-    Windows 上 cmd.exe 的子进程不在进程组语义内，用 taskkill /T 收；
-    POSIX 上按进程组 kill（`start_new_session=True` 已把子进程隔离成独立会话）。
-    """
-    if proc.returncode is not None:
-        return
-    try:
-        if sys.platform == "win32":
-            import subprocess
-
-            await asyncio.to_thread(
-                subprocess.run, ["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True
-            )
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=CONTAINER_STOP_GRACE)
-            except TimeoutError:  # pragma: no cover
-                proc.kill()
-        else:
-            import signal
-
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-    except (ProcessLookupError, PermissionError, OSError) as e:  # pragma: no cover
-        log.warning("sandbox: failed to kill process tree: %s", e)
-        try:
-            proc.kill()
-        except ProcessLookupError:
-            pass
-
-
 async def run_host_command(
     argv: list[str], timeout: float, cwd: str | None = None
 ) -> tuple[int, str]:
@@ -92,16 +62,12 @@ async def run_host_command(
     返回 ``(exit_code, combined_output)``；超时返回 124 并杀掉进程树。
     """
     try:
-        proc = await asyncio.create_subprocess_exec(
+        proc = await create_exec_process(
             *argv,
             cwd=cwd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             stdin=asyncio.subprocess.DEVNULL,
-            # POSIX 必须把子进程放进独立会话/进程组：否则超时收尾时
-            # os.killpg 会把**调用方自己的进程组**（pytest / 服务进程）
-            # 一起 SIGKILL（Linux CI 上实测把测试进程打死）。
-            start_new_session=(sys.platform != "win32"),
         )
     except (OSError, ValueError) as e:
         return 1, f"(cannot spawn {argv[0]}: {e})"
@@ -111,6 +77,11 @@ async def run_host_command(
     except TimeoutError:
         await kill_process_tree(proc)
         return 124, f"(timed out after {timeout:.0f}s)"
+    except asyncio.CancelledError:
+        await kill_process_tree(proc)
+        raise
+    finally:
+        release_process(proc)
 
 
 @dataclass

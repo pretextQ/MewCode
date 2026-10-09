@@ -22,15 +22,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import signal
 import subprocess
-import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
 from mewcode.config import RepoConfig, ServiceConfig
+from mewcode.processes import create_shell_process, kill_process_tree, release_process
 
 from . import sop
 from .jobs import InvalidTransition, Job, JobStore
@@ -243,32 +242,7 @@ class ExecutionContext:
 
 
 async def _terminate_process_tree(proc: asyncio.subprocess.Process) -> None:
-    """显式收尾子进程树——不能依赖事件循环退出兜底（仓库已知坑）。
-
-    Windows 上 cmd.exe 的子进程不在进程组语义内，用 taskkill /T 收；
-    POSIX 上按进程组 kill（start_new_session=True 已隔离）。
-    """
-    if proc.returncode is not None:
-        return
-    try:
-        if sys.platform == "win32":
-            await asyncio.to_thread(
-                subprocess.run,
-                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
-                capture_output=True,
-            )
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=10)
-            except TimeoutError:  # pragma: no cover - taskkill 未果时的兜底
-                proc.kill()
-        else:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-    except (ProcessLookupError, PermissionError, OSError) as e:  # pragma: no cover
-        log.warning("failed to terminate test process tree: %s", e)
-        try:
-            proc.kill()
-        except ProcessLookupError:
-            pass
+    await kill_process_tree(proc)
 
 
 def _absorb_cancellation(exc: BaseException) -> str:
@@ -321,12 +295,11 @@ class TestRunner:
         if not command:
             raise ValueError("empty test command")
         env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
-        proc = await asyncio.create_subprocess_shell(
+        proc = await create_shell_process(
             command,
             cwd=work_dir,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
-            start_new_session=(sys.platform != "win32"),
             env=env,
         )
         try:
@@ -341,6 +314,11 @@ class TestRunner:
                 output=f"(timed out after {timeout:.0f}s)",
                 timed_out=True,
             )
+        except asyncio.CancelledError:
+            await _terminate_process_tree(proc)
+            raise
+        finally:
+            release_process(proc)
 
 
 class SandboxTestRunner:

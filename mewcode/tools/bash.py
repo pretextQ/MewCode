@@ -5,6 +5,7 @@ import asyncio
 
 from pydantic import BaseModel, Field
 
+from mewcode.processes import create_shell_process, kill_process_tree, release_process
 from mewcode.shell import shell_description
 from mewcode.tools.base import Tool, ToolResult
 
@@ -25,9 +26,10 @@ class Bash(Tool[Params]):
 
     async def execute(self, params: Params) -> ToolResult:
         timeout = min(params.timeout, MAX_TIMEOUT)
+        proc = None
 
         try:
-            proc = await asyncio.create_subprocess_shell(
+            proc = await create_shell_process(
                 params.command,
                 cwd=self._work_dir or None,
                 stdout=asyncio.subprocess.PIPE,
@@ -35,11 +37,17 @@ class Bash(Tool[Params]):
             )
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         except TimeoutError:
-            proc.kill()
-            await proc.wait()
+            if proc is not None:
+                await kill_process_tree(proc)
             return ToolResult(output=f"Error: command timed out after {timeout}s", is_error=True)
+        except asyncio.CancelledError:
+            if proc is not None:
+                await kill_process_tree(proc)
+            raise
         except Exception as e:
             return ToolResult(output=f"Error executing command: {e}", is_error=True)
+        finally:
+            release_process(proc)
 
         parts: list[str] = []
         if stdout:

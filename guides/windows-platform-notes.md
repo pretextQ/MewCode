@@ -35,6 +35,14 @@ PowerShell 命令必须显式调用 PowerShell。带空格的解释器和路径�
 
 ## 进程与阻塞 I/O
 
+- 命令工具、command hook、宿主验证与运行时命令共用 `processes.py` 的生命周期管理。
+  POSIX 使用独立进程组；Windows 在启动真实命令之前加入独立 Job Object，
+  超时或取消时回收整个进程树，即使原命令父进程已经退出也能定位后代。
+  Windows 命令会等待其 Job 内后代退出，后代同样受本次命令的超时约束；
+  这不是 OS 沙箱，不能代替容器隔离。
+- 清理有明确等待上限，重复取消不会打断回收；正常命令的输出和退出码保持不变。
+  Windows 实现依据 [Job Object 进程归属](https://learn.microsoft.com/en-us/windows/win32/api/jobapi2/nf-jobapi2-assignprocesstojobobject)
+  和 [整组终止](https://learn.microsoft.com/en-us/windows/win32/api/jobapi2/nf-jobapi2-terminatejobobject) 的原生接口契约。
 - 危险命令黑名单区分 POSIX 与 Windows（`Remove-Item -Recurse -Force`、
   `reg add ...\CurrentVersion\Run`、`certutil -urlcache`、
   `powershell -enc` 等各有模式）。
