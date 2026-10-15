@@ -1,0 +1,70 @@
+........................................................................ [  5%]
+........................................................................ [ 11%]
+........................................................................ [ 16%]
+........................................................................ [ 22%]
+........................................................................ [ 27%]
+...........................................ssssssssssss.s............... [ 33%]
+..........................................................F............. [ 39%]
+......................................ssssssssssssss.................... [ 44%]
+........................................................................ [ 50%]
+........................................................................ [ 55%]
+........................................................................ [ 61%]
+........................................................................ [ 66%]
+........................................................................ [ 72%]
+........................................................................ [ 78%]
+.........s.............................................................. [ 83%]
+........................................................................ [ 89%]
+........................................................................ [ 94%]
+....................................................................     [100%]
+=================================== FAILURES ===================================
+________________ test_cancellation_reaps_descendants[tree-bash] ________________
+
+tmp_path = PosixPath('/tmp/pytest-of-runner/pytest-0/test_cancellation_reaps_descen0')
+kind = 'bash', mode = 'tree'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("kind", ["bash", "hook", "service", "host"])
+    @pytest.mark.parametrize("mode", ["tree", "orphan"])
+    async def test_cancellation_reaps_descendants(tmp_path, kind, mode):
+        task = start_command(tmp_path, mode, kind, 30)
+        try:
+            await wait_for_descendants(tmp_path)
+            if mode == "orphan":
+                deadline = time.monotonic() + 2
+                while is_running(int((tmp_path / "parent.pid").read_text())) and time.monotonic() < deadline:
+                    await asyncio.sleep(0.01)
+                assert not is_running(int((tmp_path / "parent.pid").read_text()))
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(task, 8)
+>           await assert_reaped(tmp_path)
+
+tests/test_process_cleanup.py:131: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_process_cleanup.py:63: in assert_reaped
+    while any(is_running(pid) for pid in pids) and time.monotonic() < deadline:
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_process_cleanup.py:63: in <genexpr>
+    while any(is_running(pid) for pid in pids) and time.monotonic() < deadline:
+              ^^^^^^^^^^^^^^^
+tests/test_process_cleanup.py:46: in is_running
+    return not (stat.exists() and stat.read_text().rsplit(")", 1)[1].split()[0] == "Z")
+                                  ^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = PosixPath('/proc/2451/stat'), encoding = 'locale', errors = None
+
+    def read_text(self, encoding=None, errors=None):
+        """
+        Open the file in text mode, read it, and close the file.
+        """
+        encoding = io.text_encoding(encoding)
+        with self.open(mode='r', encoding=encoding, errors=errors) as f:
+>           return f.read()
+                   ^^^^^^^^
+E           ProcessLookupError: [Errno 3] No such process
+
+/usr/lib/python3.12/pathlib.py:1030: ProcessLookupError
+=========================== short test summary info ============================
+FAILED tests/test_process_cleanup.py::test_cancellation_reaps_descendants[tree-bash] - ProcessLookupError: [Errno 3] No such process
+1 failed, 1263 passed, 28 skipped in 59.19s
