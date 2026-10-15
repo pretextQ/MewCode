@@ -434,6 +434,15 @@ class DockerSandbox:
             value = os.environ.get(key, "")
             if value:
                 env[key] = value
+        provider_key = _ENV_KEY_MAP.get(provider_config.protocol, "")
+        if provider_key:
+            # Preserve ProviderConfig's explicit-key/custom-variable precedence
+            # instead of silently switching credentials inside the container.
+            resolved_key = provider_config.resolve_api_key()
+            if resolved_key:
+                env[provider_key] = resolved_key
+            else:
+                env.pop(provider_key, None)
         return env
 
     async def run_agent(
