@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -14,6 +15,7 @@ class Backup:
     backup_path: str
     version: int
     timestamp: float
+    existed: bool = True
 
 
 @dataclass
@@ -43,28 +45,41 @@ class FileHistory:
             ver = self._tracked.get(abs_path, 0)
             new_ver = ver + 1
 
+            bp = self._session_dir / self._backup_name(abs_path, new_ver)
+            existed = True
             try:
                 data = Path(abs_path).read_bytes()
-                bp = self._session_dir / self._backup_name(abs_path, new_ver)
+            except FileNotFoundError:
+                existed = False
+            else:
                 bp.write_bytes(data)
-            except OSError:
-                pass
+
+            if abs_path not in self._tracked:
+                # Before its first modification, a file had this state at all
+                # earlier checkpoints, including the nonexistence of new files.
+                initial = Backup(str(bp), new_ver, time.time(), existed)
+                for snapshot in self._snapshots:
+                    snapshot.backups[abs_path] = initial
 
             self._tracked[abs_path] = new_ver
 
     def make_snapshot(self, msg_index: int, user_text: str) -> None:
         with self._lock:
             backups: dict[str, Backup] = {}
+            snapshot_id = uuid.uuid4().hex
             for path, ver in self._tracked.items():
-                bp = self._session_dir / self._backup_name(path, ver)
-                if not bp.exists():
-                    try:
-                        data = Path(path).read_bytes()
-                        bp.write_bytes(data)
-                    except (FileNotFoundError, OSError):
-                        pass
+                # Completed-turn checkpoints preserve current disk state,
+                # independently of track_edit's pre-edit undo backups.
+                bp = self._session_dir / f"snapshot-{snapshot_id}-{self._backup_name(path, ver)}"
+                existed = True
+                try:
+                    data = Path(path).read_bytes()
+                except FileNotFoundError:
+                    existed = False
+                else:
+                    bp.write_bytes(data)
                 backups[path] = Backup(
-                    backup_path=str(bp), version=ver, timestamp=time.time(),
+                    backup_path=str(bp), version=ver, timestamp=time.time(), existed=existed,
                 )
 
             self._snapshots.append(Snapshot(
@@ -94,14 +109,15 @@ class FileHistory:
 
             for file_path, backup in target.backups.items():
                 bp = Path(backup.backup_path)
-                try:
-                    backup_data = bp.read_bytes()
-                except FileNotFoundError:
+                if not backup.existed:
                     fp = Path(file_path)
                     if fp.exists():
                         fp.unlink()
                         changed.append(file_path)
                     continue
+
+                # A lost backup must never be treated as a nonexistent file.
+                backup_data = bp.read_bytes()
 
                 fp = Path(file_path)
                 try:
@@ -109,7 +125,7 @@ class FileHistory:
                 except FileNotFoundError:
                     current_data = b""
 
-                if current_data != backup_data:
+                if not fp.exists() or current_data != backup_data:
                     fp.parent.mkdir(parents=True, exist_ok=True)
                     fp.write_bytes(backup_data)
                     changed.append(file_path)

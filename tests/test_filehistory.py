@@ -177,3 +177,60 @@ def test_session_dir_isolated_per_session(tmp_path: Path) -> None:
     b = FileHistory(str(tmp_path), "sess-b")
     assert a._session_dir != b._session_dir
     assert a._session_dir.exists() and b._session_dir.exists()
+
+
+def test_completed_turn_snapshot_restores_completed_content(fh, work_dir):
+    file = work_dir / "edited.txt"
+    file.write_text("before", encoding="utf-8")
+    fh.track_edit(str(file))
+    file.write_text("first turn", encoding="utf-8")
+    fh.make_snapshot(2, "first turn completed")
+    fh.track_edit(str(file))
+    file.write_text("second turn", encoding="utf-8")
+    fh.make_snapshot(4, "second turn completed")
+    fh.rewind(0)
+    assert file.read_text(encoding="utf-8") == "first turn"
+    # Editing again must not overwrite a retained checkpoint's backup.
+    fh.track_edit(str(file))
+    file.write_text("third turn", encoding="utf-8")
+    fh.rewind(0)
+    assert file.read_text(encoding="utf-8") == "first turn"
+
+
+def test_rewind_restores_files_first_touched_after_checkpoint(fh, work_dir):
+    existing = work_dir / "existing.txt"
+    existing.write_text("original", encoding="utf-8")
+    new = work_dir / "new.txt"
+    fh.make_snapshot(0, "before edits")
+    fh.track_edit(str(existing))
+    existing.write_text("changed", encoding="utf-8")
+    fh.track_edit(str(new))
+    new.write_text("created", encoding="utf-8")
+    fh.rewind(0)
+    assert existing.read_text(encoding="utf-8") == "original"
+    assert not new.exists()
+
+
+def test_rewind_recreates_empty_file_and_preserves_deleted_state(fh, work_dir):
+    file = work_dir / "empty.txt"
+    file.touch()
+    fh.track_edit(str(file))
+    fh.make_snapshot(0, "empty exists")
+    file.unlink()
+    fh.make_snapshot(1, "deleted")
+    file.write_text("recreated", encoding="utf-8")
+    fh.rewind(1)
+    assert not file.exists()
+    fh.rewind(0)
+    assert file.exists() and file.read_bytes() == b""
+
+
+def test_lost_backup_does_not_delete_current_file(fh, work_dir):
+    file = work_dir / "safe.txt"
+    file.write_text("original", encoding="utf-8")
+    fh.track_edit(str(file))
+    fh.make_snapshot(0, "checkpoint")
+    Path(fh.get_snapshots()[0].backups[str(file.resolve())].backup_path).unlink()
+    with pytest.raises(FileNotFoundError):
+        fh.rewind(0)
+    assert file.read_text(encoding="utf-8") == "original"
