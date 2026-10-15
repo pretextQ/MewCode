@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 
 _DANGEROUS_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"rm\s+-[a-z]*r[a-z]*f[a-z]*\s+/\S*"), "递归强制删除绝对路径"),
@@ -69,6 +70,22 @@ def is_safe_command(command: str) -> bool:
             return False
     if _UNSAFE_PATH_RE.search(trimmed):
         return False
+    try:
+        words = shlex.split(trimmed)
+    except ValueError:
+        return False
+    if words[:2] in (["git", "branch"], ["git", "tag"], ["git", "remote"]):
+        args = words[2:]
+        if not args:
+            return True
+        # These commands mix listing and mutation. Never infer read-only
+        # behavior from their prefix, or allow unknown options/positionals.
+        if words[1] == "branch":
+            return all(arg in {"-a", "--all", "-r", "--remotes", "-v", "-vv", "--verbose",
+                               "--list", "-l", "--show-current", "--no-color"} for arg in args)
+        if words[1] == "tag":
+            return all(arg in {"-l", "--list", "-n", "--no-column"} for arg in args)
+        return args in (["-v"], ["--verbose"])
     return any(
         trimmed == safe or trimmed.startswith(safe + " ")
         for safe in _SAFE_COMMANDS
