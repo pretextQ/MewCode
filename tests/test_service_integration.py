@@ -15,6 +15,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import pytest
+import yaml
 
 from mewcode.config import RepoConfig, ServiceConfig
 from mewcode.service.compose import (
@@ -165,6 +166,43 @@ def repo_config(compose_repo: Path) -> RepoConfig:
 
 
 class TestComposeVerifier:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("unsafe", [
+        {"privileged": True}, {"volumes": ["/:/host"]},
+        {"volumes": ["/var/run/docker.sock:/var/run/docker.sock"]},
+        {"build": "."}, {"env_file": "../../secret.env"},
+        {"network_mode": "host"}, {"pid": "host"},
+        {"cap_add": ["SYS_ADMIN"]}, {"extends": {"file": "outside.yaml", "service": "x"}},
+    ])
+    async def test_unsafe_compose_never_reaches_host_runtime(self, compose_repo, repo_config, unsafe):
+        (compose_repo / "docker-compose.yml").write_text(
+            yaml.safe_dump({"services": {"cache": {"image": "redis:7-alpine", **unsafe}}}), encoding="utf-8"
+        )
+        runner = FakeComposeRunner()
+        with pytest.raises(ValueError):
+            await ComposeVerifier(FakeSandbox(), runner=runner).verify(FakeJob(), repo_config, str(compose_repo))
+        assert runner.calls == []
+
+    @pytest.mark.asyncio
+    async def test_compose_uses_frozen_snapshot_without_host_interpolation(self, compose_repo, repo_config):
+        source = compose_repo / "docker-compose.yml"
+        source.write_text(COMPOSE_YML.replace("image: redis:7-alpine", 'image: redis:7-alpine\n    command: "${SECRET}"'))
+
+        class MutatingRunner(FakeComposeRunner):
+            async def __call__(self, argv, timeout, cwd):
+                frozen = Path(argv[3])
+                assert not frozen.is_relative_to(compose_repo)
+                document = yaml.safe_load(frozen.read_text(encoding="utf-8"))
+                assert document["services"]["cache"]["command"] == "$${SECRET}"
+                assert document["services"]["cache"]["cap_drop"] == ["ALL"]
+                source.write_text("services: {escape: {image: alpine, privileged: true}}")
+                return await super().__call__(argv, timeout, cwd)
+
+        runner = MutatingRunner()
+        outcome = await ComposeVerifier(FakeSandbox(), runner=runner).verify(FakeJob(), repo_config, str(compose_repo))
+        assert outcome.passed
+        assert not Path(runner.calls[0]["argv"][3]).exists()
+
     @pytest.mark.asyncio
     async def test_no_compose_file_returns_none(self, tmp_path: Path, repo_config: RepoConfig):
         verifier = ComposeVerifier(FakeSandbox(), runner=FakeComposeRunner())

@@ -20,9 +20,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import tempfile
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
+
+import yaml
 
 from mewcode.config import RepoConfig
 
@@ -42,6 +45,70 @@ COMPOSE_DOWN_TIMEOUT = 120
 
 #: 宿主命令执行器（argv, timeout, cwd）-> (exit_code, output)
 CommandRunner = Callable[[list[str], float, "str | None"], Awaitable[tuple[int, str]]]
+
+# Only dependency containers are supported here. Unknown options fail closed:
+# in particular, build/include/extends/env_file and host namespaces must never
+# turn agent-controlled repository content into host access.
+_SERVICE_KEYS = frozenset({
+    "image", "command", "entrypoint", "environment", "healthcheck", "depends_on",
+    "expose", "volumes", "networks", "user", "working_dir", "read_only", "tmpfs",
+    "mem_limit", "cpus", "pids_limit", "restart", "labels", "init",
+})
+
+
+def safe_compose_snapshot(source: Path, target: Path) -> None:
+    """Validate a restricted Compose document and freeze it outside the worktree.
+
+    Escape dollar signs so Compose cannot interpolate the host's environment.
+    No bind mounts, external resources, builds or host configuration files are
+    permitted, even if introduced by YAML aliases or a later repository edit.
+    """
+    data = yaml.safe_load(source.read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or set(data) - {"services", "volumes", "networks", "version"}:
+        raise ValueError("unsupported Compose top-level configuration")
+    services = data.get("services")
+    if not isinstance(services, dict) or not services:
+        raise ValueError("Compose services must be a nonempty mapping")
+    volumes = data.get("volumes") or {}
+    networks = data.get("networks") or {}
+    for kind, resources in (("volumes", volumes), ("networks", networks)):
+        if not isinstance(resources, dict) or any(value not in (None, {}) for value in resources.values()):
+            raise ValueError(f"Compose {kind} must be project-local resources without options")
+    for service in services.values():
+        if not isinstance(service, dict) or set(service) - _SERVICE_KEYS:
+            raise ValueError("unsupported or unsafe Compose service options")
+        if not isinstance(service.get("image"), str):
+            raise ValueError("Compose services require an image")
+        environment = service.get("environment", {})
+        if not isinstance(environment, dict) or any(value is None for value in environment.values()):
+            raise ValueError("Compose environment must specify explicit values")
+        mounts = service.get("volumes", [])
+        if not isinstance(mounts, list):
+            raise ValueError("Compose volumes must be a list")
+        for mount in mounts:
+            if isinstance(mount, str):
+                parts = mount.split(":")
+                if len(parts) not in (2, 3) or parts[0] not in volumes:
+                    raise ValueError("only declared project-local named volumes are allowed")
+                destination = parts[1]
+            elif isinstance(mount, dict):
+                if (set(mount) - {"type", "source", "target", "read_only"}
+                        or mount.get("type") != "volume" or mount.get("source") not in volumes):
+                    raise ValueError("only declared project-local named volumes are allowed")
+                destination = mount.get("target", "")
+            else:
+                raise ValueError("invalid Compose volume")
+            if not isinstance(destination, str) or not destination.startswith("/"):
+                raise ValueError("Compose volume target must be absolute")
+        attached = service.get("networks", [])
+        if not isinstance(attached, (list, dict)) or any(name not in {*networks, "default"} for name in attached):
+            raise ValueError("only project-local Compose networks are allowed")
+        if isinstance(attached, dict) and any(value not in (None, {}) for value in attached.values()):
+            raise ValueError("Compose network attachment options are unsupported")
+        # Enforce these even if repository content requests weaker isolation.
+        service["cap_drop"] = ["ALL"]
+        service["security_opt"] = ["no-new-privileges:true"]
+    target.write_text(yaml.safe_dump(data, sort_keys=False).replace("$", "$$"), encoding="utf-8")
 
 
 def find_compose_file(work_dir: str) -> str:
@@ -125,7 +192,13 @@ class ComposeVerifier:
             )
             return outcome
 
-        compose_path = str(Path(work_dir) / compose_file)
+        snapshot = tempfile.TemporaryDirectory(prefix="mewcode-compose-")
+        compose_path = str(Path(snapshot.name) / compose_file)
+        try:
+            safe_compose_snapshot(Path(work_dir) / compose_file, Path(compose_path))
+        except Exception:
+            snapshot.cleanup()
+            raise
         try:
             up = await self._run(
                 self._argv(compose_path, project, "up", "-d", "--wait",
@@ -143,7 +216,7 @@ class ComposeVerifier:
                 outcome.test = await self._run_test(job, repo, work_dir, outcome.network)
         finally:
             # 无论成败（含超时与取消）都必须清理：容器 + 卷 + 网络
-            outcome.down_output = await self._down(compose_path, project, work_dir)
+            outcome.down_output = await self._down(compose_path, project, work_dir, snapshot.cleanup)
         return outcome
 
     # -- 内部 -------------------------------------------------------------
@@ -184,13 +257,20 @@ class ComposeVerifier:
             timed_out=result.timed_out,
         )
 
-    async def _down(self, compose_path: str, project: str, work_dir: str) -> str:
+    async def _down(
+        self, compose_path: str, project: str, work_dir: str, cleanup: Callable[[], None] | None = None
+    ) -> str:
         """``down -v`` 清理；取消也让它跑完（不能依赖进程退出兜底——仓库已知坑）。"""
-        task = asyncio.ensure_future(
-            self.runner(
-                self._argv(compose_path, project, "down", "-v"), COMPOSE_DOWN_TIMEOUT, work_dir
-            )
-        )
+        async def run_down() -> tuple[int, str]:
+            try:
+                return await self.runner(
+                    self._argv(compose_path, project, "down", "-v"), COMPOSE_DOWN_TIMEOUT, work_dir
+                )
+            finally:
+                if cleanup is not None:
+                    cleanup()
+
+        task = asyncio.ensure_future(run_down())
         try:
             code, output = await asyncio.shield(task)
         except asyncio.CancelledError:
