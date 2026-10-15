@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import subprocess
 import sys
@@ -427,3 +428,34 @@ async def test_stale_container_does_not_block_the_next_run(sandbox: DockerSandbo
         assert "survived" in result.stdout
     finally:
         subprocess.run(["docker", "rm", "-f", name], capture_output=True, timeout=60)
+
+
+@pytest.mark.asyncio
+async def test_cancelled_command_removes_live_container(sandbox: DockerSandbox, worktree: Path):
+    name = sandbox.container_name("live-cancel-cmd")
+    task = asyncio.create_task(sandbox.run_command(
+        "live-cancel", str(worktree), 'python -c "import time; time.sleep(120)"', timeout=180
+    ))
+    try:
+        async with asyncio.timeout(60):
+            while True:
+                status = await asyncio.to_thread(
+                    subprocess.run, ["docker", "inspect", "--format", "{{.State.Running}}", name],
+                    capture_output=True, text=True, timeout=10,
+                )
+                if status.returncode == 0 and status.stdout.strip() == "true":
+                    break
+                if task.done():
+                    pytest.fail(f"container did not start: {task.result()}")
+                await asyncio.sleep(0.1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        status = await asyncio.to_thread(
+            subprocess.run, ["docker", "inspect", name], capture_output=True, timeout=10,
+        )
+        assert status.returncode != 0, "cancelled container still exists"
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        await sandbox.remove_container(name)

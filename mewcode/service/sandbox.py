@@ -478,15 +478,15 @@ class DockerSandbox:
 
         log.info("sandbox: starting container %s (image=%s network=%s)", name, image, network or self.config.network)
         await self._evict_stale_container(name)
-        code, out = await self._run(argv, timeout=timeout)
-        timed_out = code == 124
-        if timed_out:
-            # 显式收尾：docker run 超时不等于容器停了（仓库已知坑：不能依赖进程退出兜底）
-            await self.stop_container(name)
-        result = self._parse_output(code, out, timed_out, name)
-        if not self.config.keep_containers:
-            await self.remove_run_dir(run_dir)
-        return result
+        try:
+            code, out = await self._run_container(argv, name, timeout)
+            timed_out = code == 124
+            if timed_out:
+                await self.stop_container(name)
+            return self._parse_output(code, out, timed_out, name)
+        finally:
+            if not self.config.keep_containers:
+                await self.remove_run_dir(run_dir)
 
     async def run_command(
         self,
@@ -517,12 +517,33 @@ class DockerSandbox:
             mount_src=mount_src,
         )
         await self._evict_stale_container(name)
-        code, out = await self._run(argv, timeout=timeout)
+        code, out = await self._run_container(argv, name, timeout)
         if code == 124:
             await self.stop_container(name)
         return SandboxRunResult(
             exit_code=code, stdout=out, timed_out=code == 124, container=name
         )
+
+    async def _run_container(self, argv: list[str], name: str, timeout: float) -> tuple[int, str]:
+        try:
+            return await self._run(argv, timeout=timeout)
+        except BaseException:
+            # Killing the docker client does not kill the daemon's container.
+            # Keep ownership until a bounded force-removal finishes, including
+            # when shutdown sends repeated cancellation signals.
+            cleanup = asyncio.create_task(self.remove_container(name))
+            while not cleanup.done():
+                try:
+                    await asyncio.shield(cleanup)
+                except asyncio.CancelledError:
+                    continue
+                except Exception:
+                    break
+            try:
+                cleanup.result()
+            except Exception as exc:
+                log.warning("container cancellation cleanup failed for %s: %s", name, exc)
+            raise
 
     def _parse_output(self, code: int, output: str, timed_out: bool, container: str) -> SandboxRunResult:
         """从容器输出里取出最后一行 JSON（agent 的机器可读摘要）。"""
