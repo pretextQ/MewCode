@@ -627,6 +627,72 @@ class TestSop:
 
 class TestHeadlessRunnerBudget:
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("sandbox_mode", [False, True])
+    async def test_retry_budget_uses_cumulative_usage_and_records_overrun(
+        self, tmp_path, demo_repo, sandbox_mode
+    ):
+        from mewcode.config import ProviderConfig
+        from mewcode.service.sandbox import SandboxRunResult
+
+        async with chain_env(tmp_path, demo_repo, publisher=FakePublisher()) as (store, chain, _, config):
+            config.token_budget = 100
+            config.sandbox.enabled = sandbox_mode
+            runs = []
+
+            def edit(work_dir):
+                runs.append(work_dir)
+                content = "def add(a, b):\n    return a + b + 1\n" if len(runs) == 1 else CALC_FIXED
+                (Path(work_dir) / "calc.py").write_text(content, encoding="utf-8")
+
+            class Agent:
+                def __init__(self, work_dir):
+                    self.work_dir = work_dir
+
+                async def run_to_completion(self, prompt, conversation=None, event_callback=None):
+                    edit(self.work_dir)
+                    event_callback({"type": "usage", "usage": {"inputTokens": 60, "outputTokens": 0}})
+                    return "done"
+
+                async def cancel_background_tasks(self):
+                    pass
+
+            class Sandbox:
+                async def available(self):
+                    return True
+
+                async def run_agent(self, job_id, work_dir, *args, **kwargs):
+                    edit(work_dir)
+                    return SandboxRunResult(0, result_text="done", input_tokens=60)
+
+            runner = HeadlessAgentRunner(
+                config, ProviderConfig("fake", "openai", "http://unused", "fake"), sandbox=Sandbox()
+            )
+            runner._build_agent = Agent
+            chain.runner = runner
+            job = await make_job(store)
+            await chain(job)
+            final = await store.get_or_raise(job.id)
+            assert len(runs) == 2
+            assert final.status == "escalate"
+            assert "cost guard" in final.last_error
+            assert final.tokens_in == 120
+            assert not chain.publisher.contexts
+            assert len([e for e in await store.events(job.id) if e.kind == "agent_finished"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_exhausted_budget_does_not_start_another_attempt(self, tmp_path):
+        from mewcode.config import ProviderConfig
+        from mewcode.service.jobs import Job
+
+        runner = HeadlessAgentRunner(
+            ServiceConfig(token_budget=100), ProviderConfig("fake", "openai", "http://unused", "fake")
+        )
+        job = Job("job-1", "fp", "demo", "warning", {}, "fixing", tokens_in=100)
+        with pytest.raises(TokenBudgetExceeded, match="already exhausted") as error:
+            await runner.run(job, str(tmp_path), "prompt", lambda e: None)
+        assert error.value.input_tokens == 0
+
+    @pytest.mark.asyncio
     async def test_budget_exceeded_raises(self, tmp_path: Path):
         """token 预算在 usage 回调处熔断（真实 runner 的路径）。"""
         from mewcode.config import ProviderConfig

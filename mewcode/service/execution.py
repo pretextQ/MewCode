@@ -89,6 +89,11 @@ def policy_event_detail(policy: RepoPolicy) -> str:
 class TokenBudgetExceeded(Exception):
     """单 job token 预算熔断（架构文档：成本控制双重要求之一）。"""
 
+    def __init__(self, message: str, *, input_tokens: int = 0, output_tokens: int = 0) -> None:
+        super().__init__(message)
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+
 
 @dataclass
 class TestOutcome:
@@ -482,6 +487,8 @@ class HeadlessAgentRunner:
         # 预算在动手前解析：策略文件坏掉在这里就暴露（PolicyError → 执行链
         # escalate），而不是等 agent 跑了一半才发现配置读不了。
         budget = self._resolve_token_budget(job)
+        if budget and job.tokens_in + job.tokens_out >= budget:
+            raise TokenBudgetExceeded(f"token budget {budget} already exhausted by previous attempts")
         if await self._use_sandbox():
             return await self._run_in_sandbox(job, work_dir, prompt, on_event, budget)
         on_event({"type": "execution_mode", "detail": "host execution explicitly enabled; no OS sandbox"})
@@ -530,10 +537,12 @@ class HeadlessAgentRunner:
         })
         # 沙箱模式做不到中途熔断（容器已经跑完）：事后门禁拦住"超预算的修复"
         # 进 PR——用量已经发生，但成果不带走，证据留在 escalate 记录里。
-        if budget and result.input_tokens + result.output_tokens > budget:
+        prior_tokens = job.tokens_in + job.tokens_out
+        if budget and prior_tokens + result.input_tokens + result.output_tokens > budget:
             raise TokenBudgetExceeded(
                 f"token budget {budget} exceeded in sandbox "
-                f"({result.input_tokens} in + {result.output_tokens} out)"
+                f"({prior_tokens} previous + {result.input_tokens} in + {result.output_tokens} out)",
+                input_tokens=result.input_tokens, output_tokens=result.output_tokens,
             )
         if result.timed_out:
             raise TimeoutError(f"sandbox agent run timed out after {timeout:.0f}s")
@@ -608,10 +617,12 @@ class HeadlessAgentRunner:
                 usage = event.get("usage") or {}
                 outcome.input_tokens = int(usage.get("inputTokens", outcome.input_tokens))
                 outcome.output_tokens = int(usage.get("outputTokens", outcome.output_tokens))
-                if budget and outcome.total_tokens > budget:
+                prior_tokens = job.tokens_in + job.tokens_out
+                if budget and prior_tokens + outcome.total_tokens > budget:
                     raise TokenBudgetExceeded(
                         f"token budget {budget} exceeded "
-                        f"({outcome.input_tokens} in + {outcome.output_tokens} out)"
+                        f"({prior_tokens} previous + {outcome.input_tokens} in + {outcome.output_tokens} out)",
+                        input_tokens=outcome.input_tokens, output_tokens=outcome.output_tokens,
                     )
             elif etype == "tool_use":
                 outcome.tool_calls += 1
@@ -847,8 +858,16 @@ class ExecutionChain:
             await self._notify(job.id, "fixing", f"agent run attempt {attempt}")
 
             try:
+                # Job objects are snapshots: refresh cumulative usage before
+                # every attempt, including retries following a failed CI gate.
+                job = await self.store.get_or_raise(job.id)
                 outcome = await self.runner.run(job, work_dir, prompt, self._make_on_event(job))
             except TokenBudgetExceeded as e:
+                await self.store.add_usage(job.id, e.input_tokens, e.output_tokens)
+                await self._event(
+                    job.id, "agent_finished",
+                    f"attempt={attempt} budget_exceeded=true tokens_in={e.input_tokens} tokens_out={e.output_tokens}",
+                )
                 await self._escalate(job.id, f"cost guard: {e}")
                 return None
             except asyncio.CancelledError:
