@@ -9,7 +9,7 @@ import os
 import sys
 from pathlib import Path
 
-from mewcode.config import ConfigError, load_config
+from mewcode.config import AppConfig, ConfigError, load_config
 from mewcode.hooks import HookConfigError, HookEngine, load_hooks
 from mewcode.permissions import PermissionMode
 
@@ -54,10 +54,10 @@ def _serve_main(argv: list[str]) -> None:
         )
         sys.exit(2)
 
-    asyncio.run(_serve(service, host, port, recover=not args.no_recover))
+    asyncio.run(_serve(config, host, port, recover=not args.no_recover))
 
 
-async def _serve(service, host: str, port: int, recover: bool = True) -> None:
+async def _serve(config: AppConfig, host: str, port: int, recover: bool = True) -> None:
     from aiohttp import web
 
     from mewcode.service.api import create_app
@@ -72,12 +72,7 @@ async def _serve(service, host: str, port: int, recover: bool = True) -> None:
     from mewcode.service.triggers import build_adapters
     from mewcode.service.vcs import GitHubVCS
 
-    try:
-        config = load_config()
-    except ConfigError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
-
+    service = config.service
     try:
         hooks = load_hooks(config.raw_hooks)
     except HookConfigError as e:

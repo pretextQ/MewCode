@@ -52,7 +52,7 @@ class TestServeRefusal:
         )
         called: dict = {}
 
-        async def fake_serve(service, host, port, recover=True):
+        async def fake_serve(config, host, port, recover=True):
             called.update(host=host, port=port, recover=recover)
 
         monkeypatch.setattr("mewcode.__main__._serve", fake_serve)
@@ -66,8 +66,8 @@ class TestServeRefusal:
         )
         called: dict = {}
 
-        async def fake_serve(service, host, port, recover=True):
-            called.update(host=host, port=port, recover=recover, data_dir=service.data_dir)
+        async def fake_serve(config, host, port, recover=True):
+            called.update(host=host, port=port, recover=recover, data_dir=config.service.data_dir)
 
         monkeypatch.setattr("mewcode.__main__._serve", fake_serve)
         _serve_main(["--host", "127.0.0.1", "--port", "9300", "--data-dir", "/tmp/state", "--no-recover"])
@@ -209,12 +209,34 @@ class TestConfigFlag:
         )
         seen: dict = {}
 
-        async def fake_serve(service, host, port, recover=True):
-            seen.update(port=port, service_port=service.port)
+        async def fake_serve(config, host, port, recover=True):
+            seen.update(port=port, service_port=config.service.port, model=config.providers[0].model)
 
         monkeypatch.setattr("mewcode.__main__._serve", fake_serve)
         _serve_main(["--config", str(cfg)])
-        assert seen == {"port": 9877, "service_port": 9877}
+        assert seen == {"port": 9877, "service_port": 9877, "model": "m"}
+
+    @pytest.mark.asyncio
+    async def test_serve_does_not_rediscover_configuration(self, monkeypatch):
+        from mewcode.__main__ import _serve
+        from mewcode.hooks import HookConfigError
+
+        config = make_config(ServiceConfig())
+        config.raw_hooks = {"selected-config": "hooks"}
+        seen = []
+
+        def unexpected_reload(*args):
+            pytest.fail("service must reuse the selected configuration")
+
+        def stop_at_hooks(raw):
+            seen.append(raw)
+            raise HookConfigError("stop before starting services")
+
+        monkeypatch.setattr("mewcode.__main__.load_config", unexpected_reload)
+        monkeypatch.setattr("mewcode.__main__.load_hooks", stop_at_hooks)
+        with pytest.raises(SystemExit):
+            await _serve(config, "127.0.0.1", 9877)
+        assert seen == [config.raw_hooks]
 
     def test_missing_config_file_exits_with_error(self, monkeypatch, tmp_path: Path, capsys):
         monkeypatch.setattr(sys, "argv", ["mewcode", "-p", "hi", "--config", str(tmp_path / "nope.yaml")])
