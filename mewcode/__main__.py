@@ -107,7 +107,6 @@ async def _serve(service, host: str, port: int, recover: bool = True) -> None:
         policy_loader=policy_loader,
     )
     vcs = GitHubVCS(service.vcs) if service.vcs.provider == "github" else None
-    default_repo = next(iter(service.repos), "job")
     # 集成验证（M2 W4）：沙箱不可用时 verifier 如实记 integration_skipped，
     # 不做降级直跑——集成验证的前提就是容器运行时（compose 起依赖 + 容器内跑测试）
     integration_verifier = ComposeVerifier(sandbox, runtime_bin=service.sandbox.runtime)
@@ -116,7 +115,7 @@ async def _serve(service, host: str, port: int, recover: bool = True) -> None:
         store,
         runner,
         test_runner=SandboxTestRunner(
-            sandbox, repo_name=default_repo, allow_host_fallback=service.sandbox.allow_host_fallback
+            sandbox, allow_host_fallback=service.sandbox.allow_host_fallback
         ) if sandbox else None,
         publisher=PullRequestPublisher(vcs, store, service) if vcs else None,
         ci_gate=GitHubCIGate(vcs) if vcs else None,

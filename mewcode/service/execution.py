@@ -23,6 +23,7 @@ import asyncio
 import logging
 import os
 import subprocess
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -336,7 +337,9 @@ class SandboxTestRunner:
         self.fallback = fallback or TestRunner()
         self.allow_host_fallback = allow_host_fallback
 
-    async def run(self, work_dir: str, command: str, timeout: float) -> TestOutcome:
+    async def run(
+        self, work_dir: str, command: str, timeout: float, *, job_id: str = "", repo_name: str = ""
+    ) -> TestOutcome:
         if not command:
             raise ValueError("empty test command")
         try:
@@ -353,7 +356,8 @@ class SandboxTestRunner:
             return outcome
 
         result = await self.sandbox.run_command(
-            self.repo_name, work_dir, command, repo_name=self.repo_name, timeout=timeout
+            job_id or f"test-{uuid.uuid4().hex}", work_dir, command,
+            repo_name=repo_name or self.repo_name, timeout=timeout
         )
         return TestOutcome(
             command=command,
@@ -1104,7 +1108,12 @@ class ExecutionChain:
         if not repo.test_command:
             await self._event(job.id, f"{phase}_tests", "skipped: no test_command configured for repo")
             return None
-        outcome = await self.test_runner.run(work_dir, repo.test_command, repo.test_timeout_seconds)
+        if isinstance(self.test_runner, SandboxTestRunner):
+            outcome = await self.test_runner.run(
+                work_dir, repo.test_command, repo.test_timeout_seconds, job_id=job.id, repo_name=job.repo
+            )
+        else:
+            outcome = await self.test_runner.run(work_dir, repo.test_command, repo.test_timeout_seconds)
         detail = outcome.summary()
         if outcome.output:
             detail += "\n" + outcome.output[-2000:]
