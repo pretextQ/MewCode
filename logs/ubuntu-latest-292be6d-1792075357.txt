@@ -1,0 +1,59 @@
+........................................................................ [  5%]
+........................................................................ [ 11%]
+........................................................................ [ 16%]
+........................................................................ [ 22%]
+........................................................................ [ 27%]
+...........................................ssssssssssss.s............... [ 33%]
+...............................................................F........ [ 39%]
+.....................................ssssssssssssss..................... [ 44%]
+........................................................................ [ 50%]
+........................................................................ [ 55%]
+........................................................................ [ 61%]
+........................................................................ [ 66%]
+........................................................................ [ 72%]
+........................................................................ [ 78%]
+........s............................................................... [ 83%]
+........................................................................ [ 89%]
+........................................................................ [ 94%]
+...................................................................      [100%]
+=================================== FAILURES ===================================
+_______________ test_cancellation_reaps_descendants[orphan-hook] _______________
+
+tmp_path = PosixPath('/tmp/pytest-of-runner/pytest-0/test_cancellation_reaps_descen5')
+kind = 'hook', mode = 'orphan'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("kind", ["bash", "hook", "service", "host"])
+    @pytest.mark.parametrize("mode", ["tree", "orphan"])
+    async def test_cancellation_reaps_descendants(tmp_path, kind, mode):
+        task = start_command(tmp_path, mode, kind, 30)
+        try:
+            await wait_for_descendants(tmp_path)
+            if mode == "orphan":
+                deadline = time.monotonic() + 2
+>               while is_running(int((tmp_path / "parent.pid").read_text())) and time.monotonic() < deadline:
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_process_cleanup.py:125: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_process_cleanup.py:46: in is_running
+    return not (stat.exists() and stat.read_text().rsplit(")", 1)[1].split()[0] == "Z")
+                                  ^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = PosixPath('/proc/2458/stat'), encoding = 'locale', errors = None
+
+    def read_text(self, encoding=None, errors=None):
+        """
+        Open the file in text mode, read it, and close the file.
+        """
+        encoding = io.text_encoding(encoding)
+        with self.open(mode='r', encoding=encoding, errors=errors) as f:
+>           return f.read()
+                   ^^^^^^^^
+E           ProcessLookupError: [Errno 3] No such process
+
+/usr/lib/python3.12/pathlib.py:1030: ProcessLookupError
+=========================== short test summary info ============================
+FAILED tests/test_process_cleanup.py::test_cancellation_reaps_descendants[orphan-hook] - ProcessLookupError: [Errno 3] No such process
+1 failed, 1262 passed, 28 skipped in 59.82s
