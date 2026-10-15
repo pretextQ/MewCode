@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from mewcode.tools.base import SKIP_DIRS, Tool, ToolResult
+from mewcode.tools.base import SKIP_DIRS, Tool, ToolResult, search_path_allowed
 
 
 class Params(BaseModel):
@@ -31,7 +31,7 @@ class Glob(Tool[Params]):
             return sorted(
                 str(p.relative_to(base))
                 for p in base.glob(params.pattern)
-                if p.is_file() and not any(part in SKIP_DIRS for part in p.parts)
+                if search_path_allowed(base, p) and p.is_file() and not any(part in SKIP_DIRS for part in p.parts)
             )
 
         try:

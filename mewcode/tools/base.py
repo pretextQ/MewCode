@@ -18,6 +18,14 @@ ToolCategory = Literal["read", "write", "command"]
 ParamsT = TypeVar("ParamsT", bound=BaseModel)
 
 
+def search_path_allowed(base: Path, candidate: Path) -> bool:
+    """Keep search results inside the requested directory, resolving symlinks."""
+    try:
+        return candidate.resolve(strict=True).is_relative_to(base.resolve(strict=True))
+    except (OSError, RuntimeError):
+        return False
+
+
 def detect_encoding(path: Path) -> str:
     """编码探测：BOM → utf-8 → locale 编码 → win32 ANSI 代码页。
 

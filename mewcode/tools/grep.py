@@ -7,7 +7,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from mewcode.tools.base import SKIP_DIRS, Tool, ToolResult
+from mewcode.tools.base import SKIP_DIRS, Tool, ToolResult, search_path_allowed
 
 GREP_MAX_FILE_BYTES = 1_000_000
 GREP_MAX_RESULTS = 200
@@ -18,7 +18,7 @@ def _scan_sync(base: Path, regex: re.Pattern, glob_pattern: str) -> list[str]:
     for file_path in sorted(base.glob(glob_pattern)):
         if len(results) >= GREP_MAX_RESULTS:
             break
-        if not file_path.is_file():
+        if not search_path_allowed(base, file_path) or not file_path.is_file():
             continue
         if any(part in SKIP_DIRS for part in file_path.parts):
             continue
