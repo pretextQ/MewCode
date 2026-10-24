@@ -7,22 +7,18 @@ MewCode 的权限系统是分层的（Layer 0–3）。本文档说明各层的�
 
 对每次工具调用，`PermissionChecker.check` 按以下顺序判定，命中即返回：
 
-1. **Layer 0 — PLAN 模式工具白名单**：PLAN 模式下只允许只读工具；
-   plan 文件写入例外先过沙箱再按 resolve 后的父目录前缀判定。
-2. **Layer 1b — 危险命令黑名单**（先于白名单）：`Bash` 类工具先过
-   `DangerousCommandDetector`，命中即 deny，与白名单无关。
-3. **Layer 1 — 安全命令白名单**：`echo`、`ls`、`git status` 等只读命令
-   自动放行。白名单不含任何具备写入/执行能力的命令；含禁用字符
-   （`|`、`;`、`&&`、`>`、`<`、`&`、`$(`、反引号、换行、回车）或绝对
-   路径目标的命令不进白名单。
-4. **Layer 2 — 路径沙箱**：read/write 类工具的所有路径参数
-   （`file_path`、`path` 等）逐一过 `PathSandbox`；沙箱外路径在
-   DEFAULT 模式下触发 ask 或 deny。
-5. **Layer 3 — 用户规则引擎**：用户在配置里声明的 `allow/deny/ask`
-   规则。**deny 规则优先于安全白名单**——即使命令在白名单内，命中
-   deny 也拒绝。
-6. **模式兜底**：DEFAULT 下写类/命令类触发 ask；ACCEPT_EDITS 自动
-   放行写文件；BYPASS 跳过 ask（危险检测与规则仍生效）。
+1. PLAN 模式先处理特定协作工具白名单。
+2. command 类工具先做危险命令检测，命中即拒绝。
+3. read/write 类工具的实际路径经过 PathSandbox，越界直接拒绝。
+4. PLAN 文件写入例外在沙箱通过后做精确路径判定。
+5. 用户规则按优先级匹配，规则先于安全命令白名单。
+6. 只读命令白名单自动放行；shell 控制符、环境变量展开、UNC 等可疑语法回到模式判定。
+7. 模式兜底：DEFAULT 下写类/命令类需要确认；ACCEPT_EDITS 自动放行写文件；
+   DONT_ASK 与 BYPASS 会放行命令类，危险检测和显式 deny 规则仍生效。
+
+规则仅支持 `allow` / `deny`，按文本大小写敏感匹配，在 Windows 与 POSIX 上保持一致。
+“总是允许”会为 Bash 保存完整命令的字面匹配规则；旧的通配 allow 规则不能授权链式命令、重定向或展开。
+规则文件修改后按文件元数据刷新解析缓存。
 
 ## 并行批次
 
@@ -46,3 +42,6 @@ MewCode 的权限系统是分层的（Layer 0–3）。本文档说明各层的�
 | `python --version` | `sed -i 's/x/y/' C:/Users/x/f.txt` |
 | | `tee 任意文件`、`npx <包名>`、`awk 'BEGIN{system(...)}'` |
 | | `echo hi\nrm -rf ~`（换行注入） |
+
+MCP 工具同样受到 agent 定义的 `tools` / `disallowed_tools` 限制，支持完整名称或通配模式。
+PLAN 子代理不会获得 MCP 工具。
