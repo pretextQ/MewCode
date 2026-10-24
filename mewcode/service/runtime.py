@@ -74,6 +74,7 @@ class ServiceRuntime:
         self.worktree_cleanup_cutoff_hours = worktree_cleanup_cutoff_hours
         self._data_dir = data_dir
         self._intake_lock = asyncio.Lock()
+        self._maintenance_task: asyncio.Task | None = None
         self.accepting = False
 
     # -- 生命周期 ---------------------------------------------------------
@@ -84,6 +85,7 @@ class ServiceRuntime:
         self.accepting = True
         if self.worktree_cleanup_cutoff_hours is not None:
             await self._cleanup_worktrees()
+            self._maintenance_task = asyncio.create_task(self._maintain_worktrees())
         if recover:
             await self.pool.requeue_unfinished()
         log.info(
@@ -93,11 +95,20 @@ class ServiceRuntime:
             self.config.data_dir,
         )
 
+    async def _maintain_worktrees(self) -> None:
+        while True:
+            await asyncio.sleep(3600)
+            try:
+                await self._cleanup_worktrees()
+            except Exception:
+                log.exception("periodic worktree cleanup failed")
+
     async def _cleanup_worktrees(self) -> None:
         """启动时顺带清一次陈旧 worktree（架构文档风险表：24/7 运行磁盘只增不减）。"""
         from mewcode.worktree import WorktreeManager
         from mewcode.worktree.cleanup import cleanup_stale_worktrees
 
+        protected = {j.id for j in await self.store.list_unfinished()}
         for name, repo in self.config.repos.items():
             path = Path(repo.path)
             if not path.is_dir():
@@ -105,7 +116,7 @@ class ServiceRuntime:
             try:
                 manager = WorktreeManager(repo_root=str(path), symlink_directories=[])
                 removed = await cleanup_stale_worktrees(
-                    manager, self.worktree_cleanup_cutoff_hours or 24
+                    manager, self.worktree_cleanup_cutoff_hours or 24, protected_names=protected
                 )
                 if removed:
                     log.info("cleaned %d stale worktree(s) in %s", removed, name)
@@ -114,6 +125,10 @@ class ServiceRuntime:
 
     async def stop(self) -> None:
         self.accepting = False
+        if self._maintenance_task:
+            self._maintenance_task.cancel()
+            await asyncio.gather(self._maintenance_task, return_exceptions=True)
+            self._maintenance_task = None
         async with self._intake_lock:
             await self.pool.stop()
             await self.store.close()

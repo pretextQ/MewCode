@@ -284,3 +284,15 @@ class TestServiceWorktreePatterns:
         assert not _is_ephemeral("job-0123456789abcd")  # 14 位
         assert not _is_ephemeral("job-ZZZZZZZZZZZZ")    # 非 hex
         assert not _is_ephemeral("job-")
+
+
+def test_published_branch_cleanup_protects_unfinished_jobs(manager, git_repo):
+    name = "job-0123456789ab"
+    wt = asyncio.run(manager.create(name))
+    manager._run_git(["branch", "-m", f"mewfix/{name}"], cwd=wt.path)
+    entry = Path(wt.path)
+    _age_entry(entry, 48)
+    assert asyncio.run(cleanup_stale_worktrees(manager, 24, protected_names={name})) == 0
+    assert entry.exists()
+    assert asyncio.run(cleanup_stale_worktrees(manager, 24)) == 1
+    assert manager._run_git(["show-ref", "--verify", f"refs/heads/mewfix/{name}"]).returncode != 0

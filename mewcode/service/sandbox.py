@@ -166,6 +166,7 @@ class DockerSandbox:
         self._available: bool | None = None
         self._checked_at = 0.0
         self._requirements_cache: str = ""
+        self._image_lock = asyncio.Lock()
 
     # -- 运行时探测 -------------------------------------------------------
 
@@ -286,6 +287,23 @@ class DockerSandbox:
         return f"{self.config.image_prefix}-{safe_repo}:{digest}"
 
     async def ensure_image(self, repo_name: str, repo_path: str | None = None) -> str:
+        async with self._image_lock:
+            tag = await self._ensure_image(repo_name, repo_path)
+            repository = tag.rsplit(":", 1)[0]
+            code, output = await self._run(
+                [self.runtime, "image", "ls", repository, "--format", "{{.Repository}}:{{.Tag}}"],
+                timeout=PROBE_TIMEOUT,
+            )
+            if code == 0:
+                tags = list(dict.fromkeys(t for t in output.splitlines() if t.startswith(repository + ":")))
+                keep = {tag, *[t for t in tags if t != tag][:2]}
+                for old in tags:
+                    if old not in keep:
+                        # No --force: Docker protects images still used by a container.
+                        await self._run([self.runtime, "image", "rm", old], timeout=PROBE_TIMEOUT)
+            return tag
+
+    async def _ensure_image(self, repo_name: str, repo_path: str | None = None) -> str:
         """确保项目镜像存在（内容寻址 tag：依赖不变就复用缓存）。"""
         dockerfile = self.dockerfile()
         mewcode_requirements = await self.mewcode_requirements()
@@ -306,12 +324,19 @@ class DockerSandbox:
         (context / "mewcode-requirements.txt").write_text(mewcode_requirements, encoding="utf-8")
         (context / "project-requirements.txt").write_text(project_requirements, encoding="utf-8")
 
-        log.info("sandbox: building image %s (this can take a while)", tag)
-        code, out = await self._run(
-            [self.runtime, "build", "-t", tag, "."], timeout=IMAGE_BUILD_TIMEOUT, cwd=str(context)
-        )
-        if code != 0:
-            raise SandboxError(f"image build failed for {tag}: {out.strip()[-800:]}")
+        try:
+            log.info("sandbox: building image %s (this can take a while)", tag)
+            code, out = await self._run(
+                [self.runtime, "build", "-t", tag, "."], timeout=IMAGE_BUILD_TIMEOUT, cwd=str(context)
+            )
+            if code != 0:
+                raise SandboxError(f"image build failed for {tag}: {out.strip()[-800:]}")
+        finally:
+            resolved = context.resolve()
+            build_root = (self.work_root / "build").resolve()
+            if resolved.parent == build_root and not context.is_symlink():
+                await asyncio.to_thread(shutil.rmtree, resolved, True)
+
         return tag
 
     # -- 运行 -------------------------------------------------------------
