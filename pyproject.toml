@@ -1,7 +1,18 @@
 [project]
 name = "mewcode"
-version = "0.2.0"
-description = "A terminal AI coding assistant"
+version = "0.3.0"
+description = "An interactive coding agent and alert-driven automated repair service"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
 requires-python = ">=3.11"
 dependencies = [
     "textual>=2.1.0",
@@ -13,6 +24,10 @@ dependencies = [
     "httpx>=0.27.0",
     "aiohttp>=3.14.5",
 ]
+
+[project.urls]
+Repository = "https://github.com/pretextQ/MewCode"
+Issues = "https://github.com/pretextQ/MewCode/issues"
 
 [project.scripts]
 mewcode = "mewcode.__main__:main"
