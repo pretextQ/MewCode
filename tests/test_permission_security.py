@@ -1362,3 +1362,17 @@ def test_shell_expansion_and_unc_require_confirmation(command):
 
     assert not is_safe_command(command)
 
+
+@pytest.mark.parametrize("command", [
+    "rm -fr /", "rm -f -r /tmp/example", "rm --force --recursive /tmp/example",
+    "rm -Rf /tmp/example", "rm --recursive -f /tmp/example",
+])
+def test_recursive_delete_option_order(command):
+    assert DangerousCommandDetector().detect(command)[0]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows command syntax")
+@pytest.mark.parametrize("command", ["del /s /f C:\\", "del /f /s C:\\", "rmdir /q /s C:\\"])
+def test_windows_delete_option_order(command):
+    assert DangerousCommandDetector().detect(command)[0]
+

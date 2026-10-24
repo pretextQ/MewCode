@@ -105,6 +105,29 @@ class DangerousCommandDetector:
 
 
     def detect(self, command: str) -> tuple[bool, str]:
+        # Parse option sets rather than relying on one spelling/order of flags.
+        for segment in re.split(r"[;&|\n\r]+", command):
+            try:
+                words = shlex.split(segment, posix=False)
+            except ValueError:
+                continue
+            if not words:
+                continue
+            executable = words[0].strip("\"'").replace("\\", "/").rsplit("/", 1)[-1].lower()
+            args = [word.strip("\"'") for word in words[1:]]
+            if executable in {"rm", "rm.exe"}:
+                options = args[:args.index("--")] if "--" in args else args
+                short_flags = "".join(a[1:] for a in options if a.startswith("-") and not a.startswith("--"))
+                recursive = "r" in short_flags.lower() or "--recursive" in options
+                force = "f" in short_flags or "--force" in options
+                absolute = any(a.startswith(("/", "~", "$", "%", "\\"))
+                               or re.match(r"^[a-zA-Z]:", a) for a in args)
+                if recursive and force and absolute:
+                    return True, "递归强制删除绝对路径"
+            if os.name == "nt":
+                flags = {a.lower() for a in args}
+                if executable in {"rd", "rmdir", "rd.exe", "rmdir.exe", "del", "erase"} and "/s" in flags:
+                    return True, "Windows 递归删除"
         for pattern, reason in self._patterns:
             if pattern.search(command):
                 return True, reason
