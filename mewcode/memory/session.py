@@ -11,6 +11,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import IO, Any
 
+from mewcode.atomic import atomic_write_text
 from mewcode.conversation import ConversationManager, Message, ToolResultBlock, ToolUseBlock
 
 SESSIONS_DIR = ".mewcode/sessions"
@@ -337,9 +338,7 @@ class SessionMeta:
             "created_at": self.created_at.isoformat(),
             "last_active": self.last_active.isoformat(),
         }
-        path.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        atomic_write_text(path, json.dumps(data, ensure_ascii=False, indent=2))
 
     @classmethod
     def load(cls, path: Path) -> SessionMeta | None:
@@ -354,7 +353,7 @@ class SessionMeta:
                 created_at=datetime.fromisoformat(data["created_at"]),
                 last_active=datetime.fromisoformat(data["last_active"]),
             )
-        except (json.JSONDecodeError, KeyError, ValueError):
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError):
             return None
 
 
@@ -525,8 +524,6 @@ class SessionManager:
             return None
 
         meta = SessionMeta.load(meta_path)
-        if meta is None:
-            return None
 
         records: list[SessionRecord] = []
         with open(jsonl_path, encoding="utf-8") as f:
@@ -552,6 +549,12 @@ class SessionManager:
         valid_count = validate_message_chain(records)
         records = records[:valid_count]
         messages = records_to_messages(records)
+        if meta is None:
+            meta = SessionMeta(
+                id=session_id, message_count=len(messages),
+                title=next((m.content[:TITLE_MAX_LENGTH] for m in messages if m.role == "user" and m.content), ""),
+            )
+            meta.save(meta_path)
 
         # 上次崩溃可能留下无换行结尾的残行；append 前补换行，
         # 否则新记录会永久拼接在残行上，之后所有读取都解析失败

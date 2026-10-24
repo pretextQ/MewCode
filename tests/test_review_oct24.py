@@ -8,6 +8,39 @@ from mewcode.agents.tool_filter import resolve_agent_tools
 from mewcode.tools import ToolRegistry
 
 
+def test_failed_atomic_replace_keeps_previous_file(tmp_path, monkeypatch):
+    from mewcode.atomic import atomic_write_text
+
+    path = tmp_path / "meta"
+    path.write_text("previous", encoding="utf-8")
+
+    def fail(*args):
+        raise OSError("simulated replace failure")
+
+    monkeypatch.setattr("mewcode.atomic.os.replace", fail)
+    with pytest.raises(OSError):
+        atomic_write_text(path, "new")
+    assert path.read_text() == "previous"
+    assert list(tmp_path.iterdir()) == [path]
+
+
+def test_resume_recovers_corrupt_metadata(tmp_path):
+    from mewcode.conversation import Message
+    from mewcode.memory.session import SessionManager
+
+    manager = SessionManager(str(tmp_path))
+    session = manager.create()
+    session.append(Message(role="user", content="preserved transcript"))
+    session.close()
+    (manager._sessions_dir / f"{session.session_id}.meta").write_text("{", encoding="utf-8")
+    resumed = manager.resume(session.session_id)
+    assert resumed is not None
+    try:
+        assert resumed.messages[0].content == "preserved transcript"
+    finally:
+        resumed.session.close()
+
+
 def test_memory_extraction_cannot_omit_existing_sections(tmp_path, monkeypatch):
     from mewcode.memory.auto_memory import MemoryManager
 
