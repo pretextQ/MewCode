@@ -307,13 +307,14 @@ class TestObservability:
 class TestRuntime:
     @pytest.mark.asyncio
     async def test_intake_without_pool_does_not_crash(self, tmp_path: Path):
-        """池未启动时只落库不入队（boot 阶段收到告警的退化路径）。"""
+        """未启动的消费者不能对告警报告受理成功。"""
         store = JobStore(tmp_path / "jobs.db")
         runtime = ServiceRuntime(ServiceConfig(data_dir=str(tmp_path / "state")), handler=None, store=store)  # type: ignore[arg-type]
         await store.connect()
         try:
             result = await runtime.intake([JobDraft(fingerprint="fp", repo="demo")])
-            assert len(result.accepted) == 1
+            assert not result.accepted
+            assert len(result.rejected) == 1
             assert runtime.pool.queue_depth == 0
         finally:
             await store.close()
@@ -370,3 +371,14 @@ async def test_open_review_survives_dedup_window(tmp_path):
         runtime.store._require_conn().commit()
         found = await runtime.store.find_open_by_fingerprint("demo", "review", 1)
         assert found and found.id == job.id
+
+
+@pytest.mark.asyncio
+async def test_shutdown_rejects_webhook_without_creating_job(tmp_path):
+    async with service_env(tmp_path, alert_adapter=StubAdapter()) as (runtime, client):
+        runtime.accepting = False
+        response = await client.post("/webhook/alert", json={"drafts": [{"fingerprint": "late"}]})
+        assert response.status == 503
+        result = await runtime.intake([JobDraft(fingerprint="late", repo="demo")])
+        assert result.rejected and not result.accepted
+        assert await runtime.store.list_jobs() == []

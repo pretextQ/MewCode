@@ -102,6 +102,8 @@ def create_app(
         return payload
 
     async def handle_webhook(request: web.Request, source: str) -> web.Response:
+        if not runtime.accepting or not runtime.pool.running:
+            return web.json_response({"error": "service is stopping"}, status=503)
         payload = await read_json(request)
         adapter = adapters.get(source)
         if adapter is None:

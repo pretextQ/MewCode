@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -72,12 +73,15 @@ class ServiceRuntime:
         )
         self.worktree_cleanup_cutoff_hours = worktree_cleanup_cutoff_hours
         self._data_dir = data_dir
+        self._intake_lock = asyncio.Lock()
+        self.accepting = False
 
     # -- 生命周期 ---------------------------------------------------------
 
     async def start(self, recover: bool = True) -> None:
         await self.store.connect()
         await self.pool.start()
+        self.accepting = True
         if self.worktree_cleanup_cutoff_hours is not None:
             await self._cleanup_worktrees()
         if recover:
@@ -109,12 +113,23 @@ class ServiceRuntime:
                 log.warning("worktree cleanup failed for %s: %s", name, e)
 
     async def stop(self) -> None:
-        await self.pool.stop()
-        await self.store.close()
+        self.accepting = False
+        async with self._intake_lock:
+            await self.pool.stop()
+            await self.store.close()
 
     # -- 接入 -------------------------------------------------------------
 
     async def intake(self, drafts: list[JobDraft]) -> IntakeResult:
+        async with self._intake_lock:
+            if not self.accepting or not self.pool.running:
+                return IntakeResult(rejected=[{
+                    "repo": d.repo, "fingerprint": d.fingerprint, "title": d.title,
+                    "reason": "service is not accepting jobs",
+                } for d in drafts])
+            return await self._intake(drafts)
+
+    async def _intake(self, drafts: list[JobDraft]) -> IntakeResult:
         """去重后落库并入队；返回本次受理结果。
 
         去重语义（架构文档第四节）：同仓库 + 同指纹 + 未完结 + 窗口内 =>
@@ -166,8 +181,7 @@ class ServiceRuntime:
                 result.deduped.append(job)
                 log.info("job %s: merged duplicate alert (fingerprint=%s)", job.id, draft.fingerprint)
                 continue
-            if self.pool.running:
-                await self.pool.submit(job.id)
+            await self.pool.submit(job.id)
             result.accepted.append(job)
             if self.notifier is not None:
                 try:
