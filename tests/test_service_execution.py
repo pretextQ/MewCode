@@ -147,6 +147,20 @@ async def make_job(store: JobStore, **payload_overrides):
 
 class TestHappyPath:
     @pytest.mark.asyncio
+    async def test_changes_requested_resumes_existing_worktree(self, tmp_path: Path, demo_repo: Path):
+        async with chain_env(tmp_path, demo_repo, publisher=FakePublisher()) as (store, chain, runner, _):
+            job = await make_job(store)
+            await chain(job)
+            await store.transition(job.id, "ci_gate")
+            await store.transition(job.id, "human_review")
+            job = await store.transition(job.id, "changes_requested", last_error="please add coverage")
+            await chain(job)
+            assert (await store.get_or_raise(job.id)).status == "pr_opened"
+            assert len(runner.calls) == 2
+            assert runner.calls[0]["work_dir"] == runner.calls[1]["work_dir"]
+            assert "please add coverage" in runner.calls[1]["prompt"]
+
+    @pytest.mark.asyncio
     async def test_worker_recovers_with_cached_worktree(self, tmp_path: Path, demo_repo: Path):
         from mewcode.service.worker import WorkerPool
 

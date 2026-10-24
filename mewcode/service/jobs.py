@@ -358,6 +358,7 @@ class JobStore:
         ci_status: str | None = None,
         last_error: str | None = None,
         result: str | None = None,
+        expected_state: str | None = None,
     ) -> Job:
         """校验并落库一次状态转移；非法转移抛 :class:`InvalidTransition`。
 
@@ -376,6 +377,8 @@ class JobStore:
                 if row is None:
                     raise JobNotFound(job_id)
                 current = _row_to_job(row)
+                if expected_state is not None and current.status != expected_state:
+                    raise InvalidTransition(f"expected {expected_state}, got {current.status}")
                 allowed = TRANSITIONS.get(current.status, frozenset())
                 if to_state not in allowed:
                     raise InvalidTransition(
@@ -696,6 +699,8 @@ class JobStore:
         ).fetchall()
         for row in rows:
             job = _row_to_job(row)
+            if job.status == "human_review" and job.pr_url:
+                return job
             try:
                 ts = datetime.strptime(job.updated_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC).timestamp()
             except ValueError:

@@ -767,13 +767,14 @@ class ExecutionChain:
         if policy.overrides_anything:
             await self._event(job.id, "policy_applied", policy_event_detail(policy))
 
-        # --- triaging：信息不足就不下手（不产生垃圾 PR） ---
-        if await self._transition(job.id, "triaging", reason="starting alert triage") is None:
-            return
-        ok, why = sop.has_actionable_context(job)
-        if not ok:
-            await self._escalate(job.id, f"triaging failed: {why}")
-            return
+        if job.status != "changes_requested":
+            # --- triaging：信息不足就不下手（不产生垃圾 PR） ---
+            if await self._transition(job.id, "triaging", reason="starting alert triage") is None:
+                return
+            ok, why = sop.has_actionable_context(job)
+            if not ok:
+                await self._escalate(job.id, f"triaging failed: {why}")
+                return
 
         repo_root = repo.path
         if not Path(repo_root).is_dir():
@@ -792,14 +793,15 @@ class ExecutionChain:
         work_dir = worktree.path
         await self._event(job.id, "worktree_ready", f"path={work_dir} branch={worktree.branch}")
 
-        if await self._transition(job.id, "reproducing", reason=f"isolated worktree at {work_dir}") is None:
+        if (job.status != "changes_requested"
+                and await self._transition(job.id, "reproducing", reason=f"isolated worktree at {work_dir}") is None):
             return
         baseline = await self._run_tests(job, repo, work_dir, phase="baseline")
 
         # --- 修复 → 验证 → 发布 → CI 门禁 ---
         # 外层循环处理"CI 红了"：带着 CI 失败信息回到 fixing 重来，
         # 重试预算仍由状态机的 attempts 上限强制（超限由内层 escalate）。
-        feedback = ""
+        feedback = job.last_error if job.status == "changes_requested" else ""
         while True:
             context = await self._fix_and_verify(
                 job, repo, worktree, baseline, feedback, target_branch

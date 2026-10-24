@@ -24,7 +24,7 @@ from typing import Any
 
 from aiohttp import web
 
-from .jobs import Job, JobNotFound
+from .jobs import InvalidTransition, Job, JobNotFound
 from .metrics import collect_metrics, cost_report, job_report, render_prometheus
 from .runtime import ServiceRuntime
 from .triggers.base import TriggerAdapter, TriggerError
@@ -169,11 +169,36 @@ def create_app(
         report = await cost_report(runtime.store, model=model, repo=repo_filter)
         return web.json_response(report)
 
+    async def decision(request: web.Request) -> web.Response:
+        if not token:
+            return web.json_response({"error": "configure webhook_token to record decisions"}, status=503)
+        payload = await read_json(request)
+        state = payload.get("decision")
+        reason = payload.get("reason", "")
+        if (not isinstance(state, str) or state not in {"merged", "changes_requested", "escalate"}
+                or not isinstance(reason, str)):
+            return web.json_response({"error": "invalid decision or reason"}, status=400)
+        if state == "changes_requested" and not runtime.pool.running:
+            return web.json_response({"error": "service is stopping"}, status=503)
+        try:
+            job = await runtime.store.transition(
+                request.match_info["job_id"], state, reason=reason[:6000],
+                last_error=reason[:6000], expected_state="human_review",
+            )
+        except JobNotFound:
+            return web.json_response({"error": "job not found"}, status=404)
+        except InvalidTransition as e:
+            return web.json_response({"error": str(e)}, status=409)
+        if state == "changes_requested":
+            await runtime.pool.submit(job.id)
+        return web.json_response({"job": _job_summary(job)})
+
     app = web.Application(middlewares=[auth_middleware], client_max_size=max_body_bytes)
     app.router.add_post("/webhook/alert", post_alert)
     app.router.add_post("/webhook/manual", post_manual)
     app.router.add_get("/healthz", healthz)
     app.router.add_get("/jobs", list_jobs)
+    app.router.add_post("/jobs/{job_id}/decision", decision)
     app.router.add_get("/jobs/{job_id}/report", single_job_report)
     app.router.add_get("/metrics", metrics)
     app.router.add_get("/costs", costs)

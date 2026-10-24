@@ -342,3 +342,31 @@ class TestRuntime:
         finally:
             await runtime.stop()
         assert seen == ["received"]
+
+
+@pytest.mark.asyncio
+async def test_review_decision_is_authenticated_and_final(tmp_path):
+    async with service_env(tmp_path, token="s3cret") as (runtime, client):
+        job = await runtime.store.create_job(fingerprint="review", repo="demo")
+        for state in ("triaging", "reproducing", "fixing", "verifying", "pr_opened", "ci_gate", "human_review"):
+            await runtime.store.transition(job.id, state)
+        path = f"/jobs/{job.id}/decision"
+        assert (await client.post(path, json={"decision": "merged"})).status == 401
+        headers = {"X-MewCode-Token": "s3cret"}
+        assert (await client.post(path, headers=headers, json={"decision": "merged"})).status == 200
+        assert (await runtime.store.get_or_raise(job.id)).status == "merged"
+        assert (await client.post(path, headers=headers, json={"decision": "merged"})).status == 409
+
+
+@pytest.mark.asyncio
+async def test_open_review_survives_dedup_window(tmp_path):
+    async with service_env(tmp_path, token="s3cret") as (runtime, _):
+        job = await runtime.store.create_job(fingerprint="review", repo="demo")
+        for state in ("triaging", "reproducing", "fixing", "verifying", "pr_opened", "ci_gate"):
+            await runtime.store.transition(job.id, state)
+        await runtime.store.transition(job.id, "human_review", pr_url="https://example/pr/1")
+        runtime.store._require_conn().execute("UPDATE jobs SET updated_at=? WHERE id=?",
+                                             ("2000-01-01T00:00:00Z", job.id))
+        runtime.store._require_conn().commit()
+        found = await runtime.store.find_open_by_fingerprint("demo", "review", 1)
+        assert found and found.id == job.id
