@@ -18,6 +18,16 @@ ToolCategory = Literal["read", "write", "command"]
 ParamsT = TypeVar("ParamsT", bound=BaseModel)
 
 
+def decode_output(raw: bytes) -> str:
+    """Prefer UTF-8; accept the host code page for legacy command/file output."""
+    for encoding in ("utf-8-sig", "oem", locale.getpreferredencoding(False), "mbcs"):
+        try:
+            return raw.decode(encoding)
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return raw.decode("utf-8", errors="replace")
+
+
 def search_path_allowed(base: Path, candidate: Path) -> bool:
     """Keep search results inside the requested directory, resolving symlinks."""
     try:

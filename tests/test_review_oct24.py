@@ -8,6 +8,14 @@ from mewcode.agents.tool_filter import resolve_agent_tools
 from mewcode.tools import ToolRegistry
 
 
+def test_legacy_chinese_output_decodes(monkeypatch):
+    from mewcode.tools.base import decode_output
+
+    monkeypatch.setattr("mewcode.tools.base.locale.getpreferredencoding", lambda _: "gbk")
+    assert decode_output("中文输出".encode("gbk")) == "中文输出"
+    assert decode_output("中文输出".encode()) == "中文输出"
+
+
 def test_rule_text_matching_is_platform_independent():
     from mewcode.permissions.rules import Rule
 

@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 from mewcode.processes import create_shell_process, kill_process_tree, release_process
 from mewcode.shell import shell_description
-from mewcode.tools.base import Tool, ToolResult
+from mewcode.tools.base import Tool, ToolResult, decode_output
 
 MAX_TIMEOUT = 600
 MAX_CAPTURE_BYTES = 2_097_152
@@ -80,9 +80,9 @@ class Bash(Tool[Params]):
 
         parts: list[str] = []
         if stdout:
-            parts.append(f"STDOUT:\n{stdout.decode(errors='replace')}")
+            parts.append(f"STDOUT:\n{decode_output(stdout)}")
         if stderr:
-            parts.append(f"STDERR:\n{stderr.decode(errors='replace')}")
+            parts.append(f"STDERR:\n{decode_output(stderr)}")
         if not parts:
             parts.append("(no output)")
 
