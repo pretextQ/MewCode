@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from threading import RLock
 from typing import Any
 
+from mewcode.atomic import atomic_write_text
 from mewcode.conversation import ConversationManager, Message
+
+_MEMORY_LOCK = RLock()
 
 USER_MEMORIES_RELPATH = ".mewcode/memories.md"
 PROJECT_MEMORIES_RELPATH = ".mewcode/memories.md"
@@ -21,7 +25,7 @@ MEMORY_EXTRACTION_PROMPT = """\
 1. 已有相同含义的条目不要重复添加
 2. 没有值得记忆的内容，该分类下留空（不要写任何条目，不要写占位符）
 3. 每条记忆用一行 `- ` 开头，必须是具体内容，不要用 `...` 占位
-4. 输出完整的 memories.md 内容，包含所有四个分类标题
+4. 只输出新增条目；更正旧知识时追加明确的纠正条目，不要删除或回显已有内容
 
 输出格式（严格遵守，没有内容的分类下不写任何条目）：
 ### 用户偏好
@@ -126,7 +130,7 @@ class MemoryManager:
             f"{current_memories if current_memories else '(空)'}\n\n"
             f"## 最近对话\n"
             f"{chr(10).join(conv_lines)}\n\n"
-            f"请输出更新后的完整 memories.md 内容。"
+            f"请只输出需要新增的分类和条目。已有记忆由程序保留。"
         )
 
         extract_conv = ConversationManager()
@@ -175,17 +179,26 @@ class MemoryManager:
                 current_header, current_lines, user_sections, project_sections
             )
 
-        if user_sections:
-            self._user_path.parent.mkdir(parents=True, exist_ok=True)
-            self._user_path.write_text(
-                "\n".join(user_sections).strip() + "\n", encoding="utf-8"
-            )
-
-        if project_sections:
-            self._project_path.parent.mkdir(parents=True, exist_ok=True)
-            self._project_path.write_text(
-                "\n".join(project_sections).strip() + "\n", encoding="utf-8"
-            )
+        with _MEMORY_LOCK:
+            for path, additions in ((self._user_path, user_sections), (self._project_path, project_sections)):
+                if not additions:
+                    continue
+                existing = path.read_text(encoding="utf-8") if path.exists() else ""
+                sections: dict[str, list[str]] = {}
+                for text in (existing, "\n".join(additions)):
+                    header = ""
+                    for line in text.splitlines():
+                        if line.startswith("### "):
+                            header = line
+                        else:
+                            lines = sections.setdefault(header, [])
+                            if line not in lines:
+                                lines.append(line)
+                merged = "\n\n".join(
+                    "\n".join(([header] if header else []) + lines).strip()
+                    for header, lines in sections.items()
+                ).strip() + "\n"
+                atomic_write_text(path, merged)
 
     @staticmethod
     def _is_placeholder(line: str) -> bool:

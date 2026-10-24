@@ -8,6 +8,18 @@ from mewcode.agents.tool_filter import resolve_agent_tools
 from mewcode.tools import ToolRegistry
 
 
+def test_memory_extraction_cannot_omit_existing_sections(tmp_path, monkeypatch):
+    from mewcode.memory.auto_memory import MemoryManager
+
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "user")
+    manager = MemoryManager(str(tmp_path / "project"))
+    manager._write_memories("### 用户偏好\n- old preference\n### 纠正反馈\n- old correction")
+    manager._write_memories("### 用户偏好\n- new preference\n- old preference")
+    content = manager.user_path.read_text(encoding="utf-8")
+    assert "old correction" in content and "new preference" in content
+    assert content.count("old preference") == 1
+
+
 @pytest.mark.parametrize("background", [False, True])
 @pytest.mark.parametrize("name", ["mcp_files_delete", "mcp__files__delete"])
 def test_mcp_agent_restrictions(name, background):
