@@ -42,6 +42,9 @@ COMPOSE_UP_TIMEOUT = 600
 COMPOSE_WAIT_TIMEOUT = 180
 COMPOSE_PS_TIMEOUT = 60
 COMPOSE_DOWN_TIMEOUT = 120
+MAX_COMPOSE_BYTES = 1_048_576
+MAX_COMPOSE_DEPTH = 32
+MAX_COMPOSE_EVENTS = 20_000
 
 #: 宿主命令执行器（argv, timeout, cwd）-> (exit_code, output)
 CommandRunner = Callable[[list[str], float, "str | None"], Awaitable[tuple[int, str]]]
@@ -63,7 +66,22 @@ def safe_compose_snapshot(source: Path, target: Path) -> None:
     No bind mounts, external resources, builds or host configuration files are
     permitted, even if introduced by YAML aliases or a later repository edit.
     """
-    data = yaml.safe_load(source.read_text(encoding="utf-8"))
+    with source.open("rb") as stream:
+        raw = stream.read(MAX_COMPOSE_BYTES + 1)
+    if len(raw) > MAX_COMPOSE_BYTES:
+        raise ValueError("Compose document exceeds size limit")
+    text = raw.decode("utf-8")
+    depth = 0
+    for count, event in enumerate(yaml.parse(text), 1):
+        if isinstance(event, yaml.AliasEvent):
+            raise ValueError("Compose YAML aliases are unsupported")
+        if isinstance(event, (yaml.MappingStartEvent, yaml.SequenceStartEvent)):
+            depth += 1
+        elif isinstance(event, (yaml.MappingEndEvent, yaml.SequenceEndEvent)):
+            depth -= 1
+        if depth > MAX_COMPOSE_DEPTH or count > MAX_COMPOSE_EVENTS:
+            raise ValueError("Compose document exceeds structural limits")
+    data = yaml.safe_load(text)
     if not isinstance(data, dict) or set(data) - {"services", "volumes", "networks", "version"}:
         raise ValueError("unsupported Compose top-level configuration")
     services = data.get("services")
@@ -108,6 +126,10 @@ def safe_compose_snapshot(source: Path, target: Path) -> None:
         # Enforce these even if repository content requests weaker isolation.
         service["cap_drop"] = ["ALL"]
         service["security_opt"] = ["no-new-privileges:true"]
+        # Repository-controlled values must not disable or enlarge these caps.
+        service["mem_limit"] = "512m"
+        service["cpus"] = 1.0
+        service["pids_limit"] = 256
     target.write_text(yaml.safe_dump(data, sort_keys=False).replace("$", "$$"), encoding="utf-8")
 
 

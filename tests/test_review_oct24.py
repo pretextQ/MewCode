@@ -18,3 +18,23 @@ def test_mcp_agent_restrictions(name, background):
     definition.disallowed_tools = []
     definition.tools = ["ReadFile"]
     assert resolve_agent_tools(registry, definition, background).get(name) is None
+
+
+def test_compose_limits_and_alias_rejection(tmp_path):
+    import yaml
+
+    from mewcode.service.compose import safe_compose_snapshot
+
+    source, target = tmp_path / "compose.yml", tmp_path / "frozen.yml"
+    source.write_text("services:\n  db:\n    image: redis\n    pids_limit: -1\n", encoding="utf-8")
+    safe_compose_snapshot(source, target)
+    service = yaml.safe_load(target.read_text())["services"]["db"]
+    assert service["pids_limit"] == 256
+    assert service["mem_limit"] == "512m"
+    assert service["cpus"] == 1.0
+    source.write_text("services: &a {db: *a}", encoding="utf-8")
+    with pytest.raises(ValueError, match="aliases"):
+        safe_compose_snapshot(source, target)
+    source.write_text("[" * 33 + "]" * 33, encoding="utf-8")
+    with pytest.raises(ValueError, match="structural"):
+        safe_compose_snapshot(source, target)
