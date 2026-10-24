@@ -1,0 +1,109 @@
+........................................................................ [  5%]
+........................................................................ [ 10%]
+........................................................................ [ 16%]
+........................................................................ [ 21%]
+........................................................................ [ 26%]
+................................................ssssssssssss.s.......... [ 32%]
+................sss..................................................... [ 37%]
+........................................................................ [ 42%]
+...........sssssssssssssss.............................................. [ 48%]
+........................................................................ [ 53%]
+........................................................................ [ 58%]
+........................................................................ [ 64%]
+.....................................................FFF................ [ 69%]
+........................................................................ [ 74%]
+...............................................................s........ [ 80%]
+........................................................................ [ 85%]
+........................................................................ [ 90%]
+........................................................................ [ 96%]
+..................................................                       [100%]
+=================================== FAILURES ===================================
+_______ TestChainTargetBranch.test_policy_target_branch_reaches_worktree _______
+
+self = <test_service_policy.TestChainTargetBranch object at 0x7f3f0f143bf0>
+tmp_path = PosixPath('/tmp/pytest-of-runner/pytest-0/test_policy_target_branch_reac0')
+
+    @pytest.mark.asyncio
+    async def test_policy_target_branch_reaches_worktree(self, tmp_path: Path):
+        async with chain_env(tmp_path, POLICY_TARGET_DEVELOP, NoChangeRunner()) as (
+            store,
+            chain,
+            bases,
+        ):
+            job = await make_chain_job(store)
+            await chain(job)
+>           assert bases == ["develop"]
+E           AssertionError: assert [] == ['develop']
+E             
+E             Right contains one more item: 'develop'
+E             
+E             Full diff:
+E             + []
+E             - [
+E             -     'develop',
+E             - ]
+
+tests/test_service_policy.py:416: AssertionError
+______ TestChainTargetBranch.test_repo_falls_back_to_head_without_policy _______
+
+self = <test_service_policy.TestChainTargetBranch object at 0x7f3f0f164a40>
+tmp_path = PosixPath('/tmp/pytest-of-runner/pytest-0/test_repo_falls_back_to_head_w0')
+
+    @pytest.mark.asyncio
+    async def test_repo_falls_back_to_head_without_policy(self, tmp_path: Path):
+        """无策略 = 行为与 M1 完全一致：repo.base_branch（缺省）或 HEAD，无 policy 事件。"""
+        async with chain_env(tmp_path, None, NoChangeRunner()) as (store, chain, bases):
+            job = await make_chain_job(store)
+            await chain(job)
+>           assert bases == ["HEAD"]
+E           AssertionError: assert [] == ['HEAD']
+E             
+E             Right contains one more item: 'HEAD'
+E             
+E             Full diff:
+E             + []
+E             - [
+E             -     'HEAD',
+E             - ]
+
+tests/test_service_policy.py:429: AssertionError
+____ TestChainTargetBranch.test_context_carries_target_branch_to_publisher _____
+
+self = <test_service_policy.TestChainTargetBranch object at 0x7f3f0f165df0>
+tmp_path = PosixPath('/tmp/pytest-of-runner/pytest-0/test_context_carries_target_br0')
+
+    @pytest.mark.asyncio
+    async def test_context_carries_target_branch_to_publisher(self, tmp_path: Path):
+        publisher = RecordingPublisher()
+        async with chain_env(
+            tmp_path, POLICY_TARGET_DEVELOP, WritingRunner(), publisher=publisher
+        ) as (store, chain, bases):
+            job = await make_chain_job(store)
+            await chain(job)
+>           assert publisher.contexts and publisher.contexts[0].target_branch == "develop"
+E           assert ([])
+E            +  where [] = <test_service_policy.RecordingPublisher object at 0x7f3f07a87e00>.contexts
+
+tests/test_service_policy.py:441: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_service_policy.py::TestChainTargetBranch::test_policy_target_branch_reaches_worktree - AssertionError: assert [] == ['develop']
+  
+  Right contains one more item: 'develop'
+  
+  Full diff:
+  + []
+  - [
+  -     'develop',
+  - ]
+FAILED tests/test_service_policy.py::TestChainTargetBranch::test_repo_falls_back_to_head_without_policy - AssertionError: assert [] == ['HEAD']
+  
+  Right contains one more item: 'HEAD'
+  
+  Full diff:
+  + []
+  - [
+  -     'HEAD',
+  - ]
+FAILED tests/test_service_policy.py::TestChainTargetBranch::test_context_carries_target_branch_to_publisher - assert ([])
+ +  where [] = <test_service_policy.RecordingPublisher object at 0x7f3f07a87e00>.contexts
+3 failed, 1311 passed, 32 skipped in 59.34s
