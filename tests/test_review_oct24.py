@@ -8,6 +8,27 @@ from mewcode.agents.tool_filter import resolve_agent_tools
 from mewcode.tools import ToolRegistry
 
 
+def test_permission_rules_cache_reloads_after_change(tmp_path, monkeypatch):
+    import mewcode.permissions.rules as module
+
+    path = tmp_path / "rules.yml"
+    path.write_text('- {rule: "Bash(npm test)", effect: deny}', encoding="utf-8")
+    original = module._load_rules_file
+    loads = []
+
+    def load(file):
+        loads.append(file)
+        return original(file)
+
+    monkeypatch.setattr(module, "_load_rules_file", load)
+    engine = module.RuleEngine(local_rules_path=path)
+    assert engine.evaluate("Bash", "npm test") == "deny"
+    assert engine.evaluate("Bash", "npm test") == "deny"
+    assert len(loads) == 1
+    path.write_text('- {rule: "Bash(npm test)", effect: allow}', encoding="utf-8")
+    assert engine.evaluate("Bash", "npm test") == "allow"
+
+
 @pytest.mark.asyncio
 async def test_large_file_read_rejected_before_loading(tmp_path):
     from mewcode.tools.read_file import MAX_READ_BYTES, Params, ReadFile

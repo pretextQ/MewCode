@@ -114,11 +114,26 @@ class RuleEngine:
         self._user_path = user_rules_path
         self._project_path = project_rules_path
         self._local_path = local_rules_path
+        self._cache: dict[Path, tuple[tuple[int, int, int], list[Rule]]] = {}
+
+    def _rules_for(self, path: Path) -> list[Rule]:
+        try:
+            stat = path.stat()
+        except OSError:
+            self._cache.pop(path, None)
+            return []
+        signature = (stat.st_mtime_ns, stat.st_size, stat.st_ino)
+        cached = self._cache.get(path)
+        if cached is not None and cached[0] == signature:
+            return cached[1]
+        rules = _load_rules_file(path)
+        self._cache[path] = (signature, rules)
+        return rules
 
     def _load_tiers(self) -> list[list[Rule]]:
         tiers: list[list[Rule]] = []
         for p in (self._user_path, self._project_path, self._local_path):
-            tiers.append(_load_rules_file(p) if p else [])
+            tiers.append(self._rules_for(p) if p else [])
         return tiers
 
 
@@ -138,3 +153,4 @@ class RuleEngine:
         existing.append(rule)
         entries = [{"rule": f"{r.tool_name}({r.pattern})", "effect": r.effect} for r in existing]
         self._local_path.write_text(yaml.dump(entries, allow_unicode=True), encoding="utf-8")
+        self._cache.pop(self._local_path, None)
