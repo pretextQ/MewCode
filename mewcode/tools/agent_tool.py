@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -330,6 +331,10 @@ class AgentTool(Tool[AgentToolParams]):
                 result_text = await sub_agent.run_to_completion("", conversation)
             else:
                 result_text = await sub_agent.run_to_completion(p.prompt)
+        except asyncio.CancelledError:
+            self._trace_manager.complete(trace_node.agent_id, "cancelled")
+            await sub_agent.cancel_background_tasks()
+            raise
         except Exception as e:
             self._trace_manager.complete(trace_node.agent_id, "failed")
             return ToolResult(
@@ -695,6 +700,10 @@ class AgentTool(Tool[AgentToolParams]):
 
         try:
             result_text = await sub_agent.run_to_completion(task)
+        except asyncio.CancelledError:
+            self._trace_manager.complete(trace_node.agent_id, "cancelled")
+            await sub_agent.cancel_background_tasks()
+            raise
         except Exception as e:
             self._trace_manager.complete(trace_node.agent_id, "failed")
             return ToolResult(

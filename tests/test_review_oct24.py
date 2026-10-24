@@ -248,3 +248,37 @@ async def test_edit_preserves_untouched_mixed_newlines(tmp_path):
     result = await EditFile().execute(Params(file_path=str(path), old_string="old\n", new_string="new\n"))
     assert not result.is_error
     assert path.read_bytes() == b"first\r\nkeep\nnew\r\ntail\n"
+
+
+@pytest.mark.asyncio
+async def test_cancelled_worktree_agent_finishes_trace(tmp_path, monkeypatch):
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from mewcode.agents.trace import TraceManager
+    from mewcode.tools.agent_tool import AgentTool, AgentToolParams
+
+    child = SimpleNamespace(run_to_completion=AsyncMock(side_effect=asyncio.CancelledError()),
+                            cancel_background_tasks=AsyncMock())
+    monkeypatch.setattr("mewcode.agent.Agent", lambda **kwargs: child)
+    parent = SimpleNamespace(client=None, registry=ToolRegistry(), permission_checker=None,
+                             work_dir=str(tmp_path), protocol="anthropic", context_window=10000,
+                             hook_engine=None, agent_id="parent", trace_id="trace")
+    trace = TraceManager()
+    tool = AgentTool(None, None, trace, parent)
+    with pytest.raises(asyncio.CancelledError):
+        await tool._run_in_worktree(AgentToolParams(prompt="fix", description="test"),
+                                   AgentDef("test", "test"), SimpleNamespace(path=str(tmp_path)))
+    node = trace.get_tree("trace")[0]
+    assert node.status == "cancelled" and node.end_time is not None
+    child.cancel_background_tasks.assert_awaited_once()
+
+
+def test_trace_update_rejects_identity_and_invalid_counter():
+    from mewcode.agents.trace import TraceManager
+
+    manager = TraceManager()
+    node = manager.create("test")
+    for fields in ({"trace_id": "other"}, {"input_tokens": "oops"}, {"output_tokens": -1}):
+        with pytest.raises(ValueError):
+            manager.update(node.agent_id, **fields)

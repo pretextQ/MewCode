@@ -48,11 +48,17 @@ class TraceManager:
         if node is None:
             return
         for key, value in kwargs.items():
-            if hasattr(node, key):
-                setattr(node, key, value)
+            if key not in {"input_tokens", "output_tokens", "tool_call_count"}:
+                raise ValueError(f"trace field is not an editable counter: {key}")
+            if type(value) is not int or value < 0:
+                raise ValueError(f"trace counter must be a nonnegative integer: {key}")
+        for key, value in kwargs.items():
+            setattr(node, key, value)
 
 
     def complete(self, agent_id: str, status: str = "completed") -> None:
+        if status not in {"completed", "failed", "cancelled"}:
+            raise ValueError(f"invalid terminal trace status: {status}")
         node = self._nodes.get(agent_id)
         if node is None:
             return
