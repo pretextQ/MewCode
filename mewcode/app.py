@@ -1329,6 +1329,8 @@ class MewCodeApp(App):
         await ai_row.mount(streaming_label)
 
         accumulated_text = ""
+        streaming_rich = None
+        last_stream_refresh = 0.0
         tool_blocks: dict[str, ToolCallBlock] = {}
 
         # 在聊天区底部启动持续旋转的加载动画
@@ -1368,17 +1370,21 @@ class MewCodeApp(App):
                         streaming_label = Static("", classes="message ai-message")
                         await ai_row.mount(streaming_label)
                     accumulated_text += event.text
-                    from rich.text import Text as RichText
-                    t = RichText()
-                    t.append("● ", style="bold color(99)")
-                    t.append(accumulated_text)
-                    streaming_label.update(t)
-                    self.call_after_refresh(chat.scroll_end, animate=False)
+                    if streaming_rich is None:
+                        from rich.text import Text as RichText
+                        streaming_rich = RichText("● ", style="bold color(99)")
+                    streaming_rich.append(event.text, style="default")
+                    now = _time.monotonic()
+                    if now - last_stream_refresh >= 0.05:
+                        streaming_label.update(streaming_rich)
+                        last_stream_refresh = now
+                        self.call_after_refresh(chat.scroll_end, animate=False)
 
                 elif isinstance(event, RetryEvent):
                     self._show_system_message(f"↻ Retrying: {event.reason}")
 
                 elif isinstance(event, ToolUseEvent):
+                    streaming_rich = None
                     if accumulated_text:
                         if streaming_label is not None:
                             await streaming_label.remove()
@@ -1438,6 +1444,7 @@ class MewCodeApp(App):
                         await self._handle_askuser(ask_tool.current_question())
 
                 elif isinstance(event, TurnComplete):
+                    streaming_rich = None
                     if self.session:
                         for msg in self.conversation.history[history_cursor:]:
                             self.session.append(msg)
