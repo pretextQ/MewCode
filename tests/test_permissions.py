@@ -43,6 +43,18 @@ from mewcode.tools.base import StreamEnd, StreamEvent, TextDelta, ToolCallComple
 # ===========================================================================
 
 class TestDangerousCommandDetector:
+    @pytest.mark.parametrize("suffix", [" && echo x", "; echo x", " | echo x", "\necho x", " > other"])
+    def test_legacy_allow_rule_cannot_authorize_compound_shell(self, suffix):
+        assert not Rule("Bash", "npm test*", "allow").matches("Bash", "npm test" + suffix)
+
+    def test_saved_command_pattern_is_literal_and_complete(self):
+        from mewcode.permissions.rules import literal_pattern
+
+        command = "npm test " + "a" * 80 + " [?]*"
+        rule = Rule("Bash", literal_pattern(command), "allow")
+        assert rule.matches("Bash", command)
+        assert not rule.matches("Bash", command + " extra")
+
     def setup_method(self) -> None:
         self.detector = DangerousCommandDetector()
 

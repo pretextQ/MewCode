@@ -41,7 +41,16 @@ class Rule:
     def matches(self, tool_name: str, content: str) -> bool:
         if self.tool_name != tool_name:
             return False
+        # Legacy prefix rules must not authorize another command or expansion.
+        if (self.effect == "allow" and tool_name == "Bash"
+                and any(ch in content for ch in ("&", ";", "|", "\n", "\r", ">", "<", "`", "$", "%", "!", "^"))):
+            return False
         return fnmatch(content, self.pattern)
+
+
+def literal_pattern(content: str) -> str:
+    """Escape glob syntax when persisting one explicitly approved command."""
+    return "".join({"[": "[[]", "*": "[*]", "?": "[?]"}.get(ch, ch) for ch in content)
 
 
 def parse_rule(raw: str, effect: Effect) -> Rule:

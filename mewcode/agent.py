@@ -1100,9 +1100,9 @@ class Agent:
                     return
 
                 if response == PermissionResponse.ALLOW_ALWAYS:
-                    from mewcode.permissions.rules import Rule, extract_content
+                    from mewcode.permissions.rules import Rule, extract_content, literal_pattern
                     content = extract_content(tc.tool_name, tc.arguments)
-                    pattern = f"{content[:60]}*" if len(content) > 60 else f"{content}*"
+                    pattern = literal_pattern(content) if tc.tool_name == "Bash" else f"{content}*"
                     rule = Rule(tool_name=tc.tool_name, pattern=pattern, effect="allow")
                     self.permission_checker.rule_engine.append_local_rule(rule)
 
