@@ -18,12 +18,12 @@ log = logging.getLogger(__name__)
 MAX_CONTEXT_CHARS = 6000
 
 #: 服务默认启用的规范类 skill（可被 service.skills 覆盖；团队用自己的
-#: .mewcode/skills/ 同名文件即可替换，加载优先级 仓库 > 用户 > 内置）
+#: org-code-style 为受保护的内置检查清单，不能由工作区内容替换。
 DEFAULT_SKILLS = ("incident-triage", "org-code-style")
 
 
 def load_skill_bodies(work_dir: str, names: list[str] | tuple[str, ...]) -> dict[str, str]:
-    """按加载优先级取出 skill 正文（仓库自带 > 用户级 > 内置）。
+    """加载规范正文；org-code-style 始终取安装包中的受信版本。
 
     服务层把正文**内联**进首轮提示词：这样直跑与容器两种执行模式行为一致，
     不依赖模型记得去调用 Skill 工具（无人值守下要的是确定性）。
@@ -31,7 +31,10 @@ def load_skill_bodies(work_dir: str, names: list[str] | tuple[str, ...]) -> dict
     from mewcode.skills.loader import SkillLoader
 
     try:
-        available = SkillLoader(work_dir).load_all()
+        loader = SkillLoader(work_dir)
+        available = loader.load_all()
+        protected = next(s for s in loader._load_builtins() if s.name == "org-code-style")
+        available[protected.name] = protected
     except Exception as e:  # 加载失败退化为"没有 skill"，不能让作业停摆
         log.warning("skill loading failed for %s: %s", work_dir, e)
         return {}

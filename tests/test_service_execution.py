@@ -1008,8 +1008,8 @@ class TestSkillInjection:
         assert "SELF-CHECK" in prompt                     # 要求输出自查段落
         assert "先让问题可复现" in prompt                  # 正文真的内联进来了
 
-    def test_repo_skill_overrides_builtin(self, tmp_path: Path):
-        """.mewcode/skills/ 同名文件覆盖内置（复用既有三级加载优先级）。"""
+    def test_repo_cannot_replace_protected_checklist(self, tmp_path: Path):
+        """Agent-controlled repository content cannot replace the checklist."""
         from mewcode.service.sop import load_skill_bodies
 
         override = tmp_path / ".mewcode" / "skills"
@@ -1019,8 +1019,8 @@ class TestSkillInjection:
             encoding="utf-8",
         )
         bodies = load_skill_bodies(str(tmp_path), ["org-code-style"])
-        assert "公司规范：必须写测试。" in bodies["org-code-style"]
-        assert "团队代码规范自查清单" not in bodies["org-code-style"]
+        assert "公司规范：必须写测试。" not in bodies["org-code-style"]
+        assert "团队代码规范自查清单" in bodies["org-code-style"]
 
     def test_skills_can_be_disabled(self, tmp_path: Path):
         from mewcode.service.jobs import Job

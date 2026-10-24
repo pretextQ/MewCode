@@ -185,7 +185,7 @@ def build_pr_body(
             "",
             self_check,
             "",
-            "> 自查由 agent 完成、未经过人工核对；review 时请重点看未满足项。",
+            "> 清单来源：安装包内置 org-code-style。自查由 agent 完成、未经过人工核对。",
         ]
     if context.baseline_test is not None and context.baseline_test.output:
         lines += [
