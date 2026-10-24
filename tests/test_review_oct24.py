@@ -161,3 +161,19 @@ def test_compose_limits_and_alias_rejection(tmp_path):
     source.write_text("[" * 33 + "]" * 33, encoding="utf-8")
     with pytest.raises(ValueError, match="structural"):
         safe_compose_snapshot(source, target)
+
+
+def test_file_caches_are_bounded_and_eviction_requires_reread(tmp_path):
+    from mewcode.cache import FileCache
+    from mewcode.tools.file_state_cache import FileStateCache
+
+    cache = FileCache(max_entries=2, max_chars=5)
+    cache.put("one", "abc")
+    cache.put("two", "def")
+    assert cache.get("one") is None and cache.get("two") == "def"
+    cache.put("huge", "x" * 6)
+    assert cache.get("huge") is None
+    states = FileStateCache(max_entries=1)
+    states.record("old", "unused", 1)
+    states.record("new", "unused", 2)
+    assert not states.check("old")[0]

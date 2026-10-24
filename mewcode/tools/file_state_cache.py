@@ -1,24 +1,29 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from pathlib import Path
 
 
 class FileStateCache:
     """Tracks which files have been read, enforcing read-before-edit.
 
-    Stores { absolute_path: (content, mtime_ns) } after each ReadFile call.
+    Stores bounded { absolute_path: mtime_ns } after each ReadFile call.
     EditFile and WriteFile check the cache before proceeding:
       - Gate 1: file must have been read (present in cache).
       - Gate 2: file must not have been modified since the read (mtime_ns matches).
     """
 
-    def __init__(self) -> None:
-        self._cache: dict[str, tuple[str, int]] = {}
+    def __init__(self, max_entries: int = 1024) -> None:
+        self._cache: OrderedDict[str, int] = OrderedDict()
+        self.max_entries = max(1, max_entries)
 
     def record(self, path: str, content: str, mtime_ns: int) -> None:
         """Record a file's content and mtime after a successful read."""
-        self._cache[path] = (content, mtime_ns)
+        self._cache[path] = mtime_ns
+        self._cache.move_to_end(path)
+        while len(self._cache) > self.max_entries:
+            self._cache.popitem(last=False)
 
     def check(self, path: str) -> tuple[bool, str]:
         """Check whether the file is safe to edit/write.
@@ -29,7 +34,8 @@ class FileStateCache:
         if entry is None:
             return False, "Error: file has not been read yet. Read it first before editing."
 
-        _, cached_mtime_ns = entry
+        cached_mtime_ns = entry
+        self._cache.move_to_end(path)
         try:
             current_mtime_ns = Path(path).stat().st_mtime_ns
         except OSError:
@@ -46,9 +52,7 @@ class FileStateCache:
         """Update the cache entry after a successful edit/write."""
         try:
             p = Path(path)
-            content = p.read_text(encoding="utf-8")
-            mtime_ns = p.stat().st_mtime_ns
-            self._cache[path] = (content, mtime_ns)
+            self.record(path, "", p.stat().st_mtime_ns)
         except OSError:
             # If we can't read it back, just remove the stale entry.
             self._cache.pop(path, None)
