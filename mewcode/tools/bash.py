@@ -10,6 +10,33 @@ from mewcode.shell import shell_description
 from mewcode.tools.base import Tool, ToolResult
 
 MAX_TIMEOUT = 600
+MAX_CAPTURE_BYTES = 2_097_152
+
+
+async def capture_bounded(proc: asyncio.subprocess.Process) -> tuple[bytes, bytes]:
+    total = 0
+
+    async def read(stream: asyncio.StreamReader | None) -> bytes:
+        nonlocal total
+        chunks = []
+        if stream is None:
+            return b""
+        while chunk := await stream.read(65536):
+            total += len(chunk)
+            if total > MAX_CAPTURE_BYTES:
+                raise ValueError(f"command exceeds {MAX_CAPTURE_BYTES} byte output limit")
+            chunks.append(chunk)
+        return b"".join(chunks)
+
+    tasks = [asyncio.create_task(read(proc.stdout)), asyncio.create_task(read(proc.stderr))]
+    try:
+        out, err = await asyncio.gather(*tasks)
+        await proc.wait()
+        return out, err
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 class Params(BaseModel):
@@ -35,7 +62,7 @@ class Bash(Tool[Params]):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            stdout, stderr = await asyncio.wait_for(capture_bounded(proc), timeout=timeout)
         except TimeoutError:
             if proc is not None:
                 await kill_process_tree(proc)
@@ -45,6 +72,8 @@ class Bash(Tool[Params]):
                 await kill_process_tree(proc)
             raise
         except Exception as e:
+            if proc is not None:
+                await kill_process_tree(proc)
             return ToolResult(output=f"Error executing command: {e}", is_error=True)
         finally:
             release_process(proc)

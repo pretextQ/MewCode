@@ -9,6 +9,29 @@ from mewcode.tools import ToolRegistry
 
 
 @pytest.mark.asyncio
+async def test_large_file_read_rejected_before_loading(tmp_path):
+    from mewcode.tools.read_file import MAX_READ_BYTES, Params, ReadFile
+
+    path = tmp_path / "large"
+    with path.open("wb") as stream:
+        stream.truncate(MAX_READ_BYTES + 1)
+    result = await ReadFile().execute(Params(file_path=str(path)))
+    assert result.is_error and "limit" in result.output
+
+
+@pytest.mark.asyncio
+async def test_bash_output_limit_kills_runaway_process(monkeypatch):
+    import sys
+
+    from mewcode.tools.bash import Bash, Params
+
+    monkeypatch.setattr("mewcode.tools.bash.MAX_CAPTURE_BYTES", 1024)
+    command = f'"{sys.executable}" -c "import sys; sys.stdout.write(chr(120)*100000)"'
+    result = await Bash().execute(Params(command=command))
+    assert result.is_error and "output limit" in result.output
+
+
+@pytest.mark.asyncio
 async def test_sandbox_negative_probe_expires(tmp_path, monkeypatch):
     from unittest.mock import AsyncMock
 

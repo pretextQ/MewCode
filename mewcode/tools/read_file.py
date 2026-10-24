@@ -12,6 +12,8 @@ if TYPE_CHECKING:
     from mewcode.cache import FileCache
     from mewcode.tools.file_state_cache import FileStateCache
 
+MAX_READ_BYTES = 2_097_152
+
 
 class Params(BaseModel):
     file_path: str = Field(description="Absolute or relative path to the file to read")
@@ -42,12 +44,14 @@ class ReadFile(Tool[Params]):
         resolved = str(path.resolve())
 
         try:
+            if path.stat().st_size > MAX_READ_BYTES:
+                return ToolResult(output=f"Error: file exceeds {MAX_READ_BYTES} byte read limit", is_error=True)
             text = self._cache.get(resolved) if self._cache is not None else None
             if text is None:
                 import asyncio
 
                 from mewcode.tools.base import read_text_preserve
-                text = await asyncio.to_thread(read_text_preserve, path)
+                text = await asyncio.to_thread(read_text_preserve, path, MAX_READ_BYTES)
                 if self._cache is not None:
                     self._cache.put(resolved, text)
         except Exception as e:
