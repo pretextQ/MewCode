@@ -859,13 +859,28 @@ class ExecutionChain:
                 await self._event(job.id, "agent_prompt", prompt)
             await self._notify(job.id, "fixing", f"agent run attempt {attempt}")
 
+            attempt_usage = [0, 0]
+            record_event = self._make_on_event(job)
+
+            def on_attempt_event(
+                event: dict[str, Any], usage_counts: list[int] = attempt_usage,
+                emit: Callable[[dict[str, Any]], None] = record_event,
+            ) -> None:
+                if event.get("type") == "usage":
+                    usage = event.get("usage") or {}
+                    usage_counts[0] = max(usage_counts[0], int(usage.get("inputTokens", 0)))
+                    usage_counts[1] = max(usage_counts[1], int(usage.get("outputTokens", 0)))
+                emit(event)
+
             try:
                 # Job objects are snapshots: refresh cumulative usage before
                 # every attempt, including retries following a failed CI gate.
                 job = await self.store.get_or_raise(job.id)
-                outcome = await self.runner.run(job, work_dir, prompt, self._make_on_event(job))
+                outcome = await self.runner.run(job, work_dir, prompt, on_attempt_event)
             except TokenBudgetExceeded as e:
-                await self.store.add_usage(job.id, e.input_tokens, e.output_tokens)
+                await self.store.add_usage(
+                    job.id, max(e.input_tokens, attempt_usage[0]), max(e.output_tokens, attempt_usage[1])
+                )
                 await self._event(
                     job.id, "agent_finished",
                     f"attempt={attempt} budget_exceeded=true tokens_in={e.input_tokens} tokens_out={e.output_tokens}",
@@ -873,8 +888,10 @@ class ExecutionChain:
                 await self._escalate(job.id, f"cost guard: {e}")
                 return None
             except asyncio.CancelledError:
+                await self.store.add_usage(job.id, *attempt_usage)
                 raise
             except Exception as e:
+                await self.store.add_usage(job.id, *attempt_usage)
                 await self._event(job.id, "agent_error", f"{type(e).__name__}: {e}")
                 await self._escalate(job.id, f"agent run failed: {type(e).__name__}: {e}")
                 return None
