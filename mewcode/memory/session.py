@@ -453,7 +453,7 @@ async def generate_session_summary(
                 )
 
     summary_conv = ConversationManager()
-    summary_conv.history = [Message(role="user", content=SESSION_SUMMARY_PROMPT)]
+    summary_conv.history = [Message(role="user", content="以下是需要总结的对话：")]
     for msg in recent:
         summary_conv.history.append(msg)
     summary_conv.history.append(

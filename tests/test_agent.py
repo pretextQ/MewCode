@@ -809,3 +809,20 @@ def test_fork_tool_results_survive_parent_compaction(tmp_path):
     copied = child.replacement_state.replacements["tool"]
     assert copied != str(source)
     assert (child.session_dir / "tool.txt").read_text() == "large result"
+
+
+def test_iteration_reminders_are_replaced_and_not_persisted():
+    from pathlib import Path
+    from tempfile import TemporaryDirectory
+
+    from mewcode.context import apply_tool_result_budget, create_replacement_state
+
+    conv = ConversationManager()
+    conv.add_user_message("hello")
+    for i in range(100):
+        conv.set_system_reminder("plan", f"iteration {i}")
+    assert len(conv.history) == 1
+    assert len(conv.get_messages()) == 2
+    with TemporaryDirectory() as directory:
+        api, _ = apply_tool_result_budget(conv, Path(directory), create_replacement_state())
+        assert api.get_messages()[-1].content == conv.get_messages()[-1].content

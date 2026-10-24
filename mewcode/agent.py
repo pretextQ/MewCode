@@ -503,7 +503,9 @@ class Agent:
                 plan_reminder = build_plan_mode_reminder(
                     plan_path, plan_exists, iteration
                 )
-                conversation.add_system_reminder(plan_reminder)
+                conversation.set_system_reminder("plan", plan_reminder)
+            else:
+                conversation.transient_reminders.pop("plan", None)
 
             if self.hook_engine:
                 for note in self.hook_engine.drain_notifications():
@@ -513,12 +515,15 @@ class Agent:
 
             deferred_names = self.registry.get_deferred_tool_names()
             if deferred_names:
-                conversation.add_system_reminder(
+                conversation.set_system_reminder(
+                    "deferred-tools",
                     "The following deferred tools are available via ToolSearch. "
                     "Their schemas are NOT loaded - use ToolSearch with "
                     'query "select:<name>[,<name>...]" to load tool schemas before calling them:\n'
                     + "\n".join(deferred_names)
                 )
+            else:
+                conversation.transient_reminders.pop("deferred-tools", None)
 
             tools = self.registry.get_all_schemas(self.protocol)
 
@@ -1324,12 +1329,15 @@ class Agent:
 
             deferred_names = self.registry.get_deferred_tool_names()
             if deferred_names:
-                conversation.add_system_reminder(
+                conversation.set_system_reminder(
+                    "deferred-tools",
                     "The following deferred tools are available via ToolSearch. "
                     "Their schemas are NOT loaded - use ToolSearch with "
                     'query "select:<name>[,<name>...]" to load tool schemas before calling them:\n'
                     + "\n".join(deferred_names)
                 )
+            else:
+                conversation.transient_reminders.pop("deferred-tools", None)
 
             api_conv, _new_records = apply_tool_result_budget(
                 conversation, self.session_dir, self.replacement_state

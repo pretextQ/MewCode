@@ -125,7 +125,6 @@ class MemoryManager:
             return
 
         prompt = (
-            f"{MEMORY_EXTRACTION_PROMPT}\n\n"
             f"## 当前 memories.md\n"
             f"{current_memories if current_memories else '(空)'}\n\n"
             f"## 最近对话\n"
@@ -139,7 +138,7 @@ class MemoryManager:
         collected = ""
         try:
             async for event in client.stream(
-                extract_conv, system="你是一个记忆提取助手。"
+                extract_conv, system=MEMORY_EXTRACTION_PROMPT
             ):
                 if isinstance(event, TextDelta):
                     collected += event.text

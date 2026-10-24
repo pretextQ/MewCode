@@ -409,6 +409,7 @@ def apply_tool_result_budget(
 
     new_conv = ConversationManager()
     new_conv.history = new_history
+    new_conv.transient_reminders = dict(conversation.transient_reminders)
     new_conv.env_injected = conversation.env_injected
     new_conv.ltm_injected = conversation.ltm_injected
     new_conv.last_input_tokens = conversation.last_input_tokens
@@ -797,7 +798,7 @@ async def auto_compact(
 
     summary_conv = ConversationManager()
     summary_conv.history = [
-        Message(role="user", content=SUMMARY_PROMPT),
+        Message(role="user", content="以下是需要总结的对话："),
     ]
     # 只摘要前缀；保留的尾部在下面重建时原样拼回。
     for msg in to_summarize:
