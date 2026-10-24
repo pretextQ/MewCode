@@ -8,6 +8,16 @@ from mewcode.agents.tool_filter import resolve_agent_tools
 from mewcode.tools import ToolRegistry
 
 
+def test_duplicate_mcp_configs_are_rejected_before_mutation():
+    from mewcode.config import MCPServerConfig
+    from mewcode.mcp.manager import MCPManager
+
+    manager = MCPManager()
+    with pytest.raises(ValueError, match="duplicate"):
+        manager.load_configs([MCPServerConfig(name="same"), MCPServerConfig(name="same")])
+    assert manager._configs == {}
+
+
 def test_legacy_chinese_output_decodes(monkeypatch):
     from mewcode.tools.base import decode_output
 

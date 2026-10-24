@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 from mewcode.tools.base import Tool
@@ -15,6 +16,8 @@ class ToolRegistry:
         self._discovered: set[str] = set()
 
     def register(self, tool: Tool) -> None:
+        if tool.name in self._tools and self._tools[tool.name] is not tool:
+            logging.getLogger(__name__).warning("Replacing registered tool '%s'", tool.name)
         self._tools[tool.name] = tool
 
     def bind_work_dir(self, work_dir: str) -> ToolRegistry:
