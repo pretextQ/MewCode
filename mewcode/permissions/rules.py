@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from fnmatch import fnmatch
+from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any, Literal
 
@@ -45,7 +45,8 @@ class Rule:
         if (self.effect == "allow" and tool_name == "Bash"
                 and any(ch in content for ch in ("&", ";", "|", "\n", "\r", ">", "<", "`", "$", "%", "!", "^"))):
             return False
-        return fnmatch(content, self.pattern)
+        # Rule text has explicit, platform-independent case and slash semantics.
+        return fnmatchcase(content, self.pattern)
 
 
 def literal_pattern(content: str) -> str:

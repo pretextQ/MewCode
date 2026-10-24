@@ -8,6 +8,15 @@ from mewcode.agents.tool_filter import resolve_agent_tools
 from mewcode.tools import ToolRegistry
 
 
+def test_rule_text_matching_is_platform_independent():
+    from mewcode.permissions.rules import Rule
+
+    rule = Rule("Bash", "Git status", "deny")
+    assert rule.matches("Bash", "Git status")
+    assert not rule.matches("Bash", "git status")
+    assert not Rule("ReadFile", "src/*.py", "allow").matches("ReadFile", r"src\file.py")
+
+
 def test_permission_rules_cache_reloads_after_change(tmp_path, monkeypatch):
     import mewcode.permissions.rules as module
 
