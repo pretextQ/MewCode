@@ -9,9 +9,9 @@ dependencies = [
     "openai>=1.60.0",
     "pyyaml>=6.0",
     "pydantic>=2.0",
-    "mcp>=1.12.0",
+    "mcp>=1.30.0,<2",
     "httpx>=0.27.0",
-    "aiohttp>=3.14.3",
+    "aiohttp>=3.14.5",
 ]
 
 [project.scripts]
@@ -36,6 +36,7 @@ dev = [
     "mypy>=1.14.0",
     "types-pyyaml>=6.0",
     "pytest-timeout>=2.3",
+    "pip-audit>=2.10.1",
 ]
 
 [tool.ruff]
