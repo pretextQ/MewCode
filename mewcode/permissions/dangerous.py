@@ -65,7 +65,7 @@ def is_safe_command(command: str) -> bool:
     trimmed = command.strip()
     if not trimmed:
         return False
-    for ch in ("|", ";", "&", ">", "<", "$(", "`", "\n", "\r"):
+    for ch in ("|", ";", "&", ">", "<", "$", "%", "!", "^", "`", "\n", "\r", "//", "\\\\"):
         if ch in trimmed:
             return False
     if _UNSAFE_PATH_RE.search(trimmed):

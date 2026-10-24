@@ -19,6 +19,7 @@
 """
 from __future__ import annotations
 
+
 import asyncio
 import os
 import sys
@@ -1350,3 +1351,15 @@ def _conv(text: str) -> ConversationManager:
     conv = ConversationManager()
     conv.add_user_message(text)
     return conv
+
+
+@pytest.mark.parametrize("command", [
+    r"sort %USERPROFILE%\.ssh\id_rsa", "dir /s /b %USERPROFILE%",
+    "sort //server/share/secret.txt", r"sort \\server\share\secret.txt",
+    "cat $HOME/.ssh/id_rsa", "echo !SECRET!", "echo ^& other",
+])
+def test_shell_expansion_and_unc_require_confirmation(command):
+    from mewcode.permissions.dangerous import is_safe_command
+
+    assert not is_safe_command(command)
+
