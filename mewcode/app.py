@@ -7,6 +7,7 @@ import random
 import re
 import time as _time
 from collections.abc import Coroutine
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -648,7 +649,11 @@ class MewCodeApp(App):
     def _make_banner(model: str = "", work_dir: str = "") -> RichText:
         t = RichText()
         t.append(" /\\_/\\    ", style="bold color(99)")
-        t.append("MewCode v0.1.0\n", style="color(242)")
+        try:
+            release = "v" + version("mewcode")
+        except PackageNotFoundError:
+            release = "development"
+        t.append(f"MewCode {release}\n", style="color(242)")
         t.append("( o.o )   ", style="bold color(99)")
         t.append(f"{model}\n" if model else "\n", style="color(242)")
         t.append(" > ^ <    ", style="bold color(99)")
