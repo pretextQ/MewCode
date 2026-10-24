@@ -224,3 +224,16 @@ async def test_failed_worktree_agent_always_attempts_safe_cleanup(tmp_path, monk
     result = await tool._execute_with_worktree(AgentToolParams(prompt="fix", description="test"))
     assert result.is_error and "preserved" in result.output
     manager.auto_cleanup.assert_awaited_once()
+
+
+def test_plugin_agents_are_loaded_and_discovered(tmp_path, monkeypatch):
+    from mewcode.agents.loader import AgentLoader
+
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "user")
+    folder = tmp_path / "plugin"
+    folder.mkdir()
+    loader = AgentLoader(str(tmp_path))
+    loader.register_plugin_source(folder)
+    (folder / "agent.md").write_text("---\nname: plugin-agent\ndescription: plugin\n---\nbody", encoding="utf-8")
+    agent = loader.get("plugin-agent")
+    assert agent and agent.source == "plugin"

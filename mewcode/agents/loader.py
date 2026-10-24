@@ -26,6 +26,7 @@ class AgentLoader:
         self._agents: dict[str, AgentDef] = {}
         self._file_cache: dict[Path, tuple[tuple[int, int, str], AgentDef]] = {}
         self._directory_signature: tuple = ()
+        self._plugin_sources: list[Path] = []
 
 
     def _scan_directory(self, path: Path, source: str) -> list[AgentDef]:
@@ -117,7 +118,10 @@ class AgentLoader:
             if agent_def.agent_type not in seen:
                 seen[agent_def.agent_type] = agent_def
 
-        # 优先级 4：插件（保留，未实现）
+        # 插件不覆盖项目、用户或内置定义。
+        for path in self._plugin_sources:
+            for agent_def in self._scan_directory(path, "plugin"):
+                seen.setdefault(agent_def.agent_type, agent_def)
 
         self._agents = seen
         self._directory_signature = self._directories_state()
@@ -126,7 +130,9 @@ class AgentLoader:
 
     def _directories_state(self) -> tuple:
         signatures = []
-        for path in (Path(self._work_dir) / PROJECT_AGENTS_DIR, Path(USER_AGENTS_DIR).expanduser()):
+        for path in (
+            Path(self._work_dir) / PROJECT_AGENTS_DIR, Path(USER_AGENTS_DIR).expanduser(), *self._plugin_sources,
+        ):
             try:
                 signatures.append((str(path), tuple(sorted(p.name for p in path.glob("*.md")))))
             except OSError:
@@ -164,4 +170,9 @@ class AgentLoader:
         return [(ad.agent_type, ad.when_to_use) for ad in self._agents.values()]
 
     def register_plugin_source(self, path: Path) -> None:
-        pass
+        path = path.resolve()
+        if not path.is_dir():
+            raise ValueError(f"agent plugin source is not a directory: {path}")
+        if path not in self._plugin_sources:
+            self._plugin_sources.append(path)
+            self.load_all()
