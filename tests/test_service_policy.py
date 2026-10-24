@@ -374,7 +374,7 @@ async def chain_env(
     bases: list[str] = []
 
     class Manager:
-        async def create(self, job_id: str, base_branch: str | None = None) -> Any:
+        async def create(self, job_id: str, base_branch: str | None = None, *, reuse_existing: bool = False) -> Any:
             bases.append(base_branch or "")
             wd = init_worktree_dir(tmp_path, job_id)
             return SimpleNamespace(path=str(wd), branch=base_branch or "")
