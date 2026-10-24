@@ -12,7 +12,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from mewcode.client import LLMClient
+from mewcode.client import ContextOverflowError, LLMClient
 from mewcode.context import (
     CompactBoundary,
     CompactCircuitBreaker,
@@ -530,13 +530,7 @@ class Agent:
                 append_replacement_records(self.session_dir, _new_records)
 
             collector = StreamCollector()
-            llm_stream = self._stream_with_retry(
-                # 默认参数绑定当前迭代的循环变量，防止重试时读到下一迭代值
-                lambda conv=api_conv, sys=system, t=tools: self.client.stream(
-                    conv, system=sys, tools=t
-                )
-            )
-            async for event in collector.consume(llm_stream):
+            async for event in self._collect_with_context_recovery(conversation, api_conv, system, tools, collector):
                 yield event
 
             response = collector.response
@@ -1198,6 +1192,41 @@ class Agent:
             )
         return ErrorEvent(message=result or "压缩失败：对话历史为空或未达到压缩条件")
 
+    async def _collect_with_context_recovery(
+        self, conversation: ConversationManager, api_conv: ConversationManager,
+        system: str, tools: list[dict[str, Any]], collector: StreamCollector,
+    ) -> AsyncIterator[AgentEvent]:
+        for attempt in range(2):
+            try:
+                stream = self._stream_with_retry(
+                    lambda conv=api_conv: self.client.stream(conv, system=system, tools=tools)
+                )
+                async for event in collector.consume(stream):
+                    yield event
+                return
+            except ContextOverflowError:
+                if attempt:
+                    raise
+                result = await auto_compact(
+                    conversation, self.client, self.context_window, self.session_dir,
+                    protocol=self.protocol, manual=True, breaker=self.compact_breaker,
+                    recovery=self.recovery_state, tool_schemas=tools, transcript_path=self._transcript_path,
+                )
+                if not isinstance(result, CompactEvent):
+                    raise
+                yield CompactNotification(result.before_tokens, "上下文溢出后已压缩，重试一次", result.boundary)
+                conversation.inject_environment(build_environment_context(
+                    self.work_dir, self.active_skills, self._skill_catalog, self._agent_catalog
+                ))
+                memory = self.memory_manager.load() if self.memory_manager else ""
+                conversation.inject_long_term_memory(self.instructions_content, memory)
+                if self.memory_manager:
+                    self.memory_manager.reset_extraction_cursor()
+                api_conv, records = apply_tool_result_budget(conversation, self.session_dir, self.replacement_state)
+                if records:
+                    append_replacement_records(self.session_dir, records)
+                collector.response = LLMResponse()
+
     async def run_to_completion(
         self, task: str, conversation: ConversationManager | None = None,
         event_callback: Callable[[dict[str, Any]], None] | None = None,
@@ -1291,13 +1320,7 @@ class Agent:
                 append_replacement_records(self.session_dir, _new_records)
 
             collector = StreamCollector()
-            llm_stream = self._stream_with_retry(
-                # 默认参数绑定当前迭代的循环变量，防止重试时读到下一迭代值
-                lambda conv=api_conv, sys=system, t=tools: self.client.stream(
-                    conv, system=sys, tools=t
-                )
-            )
-            async for _event in collector.consume(llm_stream):
+            async for _event in self._collect_with_context_recovery(conversation, api_conv, system, tools, collector):
                 pass
 
             response = collector.response
