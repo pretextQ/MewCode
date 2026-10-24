@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
 import time
 import uuid
 from collections.abc import AsyncIterator, Callable, Coroutine
@@ -280,7 +281,8 @@ class Agent:
             permission_checker.mode if permission_checker else PermissionMode.DEFAULT
         )
         self.context_window = context_window
-        self.session_dir = ensure_session_dir(work_dir)
+        self.session_dir = ensure_session_dir(work_dir) / uuid.uuid4().hex
+        self.session_dir.mkdir(parents=True, exist_ok=True)
         self.compact_breaker = CompactCircuitBreaker()
         self.replacement_state: ContentReplacementState = create_replacement_state()
         # 保存重建工作上下文所需的快照，在 Layer 2 压缩对话后使用：
@@ -1191,6 +1193,22 @@ class Agent:
                 boundary=result.boundary,
             )
         return ErrorEvent(message=result or "压缩失败：对话历史为空或未达到压缩条件")
+
+    def inherit_tool_results(self, parent: Agent, conversation: ConversationManager) -> None:
+        """Copy frozen fork references so either agent may compact independently."""
+        from mewcode.context import clone_replacement_state
+
+        old, new = str(parent.session_dir), str(self.session_dir)
+        for source in parent.session_dir.glob("*.txt"):
+            shutil.copy2(source, self.session_dir / source.name)
+        self.replacement_state = clone_replacement_state(parent.replacement_state)
+        self.replacement_state.replacements = {
+            key: value.replace(old, new) for key, value in self.replacement_state.replacements.items()
+        }
+        for message in conversation.history:
+            message.content = message.content.replace(old, new)
+            for result in message.tool_results:
+                result.content = result.content.replace(old, new)
 
     async def _collect_with_context_recovery(
         self, conversation: ConversationManager, api_conv: ConversationManager,

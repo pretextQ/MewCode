@@ -792,3 +792,20 @@ async def test_context_overflow_compacts_and_retries_once(tmp_path, monkeypatch,
         await run()
     assert client.calls == 2
     assert manuals == [True]
+
+
+def test_fork_tool_results_survive_parent_compaction(tmp_path):
+    from mewcode.context import cleanup_tool_results
+
+    parent = Agent(MockLLMClient([]), create_default_registry(), "anthropic", work_dir=str(tmp_path))
+    child = Agent(MockLLMClient([]), create_default_registry(), "anthropic", work_dir=str(tmp_path))
+    assert parent.session_dir != child.session_dir
+    source = parent.session_dir / "tool.txt"
+    source.write_text("large result", encoding="utf-8")
+    parent.replacement_state.replacements["tool"] = str(source)
+    conv = ConversationManager()
+    child.inherit_tool_results(parent, conv)
+    cleanup_tool_results(parent.session_dir)
+    copied = child.replacement_state.replacements["tool"]
+    assert copied != str(source)
+    assert (child.session_dir / "tool.txt").read_text() == "large result"
