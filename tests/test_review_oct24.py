@@ -187,3 +187,22 @@ def test_file_caches_are_bounded_and_eviction_requires_reread(tmp_path):
     states.record("old", "unused", 1)
     states.record("new", "unused", 2)
     assert not states.check("old")[0]
+
+
+def test_agent_loader_discovers_new_files_and_caches_parsing(tmp_path, monkeypatch):
+    from mewcode.agents.loader import AgentLoader
+
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "user")
+    loader = AgentLoader(str(tmp_path))
+    loader.load_all()
+    folder = tmp_path / ".mewcode" / "agents"
+    folder.mkdir(parents=True)
+    path = folder / "new.md"
+    path.write_text("---\nname: fresh\ndescription: original\n---\nbody", encoding="utf-8")
+    original = loader.get("fresh")
+    assert original and original.when_to_use == "original"
+    assert loader.get("fresh") is original
+    path.write_text("---\nname: fresh\ndescription: updated description\n---\nbody", encoding="utf-8")
+    updated = loader.get("fresh")
+    assert updated and updated.when_to_use == "updated description"
+    assert updated.file_path == path

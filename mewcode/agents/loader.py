@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.resources
 import logging
 from pathlib import Path
@@ -23,6 +24,8 @@ class AgentLoader:
         self._work_dir = work_dir
         self._enable_verification = enable_verification
         self._agents: dict[str, AgentDef] = {}
+        self._file_cache: dict[Path, tuple[tuple[int, int, str], AgentDef]] = {}
+        self._directory_signature: tuple = ()
 
 
     def _scan_directory(self, path: Path, source: str) -> list[AgentDef]:
@@ -34,11 +37,18 @@ class AgentLoader:
             if not entry.is_file() or entry.suffix != ".md":
                 continue
             try:
-                agent_def = parse_agent_file(entry)
-                agent_def.source = source
-                agent_def.file_path = entry
+                stat = entry.stat()
+                signature = (stat.st_mtime_ns, stat.st_size, hashlib.sha256(entry.read_bytes()).hexdigest())
+                cached = self._file_cache.get(entry)
+                if cached and cached[0] == signature:
+                    agent_def = cached[1]
+                else:
+                    agent_def = parse_agent_file(entry)
+                    agent_def.source = source
+                    agent_def.file_path = entry
+                    self._file_cache[entry] = (signature, agent_def)
                 results.append(agent_def)
-            except AgentParseError as e:
+            except (AgentParseError, OSError) as e:
                 log.warning("Skipping agent file %s: %s", entry, e)
         return results
 
@@ -110,34 +120,48 @@ class AgentLoader:
         # 优先级 4：插件（保留，未实现）
 
         self._agents = seen
+        self._directory_signature = self._directories_state()
         return seen
 
 
-    def get(self, agent_type: str) -> AgentDef | None:
-        cached = self._agents.get(agent_type)
-        if cached is None:
-            return None
-
-        # 从文件热重载
-        if cached.file_path is not None and cached.file_path.exists():
+    def _directories_state(self) -> tuple:
+        signatures = []
+        for path in (Path(self._work_dir) / PROJECT_AGENTS_DIR, Path(USER_AGENTS_DIR).expanduser()):
             try:
-                reloaded = parse_agent_file(cached.file_path)
-                reloaded.source = cached.source
-                self._agents[agent_type] = reloaded
-                return reloaded
-            except AgentParseError as e:
-                log.warning(
-                    "Hot reload failed for %s, using cached: %s",
-                    agent_type,
-                    e,
-                )
-        return cached
+                signatures.append((str(path), tuple(sorted(p.name for p in path.glob("*.md")))))
+            except OSError:
+                signatures.append((str(path), None))
+        return tuple(signatures)
 
+    def _refresh_catalog(self) -> None:
+        if self._directories_state() != self._directory_signature:
+            self.load_all()
+
+    def get(self, agent_type: str) -> AgentDef | None:
+        self._refresh_catalog()
+        cached = self._agents.get(agent_type)
+        if cached is None or cached.file_path is None:
+            return cached
+        path = cached.file_path
+        try:
+            stat = path.stat()
+            entry = self._file_cache.get(path)
+            signature = (stat.st_mtime_ns, stat.st_size, hashlib.sha256(path.read_bytes()).hexdigest())
+            if entry and entry[0] == signature:
+                return entry[1]
+            reloaded = parse_agent_file(path)
+            reloaded.source = cached.source
+            reloaded.file_path = path
+            self._file_cache[path] = (signature, reloaded)
+            self._agents[agent_type] = reloaded
+            return reloaded
+        except (OSError, AgentParseError) as e:
+            log.warning("Hot reload failed for %s: %s", agent_type, e)
+            return cached
 
     def list_agents(self) -> list[tuple[str, str]]:
-        return [
-            (ad.agent_type, ad.when_to_use) for ad in self._agents.values()
-        ]
+        self._refresh_catalog()
+        return [(ad.agent_type, ad.when_to_use) for ad in self._agents.values()]
 
     def register_plugin_source(self, path: Path) -> None:
         pass
