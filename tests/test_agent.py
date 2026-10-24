@@ -721,3 +721,29 @@ async def test_max_tokens_recovery_with_empty_text_skips_empty_assistant():
         assert not (m["role"] == "assistant" and m["content"] == ""), (
             f"empty assistant message in history: {m}"
         )
+
+
+@pytest.mark.asyncio
+async def test_completion_preserves_thinking_across_tool_roundtrip(tmp_path):
+    from mewcode.tools.base import ThinkingComplete
+
+    class StrictClient(MockLLMClient):
+        async def stream(self, conversation, system="", tools=None):
+            if self._call_index == 1:
+                assistants = [m for m in conversation.history if m.role == "assistant"]
+                assert assistants[-1].thinking_blocks[0].thinking == "reasoning"
+                assert assistants[-1].thinking_blocks[0].signature == "signed"
+                wire = build_anthropic_messages(conversation.history)
+                assert any(b.get("signature") == "signed" for m in wire for b in m["content"] if isinstance(b, dict))
+            async for event in super().stream(conversation, system, tools):
+                yield event
+
+    client = StrictClient([
+        [ThinkingComplete("reasoning", "signed"),
+         ToolCallComplete("t1", "ReadFile", {"file_path": str(tmp_path / "missing")}), StreamEnd("tool_use")],
+        [ThinkingComplete("final thought", "final-signature"), TextDelta("done"), StreamEnd("end_turn")],
+    ])
+    conv = ConversationManager()
+    agent = Agent(client, create_default_registry(), "anthropic", work_dir=str(tmp_path))
+    assert await agent.run_to_completion("read", conversation=conv) == "done"
+    assert conv.history[-1].thinking_blocks[0].signature == "final-signature"

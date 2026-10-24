@@ -1301,6 +1301,10 @@ class Agent:
                 pass
 
             response = collector.response
+            conv_thinking = [
+                ConvThinkingBlock(thinking=tb.thinking, signature=tb.signature)
+                for tb in response.thinking_blocks
+            ]
             self.total_input_tokens += response.input_tokens
             self.total_output_tokens += response.output_tokens
 
@@ -1328,7 +1332,7 @@ class Agent:
             )
 
             if not response.tool_calls:
-                conversation.add_assistant_message(response.text)
+                conversation.add_assistant_message(response.text, thinking_blocks=conv_thinking)
                 if self.file_history is not None:
                     summary = response.text[:60] + "..." if len(response.text) > 60 else response.text
                     self.file_history.make_snapshot(len(conversation.history), summary)
@@ -1342,7 +1346,7 @@ class Agent:
                 )
                 for tc in response.tool_calls
             ]
-            conversation.add_assistant_message(response.text, tool_uses)
+            conversation.add_assistant_message(response.text, tool_uses, thinking_blocks=conv_thinking)
             # assistant 回复已在历史中，锚定实际用量；下一轮迭代只需对
             # 下方追加的 tool results 做字符估算。
             conversation.record_usage_anchor(
