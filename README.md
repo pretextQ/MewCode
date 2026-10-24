@@ -258,3 +258,5 @@ Windows 是一等公民运行平台，已知边界（GBK 编码读取、行尾�
 见 [guides/windows-platform-notes.md](guides/windows-platform-notes.md)。
 权限分层语义见 [guides/permission-semantics.md](guides/permission-semantics.md)，
 hook stdin JSON 契约见 [guides/hook-contract.md](guides/hook-contract.md)。
+
+本轮审查修复、提交映射与验证边界见 [维护交接](guides/maintenance.md)。
