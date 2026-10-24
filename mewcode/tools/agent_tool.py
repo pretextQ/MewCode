@@ -599,13 +599,8 @@ class AgentTool(Tool[AgentToolParams]):
                 is_error=True,
             )
 
-        from mewcode.agent import Agent as AgentClass
         from mewcode.agents.parser import AgentDef
-        from mewcode.agents.tool_filter import resolve_agent_tools
-        from mewcode.worktree.integration import (
-            build_worktree_notice,
-            generate_worktree_name,
-        )
+        from mewcode.worktree.integration import generate_worktree_name
 
         definition: AgentDef | None = None
         if p.subagent_type:
@@ -636,6 +631,26 @@ class AgentTool(Tool[AgentToolParams]):
                 output=f"Failed to create worktree: {e}",
                 is_error=True,
             )
+
+        result: ToolResult | None = None
+        try:
+            result = await self._run_in_worktree(p, definition, wt)
+        except Exception as e:
+            result = ToolResult(output=f"Sub-agent setup failed: {e}", is_error=True)
+        finally:
+            try:
+                cleanup = await self._worktree_manager.auto_cleanup(wt_name, wt.head_commit)
+                if cleanup.kept and result is not None:
+                    result.output += f"\n[Worktree preserved at {cleanup.path}, branch {cleanup.branch}]"
+            except Exception:
+                log.exception("failed to clean up sub-agent worktree %s", wt.path)
+        assert result is not None
+        return result
+
+    async def _run_in_worktree(self, p: AgentToolParams, definition: AgentDef, wt: Any) -> ToolResult:
+        from mewcode.agent import Agent as AgentClass
+        from mewcode.agents.tool_filter import resolve_agent_tools
+        from mewcode.worktree.integration import build_worktree_notice
 
         notice = build_worktree_notice(self._parent_agent.work_dir, wt.path)
         task = notice + "\n\n" + p.prompt
@@ -693,12 +708,6 @@ class AgentTool(Tool[AgentToolParams]):
             output_tokens=sub_agent.total_output_tokens,
         )
         self._trace_manager.complete(trace_node.agent_id, "completed")
-
-        cleanup = await self._worktree_manager.auto_cleanup(wt_name, wt.head_commit)
-        if cleanup.kept:
-            result_text = (result_text or "") + (
-                f"\n[Worktree preserved at {cleanup.path}, branch {cleanup.branch}]"
-            )
 
         return ToolResult(output=result_text or "(sub-agent returned no output)")
 

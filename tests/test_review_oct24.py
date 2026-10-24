@@ -206,3 +206,21 @@ def test_agent_loader_discovers_new_files_and_caches_parsing(tmp_path, monkeypat
     updated = loader.get("fresh")
     assert updated and updated.when_to_use == "updated description"
     assert updated.file_path == path
+
+
+@pytest.mark.asyncio
+async def test_failed_worktree_agent_always_attempts_safe_cleanup(tmp_path, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from mewcode.tools.agent_tool import AgentTool, AgentToolParams
+
+    manager = SimpleNamespace(
+        create=AsyncMock(return_value=SimpleNamespace(path=str(tmp_path), head_commit="sha")),
+        auto_cleanup=AsyncMock(return_value=SimpleNamespace(kept=True, path=str(tmp_path), branch="saved")),
+    )
+    parent = SimpleNamespace(max_iterations=2)
+    tool = AgentTool(None, None, None, parent, worktree_manager=manager)
+    monkeypatch.setattr(tool, "_run_in_worktree", AsyncMock(side_effect=RuntimeError("setup failed")))
+    result = await tool._execute_with_worktree(AgentToolParams(prompt="fix", description="test"))
+    assert result.is_error and "preserved" in result.output
+    manager.auto_cleanup.assert_awaited_once()
