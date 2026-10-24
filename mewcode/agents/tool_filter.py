@@ -5,6 +5,7 @@ from fnmatch import fnmatchcase
 from typing import TYPE_CHECKING
 
 from mewcode.tools import ToolRegistry
+from mewcode.tools.base import Tool
 
 if TYPE_CHECKING:
     from mewcode.agents.parser import AgentDef
@@ -176,7 +177,7 @@ def build_teammate_tools(
                 if name in allowed_set
             }
 
-    coordination_tools = [
+    coordination_tools: list[Tool] = [
         TaskCreateTool(team_manager, team_name, agent_name),
         TaskGetTool(team_manager, team_name),
         TaskListTool(team_manager, team_name),

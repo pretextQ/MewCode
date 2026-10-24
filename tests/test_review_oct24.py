@@ -8,6 +8,16 @@ from mewcode.agents.tool_filter import resolve_agent_tools
 from mewcode.tools import ToolRegistry
 
 
+def test_child_agent_can_rebind_owned_hook_engine(tmp_path):
+    from mewcode.agent import Agent
+    from mewcode.hooks import HookEngine
+
+    parent = Agent(None, ToolRegistry(), "anthropic", work_dir=str(tmp_path), hook_engine=HookEngine([]))
+    child = Agent(None, ToolRegistry(), "anthropic", work_dir=str(tmp_path), hook_engine=parent.hook_engine)
+    assert child.hook_engine.owner == child.agent_id
+    assert parent.hook_engine.owner == parent.agent_id
+
+
 def test_duplicate_mcp_configs_are_rejected_before_mutation():
     from mewcode.config import MCPServerConfig
     from mewcode.mcp.manager import MCPManager

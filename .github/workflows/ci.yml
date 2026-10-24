@@ -32,8 +32,8 @@ jobs:
       - name: Lint (ruff)
         run: uv run ruff check .
 
-      - name: Type check (mypy core packages)
-        run: uv run mypy mewcode/tools mewcode/permissions mewcode/serialization.py
+      - name: Type check (full package)
+        run: uv run mypy mewcode
 
       - name: Run tests
         shell: bash

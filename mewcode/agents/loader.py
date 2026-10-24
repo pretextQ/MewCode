@@ -129,7 +129,7 @@ class AgentLoader:
 
 
     def _directories_state(self) -> tuple:
-        signatures = []
+        signatures: list[tuple[str, tuple[str, ...] | None]] = []
         for path in (
             Path(self._work_dir) / PROJECT_AGENTS_DIR, Path(USER_AGENTS_DIR).expanduser(), *self._plugin_sources,
         ):

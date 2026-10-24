@@ -270,9 +270,9 @@ async def find_relevant_memories(
 
     result: list[RelevantMemory] = []
     for fn in selected_filenames:
-        m = by_key.get(fn)
-        if m is not None:
-            result.append(RelevantMemory(path=m.file_path, mtime_ms=m.mtime_ms))
+        selected = by_key.get(fn)
+        if selected is not None:
+            result.append(RelevantMemory(path=selected.file_path, mtime_ms=selected.mtime_ms))
     return result
 
 
