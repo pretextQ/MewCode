@@ -89,6 +89,49 @@ class TestConcurrency:
 
 class TestFailureConvergence:
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("failure", ["get", "job_started", "escalate"])
+    async def test_store_failure_does_not_kill_consumer(self, tmp_path, monkeypatch, failure):
+        from mewcode.service.jobs import JobStoreError
+
+        async with open_store(tmp_path / "jobs.db") as store:
+            first = await make_job(store, "first")
+            second = await make_job(store, "second")
+            seen = []
+            original_get = store.get
+            original_event = store.add_event
+
+            async def get(job_id):
+                if job_id == first.id and failure in {"get", "escalate"}:
+                    raise JobStoreError("temporary store failure")
+                return await original_get(job_id)
+
+            async def event(job_id, kind, detail=""):
+                if job_id == first.id and kind == "job_started" and failure == "job_started":
+                    raise JobStoreError("temporary event failure")
+                return await original_event(job_id, kind, detail)
+
+            async def handler(job):
+                if job.id == first.id and failure == "escalate":
+                    monkeypatch.setattr(store, "get", get)
+                    raise RuntimeError("handler failed")
+                seen.append(job.id)
+
+            if failure == "get":
+                monkeypatch.setattr(store, "get", get)
+            monkeypatch.setattr(store, "add_event", event)
+            pool = WorkerPool(store, handler, concurrency=1)
+            await pool.start()
+            try:
+                await pool.submit(first.id)
+                await pool.submit(second.id)
+                await asyncio.wait_for(pool._queue.join(), timeout=5)
+                assert seen == [second.id]
+                assert not pool.in_flight
+                assert not pool._consumers[0].done()
+            finally:
+                await pool.stop(drain_timeout=1)
+
+    @pytest.mark.asyncio
     async def test_timeout_escalates_job(self, tmp_path: Path):
         async with open_store(tmp_path / "jobs.db") as store:
             async def handler(job):

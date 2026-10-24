@@ -165,7 +165,12 @@ class WorkerPool:
                 return
             try:
                 await self._process(job_id, index)
+            except Exception:
+                # Store failures can occur before the handler or while recording
+                # its failure. Keep the job recoverable and the consumer alive.
+                log.exception("worker %d: could not process %s; retained for recovery", index, job_id)
             finally:
+                self._in_flight.discard(job_id)
                 self._queue.task_done()
 
     async def _process(self, job_id: str, index: int) -> None:
@@ -266,11 +271,11 @@ class WorkerPool:
             log.error("failed to re-queue %s after a leaked cancellation: %s", job_id, e)
 
     async def _escalate_safely(self, job_id: str, reason: str) -> None:
-        job = await self.store.get(job_id)
-        if job is None or job.is_terminal:
-            log.warning("escalate skipped for %s: %s", job_id, reason)
-            return
         try:
+            job = await self.store.get(job_id)
+            if job is None or job.is_terminal:
+                log.warning("escalate skipped for %s: %s", job_id, reason)
+                return
             await self.store.transition(job_id, "escalate", reason=reason, last_error=reason)
         except JobStoreError as e:
             log.error("failed to escalate %s: %s", job_id, e)
