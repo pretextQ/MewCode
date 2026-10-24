@@ -237,3 +237,14 @@ def test_plugin_agents_are_loaded_and_discovered(tmp_path, monkeypatch):
     (folder / "agent.md").write_text("---\nname: plugin-agent\ndescription: plugin\n---\nbody", encoding="utf-8")
     agent = loader.get("plugin-agent")
     assert agent and agent.source == "plugin"
+
+
+@pytest.mark.asyncio
+async def test_edit_preserves_untouched_mixed_newlines(tmp_path):
+    from mewcode.tools.edit_file import EditFile, Params
+
+    path = tmp_path / "mixed"
+    path.write_bytes(b"first\r\nkeep\nold\r\ntail\n")
+    result = await EditFile().execute(Params(file_path=str(path), old_string="old\n", new_string="new\n"))
+    assert not result.is_error
+    assert path.read_bytes() == b"first\r\nkeep\nnew\r\ntail\n"
