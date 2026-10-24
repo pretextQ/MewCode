@@ -1,6 +1,7 @@
 
 from __future__ import annotations
 
+from fnmatch import fnmatchcase
 from typing import TYPE_CHECKING
 
 from mewcode.tools import ToolRegistry
@@ -78,7 +79,7 @@ PLAN_READONLY_EXTRA_TOOLS: frozenset[str] = frozenset({
 
 
 def _is_mcp_tool(name: str) -> bool:
-    return name.startswith("mcp__")
+    return name.startswith("mcp_")
 
 
 def resolve_agent_tools(
@@ -88,7 +89,7 @@ def resolve_agent_tools(
 ) -> ToolRegistry:
     all_tools = {t.name: t for t in parent_registry.list_tools()}
 
-    # 第 0 层：MCP 工具始终放行，先分离出来再做后续过滤
+    # MCP tools bypass the built-in name lists, but never agent restrictions.
     mcp_tools = {name: tool for name, tool in all_tools.items() if _is_mcp_tool(name)}
     all_tools = {name: tool for name, tool in all_tools.items() if not _is_mcp_tool(name)}
 
@@ -123,7 +124,11 @@ def resolve_agent_tools(
         }
 
     filtered = ToolRegistry()
-    for tool in mcp_tools.values():
+    for name, tool in mcp_tools.items():
+        if any(fnmatchcase(name, pattern) for pattern in definition.disallowed_tools):
+            continue
+        if definition.tools and not any(fnmatchcase(name, pattern) for pattern in definition.tools):
+            continue
         filtered.register(tool)
     for tool in all_tools.values():
         filtered.register(tool)
