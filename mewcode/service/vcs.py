@@ -35,6 +35,10 @@ class VCSError(Exception):
     """VCS 层的基类异常。"""
 
 
+class VCSRetryableError(VCSError):
+    """A temporary transport, server or rate-limit failure."""
+
+
 class VCSAuthError(VCSError):
     """拿不到凭证，或凭证被服务端拒绝。"""
 
@@ -309,18 +313,40 @@ class GitHubVCS:
             "X-GitHub-Api-Version": "2022-11-28",
         }
         url = f"{self.config.api_base.rstrip('/')}{path}"
-        try:
-            async with httpx.AsyncClient(transport=self._transport, timeout=30) as client:
-                response = await client.request(method, url, headers=headers, **kwargs)
-        except httpx.HTTPError as e:
-            raise VCSError(redact(f"github api request failed: {e}", [token])) from e
-        if response.status_code in (401, 403):
-            raise VCSAuthError(redact(f"github api auth failed ({response.status_code})", [token]))
-        if response.status_code >= 400:
-            raise VCSError(
-                redact(f"github api {method} {path} -> {response.status_code}: {response.text[:300]}", [token])
-            )
-        return response.json()
+        # Only safe reads are retried: retrying PR creation after a lost
+        # response could create duplicate external side effects.
+        attempts = 3 if method.upper() == "GET" else 1
+        async with httpx.AsyncClient(transport=self._transport, timeout=30) as client:
+            for attempt in range(attempts):
+                try:
+                    response = await client.request(method, url, headers=headers, **kwargs)
+                except httpx.HTTPError as e:
+                    if attempt + 1 == attempts:
+                        raise VCSRetryableError(redact(f"github api request failed: {e}", [token])) from e
+                else:
+                    limited = response.status_code == 429 or (
+                        response.status_code == 403 and (
+                            "retry-after" in response.headers
+                            or response.headers.get("x-ratelimit-remaining") == "0"
+                            or "rate limit" in response.text.lower()
+                        )
+                    )
+                    if limited or response.status_code >= 500:
+                        if attempt + 1 == attempts:
+                            raise VCSRetryableError(redact(
+                                f"github api temporarily unavailable ({response.status_code}): {response.text[:300]}",
+                                [token],
+                            ))
+                    elif response.status_code in (401, 403):
+                        raise VCSAuthError(f"github api auth failed ({response.status_code})")
+                    elif response.status_code >= 400:
+                        raise VCSError(redact(
+                            f"github api {method} {path} -> {response.status_code}: {response.text[:300]}", [token]
+                        ))
+                    else:
+                        return response.json()
+                await asyncio.sleep(2 ** attempt)
+        raise VCSRetryableError("github api retries exhausted")
 
     async def find_open_pr(self, repo_slug: str, head_branch: str) -> PRInfo | None:
         owner = repo_slug.split("/")[0]
@@ -368,7 +394,10 @@ class GitHubVCS:
         start = asyncio.get_running_loop().time()
 
         while True:
-            status = await self._collect_checks(repo_slug, ref)
+            try:
+                status = await self._collect_checks(repo_slug, ref)
+            except VCSRetryableError as e:
+                status = CheckStatus(state="pending", details=str(e))
             if status.state == "success" or status.is_failure:
                 return status
             now = asyncio.get_running_loop().time()
@@ -382,8 +411,18 @@ class GitHubVCS:
             await asyncio.sleep(interval)
 
     async def _collect_checks(self, repo_slug: str, ref: str) -> CheckStatus:
-        data = await self._api("GET", f"/repos/{repo_slug}/commits/{ref}/check-runs")
-        runs = data.get("check_runs") or []
+        runs = []
+        for page in range(1, 101):
+            data = await self._api("GET", f"/repos/{repo_slug}/commits/{ref}/check-runs",
+                                   params={"per_page": 100, "page": page})
+            batch = data.get("check_runs") or []
+            runs.extend(batch)
+            if len(runs) >= data.get("total_count", len(runs)) and len(batch) < 100:
+                break
+            if not batch:
+                break
+        else:
+            raise VCSRetryableError("too many check pages to verify safely")
         if not runs:
             return CheckStatus(state="none", details="no check runs reported for this commit")
 

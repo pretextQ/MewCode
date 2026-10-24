@@ -584,3 +584,36 @@ class TestPRBodyTimeline:
             ("t", "worktree_ready", "z"),
         ])
         assert [k for _, k, _ in kept] == ["transition", "worktree_ready"]
+
+
+@pytest.mark.asyncio
+async def test_failure_on_later_check_page_cannot_pass_gate():
+    def handler(request):
+        page = int(request.url.params["page"])
+        assert request.url.params["per_page"] == "100"
+        runs = [{"name": "ok", "status": "completed", "conclusion": "success"}] * 100 if page == 1 else [
+            {"name": "late failure", "status": "completed", "conclusion": "failure"}]
+        return httpx.Response(200, json={"total_count": 101, "check_runs": runs})
+
+    status = await make_vcs(handler).poll_checks("acme/demo", "sha")
+    assert status.is_failure and "late failure" in status.details
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("code", [403, 429, 503])
+async def test_transient_read_failure_retried(code, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr("mewcode.service.vcs.asyncio.sleep", AsyncMock())
+    calls = 0
+
+    def handler(request):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(code, headers={"Retry-After": "1"}, json={"message": "rate limit"})
+        return httpx.Response(200, json={"check_runs": [
+            {"name": "test", "status": "completed", "conclusion": "success"}]})
+
+    assert (await make_vcs(handler).poll_checks("acme/demo", "sha")).state == "success"
+    assert calls == 2
