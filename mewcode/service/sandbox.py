@@ -28,6 +28,7 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -37,6 +38,7 @@ from mewcode.processes import create_exec_process, kill_process_tree, release_pr
 log = logging.getLogger(__name__)
 
 PROBE_TIMEOUT = 30
+NEGATIVE_PROBE_TTL = 60
 IMAGE_BUILD_TIMEOUT = 900
 REQUIREMENTS_TIMEOUT = 120
 CONTAINER_STOP_GRACE = 10
@@ -162,14 +164,18 @@ class DockerSandbox:
         self.runtime = runtime_bin or config.runtime or "docker"
         self.work_root = Path(work_root) if work_root else Path(tempfile.gettempdir()) / "mewcode-sandbox"
         self._available: bool | None = None
+        self._checked_at = 0.0
         self._requirements_cache: str = ""
 
     # -- 运行时探测 -------------------------------------------------------
 
     async def available(self) -> bool:
         """容器运行时是否可用（结果缓存；探测失败即视为不可用，不抛异常）。"""
-        if self._available is not None:
+        if self._available is True or (
+            self._available is False and time.monotonic() - self._checked_at < NEGATIVE_PROBE_TTL
+        ):
             return self._available
+        self._checked_at = time.monotonic()
         if shutil.which(self.runtime) is None:
             log.warning("sandbox: runtime '%s' not found on PATH", self.runtime)
             self._available = False

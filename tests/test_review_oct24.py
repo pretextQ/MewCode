@@ -8,6 +8,23 @@ from mewcode.agents.tool_filter import resolve_agent_tools
 from mewcode.tools import ToolRegistry
 
 
+@pytest.mark.asyncio
+async def test_sandbox_negative_probe_expires(tmp_path, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from mewcode.config import SandboxConfig
+    from mewcode.service.sandbox import DockerSandbox
+
+    monkeypatch.setattr("mewcode.service.sandbox.shutil.which", lambda _: "docker")
+    sandbox = DockerSandbox(SandboxConfig(), mewcode_src=str(tmp_path))
+    sandbox._run = AsyncMock(side_effect=[(1, "not ready"), (0, "ready")])
+    assert not await sandbox.available()
+    assert not await sandbox.available()
+    sandbox._checked_at -= 61
+    assert await sandbox.available()
+    assert sandbox._run.await_count == 2
+
+
 def test_failed_atomic_replace_keeps_previous_file(tmp_path, monkeypatch):
     from mewcode.atomic import atomic_write_text
 

@@ -414,7 +414,7 @@ class HeadlessAgentRunner:
         """探测一次并缓存；默认 fail-closed，不隐式切换宿主执行。"""
         if not self.config.sandbox.enabled:
             return False
-        if self._sandbox_decision is None:
+        if self._sandbox_decision is not True:
             available = self.sandbox is not None and await self.sandbox.available()
             self._sandbox_decision = available
             if not available and self.config.sandbox.allow_host_fallback:
