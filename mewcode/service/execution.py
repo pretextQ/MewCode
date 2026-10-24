@@ -784,7 +784,7 @@ class ExecutionChain:
         try:
             manager = self._worktree_manager(repo_root)
             worktree = await manager.create(
-                job.id, base_branch=target_branch or repo.base_branch or "HEAD"
+                job.id, base_branch=target_branch or repo.base_branch or "HEAD", reuse_existing=True
             )
         except Exception as e:
             await self._escalate(job.id, f"worktree creation failed: {type(e).__name__}: {e}")

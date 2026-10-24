@@ -147,6 +147,33 @@ async def make_job(store: JobStore, **payload_overrides):
 
 class TestHappyPath:
     @pytest.mark.asyncio
+    async def test_worker_recovers_with_cached_worktree(self, tmp_path: Path, demo_repo: Path):
+        from mewcode.service.worker import WorkerPool
+
+        async with chain_env(tmp_path, demo_repo, publisher=FakePublisher()) as (store, chain, runner, _):
+            original = runner.run
+            interrupted = False
+
+            async def cancel_once(job, work_dir, prompt, on_event):
+                nonlocal interrupted
+                if not interrupted:
+                    interrupted = True
+                    raise asyncio.CancelledError("leaked cancellation after worktree creation")
+                return await original(job, work_dir, prompt, on_event)
+
+            runner.run = cancel_once
+            job = await make_job(store)
+            pool = WorkerPool(store, chain, concurrency=1)
+            await pool.start()
+            try:
+                await pool.submit(job.id)
+                await asyncio.wait_for(pool._queue.join(), timeout=30)
+            finally:
+                await pool.stop(drain_timeout=1)
+            assert (await store.get_or_raise(job.id)).status == "pr_opened"
+            assert len(runner.calls) == 1
+
+    @pytest.mark.asyncio
     async def test_unavailable_sandbox_escalates_before_host_tests(self, tmp_path: Path, demo_repo: Path):
         from unittest.mock import AsyncMock
 

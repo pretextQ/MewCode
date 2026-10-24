@@ -111,13 +111,17 @@ class WorktreeManager:
     # 创建 worktree
     # ------------------------------------------------------------------
 
-    async def create(self, name: str, base_branch: str = "HEAD") -> Worktree:
+    async def create(self, name: str, base_branch: str = "HEAD", *, reuse_existing: bool = False) -> Worktree:
         async with self._lock:
             err = validate_slug(name)
             if err:
                 raise WorktreeError(err)
 
             if name in self.active:
+                existing = self.active[name]
+                if (reuse_existing and self.read_worktree_head_sha(existing.path) is not None
+                        and await asyncio.to_thread(self._is_registered_worktree, existing.path)):
+                    return existing
                 raise WorktreeError(f"worktree already exists: {name}")
 
             flat_slug = flatten_slug(name)
