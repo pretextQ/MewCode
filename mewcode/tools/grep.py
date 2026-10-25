@@ -7,7 +7,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from mewcode.tools.base import SKIP_DIRS, Tool, ToolResult, search_path_allowed
+from mewcode.tools.base import SKIP_DIRS, Tool, ToolResult, decode_output, search_path_allowed
 
 GREP_MAX_FILE_BYTES = 1_000_000
 GREP_MAX_RESULTS = 200
@@ -31,7 +31,7 @@ def _scan_sync(base: Path, regex: re.Pattern, glob_pattern: str) -> list[str]:
         if b"\x00" in raw:
             # 二进制文件：整体跳过，替代 errors="ignore" 的伪匹配
             continue
-        text = raw.decode("utf-8", errors="replace")
+        text = decode_output(raw)
         for line_num, line in enumerate(text.splitlines(), 1):
             if regex.search(line):
                 rel = file_path.relative_to(base)

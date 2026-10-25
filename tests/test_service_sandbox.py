@@ -307,11 +307,22 @@ class TestImage:
     async def test_build_context_has_no_repo_code(self, tmp_path: Path):
         """构建上下文只放依赖清单——业务代码不进镜像。"""
         sandbox, _ = make_sandbox(tmp_path)
+        original = sandbox._run
+        inspected = False
+
+        async def inspect_build(argv, timeout, cwd=None):
+            nonlocal inspected
+            if argv[1] == "build":
+                inspected = True
+                assert {p.name for p in Path(cwd).iterdir()} == {
+                    "Dockerfile", "mewcode-requirements.txt", "project-requirements.txt",
+                }
+            return await original(argv, timeout, cwd)
+
+        sandbox._run = inspect_build
         await sandbox.ensure_image("demo", str(tmp_path))
-        contexts = list((tmp_path / "sandbox" / "build").glob("*"))
-        assert contexts, "no build context created"
-        files = sorted(p.name for p in contexts[0].iterdir())
-        assert files == ["Dockerfile", "mewcode-requirements.txt", "project-requirements.txt"]
+        assert inspected
+        assert list((tmp_path / "sandbox" / "build").glob("*")) == []
 
 
 # =========================================================================

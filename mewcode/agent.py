@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
 import time
 import uuid
 from collections.abc import AsyncIterator, Callable, Coroutine
@@ -12,7 +13,8 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from mewcode.client import LLMClient
+from mewcode.cache import FileCache
+from mewcode.client import ContextOverflowError, LLMClient
 from mewcode.context import (
     CompactBoundary,
     CompactCircuitBreaker,
@@ -28,6 +30,7 @@ from mewcode.context import (
 from mewcode.conversation import ConversationManager, ToolResultBlock, ToolUseBlock
 from mewcode.conversation import ThinkingBlock as ConvThinkingBlock
 from mewcode.hooks import HookContext, HookEngine
+from mewcode.hooks.engine import OwnedHookEngine
 from mewcode.memory.auto_memory import MemoryManager
 from mewcode.permissions import (
     PermissionChecker,
@@ -266,7 +269,7 @@ class Agent:
         context_window: int = 200_000,
         instructions_content: str = "",
         memory_manager: MemoryManager | None = None,
-        hook_engine: HookEngine | None = None,
+        hook_engine: HookEngine | OwnedHookEngine | None = None,
     ) -> None:
         self.client = client
         self.registry = registry
@@ -280,7 +283,8 @@ class Agent:
             permission_checker.mode if permission_checker else PermissionMode.DEFAULT
         )
         self.context_window = context_window
-        self.session_dir = ensure_session_dir(work_dir)
+        self.session_dir = ensure_session_dir(work_dir) / uuid.uuid4().hex
+        self.session_dir.mkdir(parents=True, exist_ok=True)
         self.compact_breaker = CompactCircuitBreaker()
         self.replacement_state: ContentReplacementState = create_replacement_state()
         # 保存重建工作上下文所需的快照，在 Layer 2 压缩对话后使用：
@@ -291,7 +295,8 @@ class Agent:
         self.total_output_tokens = 0
         self.instructions_content = instructions_content
         self.memory_manager = memory_manager
-        self.hook_engine = hook_engine
+        self.file_cache: FileCache | None = None
+        self.hook_engine: HookEngine | OwnedHookEngine | None = hook_engine
         self._loop_count = 0
         self._extracting = False
         self.session_id: str = ""
@@ -369,10 +374,11 @@ class Agent:
             self._agent_catalog_list = catalog_list
 
     def _build_hook_context(self, event: str, **kwargs: str | dict) -> HookContext:
+        tool_args = kwargs.get("tool_args", {})
         return HookContext(
             event_name=event,
             tool_name=str(kwargs.get("tool_name", "")),
-            tool_args=kwargs.get("tool_args", {}),
+            tool_args=tool_args if isinstance(tool_args, dict) else {},
             file_path=str(kwargs.get("file_path", "")),
             message=str(kwargs.get("message", "")),
             error=str(kwargs.get("error", "")),
@@ -501,22 +507,27 @@ class Agent:
                 plan_reminder = build_plan_mode_reminder(
                     plan_path, plan_exists, iteration
                 )
-                conversation.add_system_reminder(plan_reminder)
+                conversation.set_system_reminder("plan", plan_reminder)
+            else:
+                conversation.transient_reminders.pop("plan", None)
 
             if self.hook_engine:
-                for note in self.hook_engine.drain_notifications():
+                for notification in self.hook_engine.drain_notifications():
                     conversation.add_system_reminder(
-                        f"Hook [{note.hook_id}] {note.event}: {note.output}"
+                        f"Hook [{notification.hook_id}] {notification.event}: {notification.output}"
                     )
 
             deferred_names = self.registry.get_deferred_tool_names()
             if deferred_names:
-                conversation.add_system_reminder(
+                conversation.set_system_reminder(
+                    "deferred-tools",
                     "The following deferred tools are available via ToolSearch. "
                     "Their schemas are NOT loaded - use ToolSearch with "
                     'query "select:<name>[,<name>...]" to load tool schemas before calling them:\n'
                     + "\n".join(deferred_names)
                 )
+            else:
+                conversation.transient_reminders.pop("deferred-tools", None)
 
             tools = self.registry.get_all_schemas(self.protocol)
 
@@ -530,13 +541,7 @@ class Agent:
                 append_replacement_records(self.session_dir, _new_records)
 
             collector = StreamCollector()
-            llm_stream = self._stream_with_retry(
-                # 默认参数绑定当前迭代的循环变量，防止重试时读到下一迭代值
-                lambda conv=api_conv, sys=system, t=tools: self.client.stream(
-                    conv, system=sys, tools=t
-                )
-            )
-            async for event in collector.consume(llm_stream):
+            async for event in self._collect_with_context_recovery(conversation, api_conv, system, tools, collector):
                 yield event
 
             response = collector.response
@@ -703,11 +708,11 @@ class Agent:
                             )
                             continue
 
-                        async for item in self._execute_tool(tc):
-                            if isinstance(item, PermissionRequest):
-                                yield item
+                        async for execution_item in self._execute_tool(tc):
+                            if isinstance(execution_item, PermissionRequest):
+                                yield execution_item
                             else:
-                                result, elapsed, is_unknown = item
+                                result, elapsed, is_unknown = execution_item
 
                         if result is None:
                             result = ToolResult(output="Error: no result from tool", is_error=True)
@@ -984,6 +989,7 @@ class Agent:
 
             if self.permission_checker:
                 tool = self.registry.get(tc.tool_name)
+                assert tool is not None
                 decision = self.permission_checker.check(tool, tc.arguments)
                 if decision.effect == "ask":
                     interactive.append(i)
@@ -1198,6 +1204,58 @@ class Agent:
             )
         return ErrorEvent(message=result or "压缩失败：对话历史为空或未达到压缩条件")
 
+    def inherit_tool_results(self, parent: Agent, conversation: ConversationManager) -> None:
+        """Copy frozen fork references so either agent may compact independently."""
+        from mewcode.context import clone_replacement_state
+
+        old, new = str(parent.session_dir), str(self.session_dir)
+        for source in parent.session_dir.glob("*.txt"):
+            shutil.copy2(source, self.session_dir / source.name)
+        self.replacement_state = clone_replacement_state(parent.replacement_state)
+        self.replacement_state.replacements = {
+            key: value.replace(old, new) for key, value in self.replacement_state.replacements.items()
+        }
+        for message in conversation.history:
+            message.content = message.content.replace(old, new)
+            for result in message.tool_results:
+                result.content = result.content.replace(old, new)
+
+    async def _collect_with_context_recovery(
+        self, conversation: ConversationManager, api_conv: ConversationManager,
+        system: str, tools: list[dict[str, Any]], collector: StreamCollector,
+    ) -> AsyncIterator[AgentEvent]:
+        for attempt in range(2):
+            try:
+                def request(conv: ConversationManager = api_conv) -> AsyncIterator[StreamEvent]:
+                    return self.client.stream(conv, system=system, tools=tools)
+
+                stream = self._stream_with_retry(request)
+                async for event in collector.consume(stream):
+                    yield event
+                return
+            except ContextOverflowError:
+                if attempt:
+                    raise
+                result = await auto_compact(
+                    conversation, self.client, self.context_window, self.session_dir,
+                    protocol=self.protocol, manual=True, breaker=self.compact_breaker,
+                    recovery=self.recovery_state, tool_schemas=tools, transcript_path=self._transcript_path,
+                )
+                if not isinstance(result, CompactEvent):
+                    raise
+                yield CompactNotification(result.before_tokens, "上下文溢出后已压缩，重试一次", result.boundary)
+                conversation.inject_environment(build_environment_context(
+                    self.work_dir, self.active_skills, self._skill_catalog, self._agent_catalog
+                ))
+                memory = self.memory_manager.load() if self.memory_manager else ""
+                conversation.inject_long_term_memory(self.instructions_content, memory)
+                if self.memory_manager:
+                    self.memory_manager.reset_extraction_cursor()
+                api_conv, records = apply_tool_result_budget(conversation, self.session_dir, self.replacement_state)
+                if records:
+                    append_replacement_records(self.session_dir, records)
+                collector.response = LLMResponse()
+
     async def run_to_completion(
         self, task: str, conversation: ConversationManager | None = None,
         event_callback: Callable[[dict[str, Any]], None] | None = None,
@@ -1277,12 +1335,15 @@ class Agent:
 
             deferred_names = self.registry.get_deferred_tool_names()
             if deferred_names:
-                conversation.add_system_reminder(
+                conversation.set_system_reminder(
+                    "deferred-tools",
                     "The following deferred tools are available via ToolSearch. "
                     "Their schemas are NOT loaded - use ToolSearch with "
                     'query "select:<name>[,<name>...]" to load tool schemas before calling them:\n'
                     + "\n".join(deferred_names)
                 )
+            else:
+                conversation.transient_reminders.pop("deferred-tools", None)
 
             api_conv, _new_records = apply_tool_result_budget(
                 conversation, self.session_dir, self.replacement_state
@@ -1291,13 +1352,7 @@ class Agent:
                 append_replacement_records(self.session_dir, _new_records)
 
             collector = StreamCollector()
-            llm_stream = self._stream_with_retry(
-                # 默认参数绑定当前迭代的循环变量，防止重试时读到下一迭代值
-                lambda conv=api_conv, sys=system, t=tools: self.client.stream(
-                    conv, system=sys, tools=t
-                )
-            )
-            async for _event in collector.consume(llm_stream):
+            async for _event in self._collect_with_context_recovery(conversation, api_conv, system, tools, collector):
                 pass
 
             response = collector.response

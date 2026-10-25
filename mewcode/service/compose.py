@@ -24,6 +24,7 @@ import tempfile
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -177,7 +178,7 @@ class ComposeVerifier:
 
     def __init__(
         self,
-        sandbox: object | None,
+        sandbox: Any,
         *,
         runtime_bin: str = "docker",
         runner: CommandRunner | None = None,

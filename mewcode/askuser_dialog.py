@@ -20,7 +20,7 @@ class InlineAskUserWidget(Vertical, can_focus=True):
         Binding("enter", "select", "Select", priority=True),
         Binding("tab", "next_q", "Next", priority=True),
         Binding("shift+tab", "prev_q", "Prev", priority=True),
-        Binding("space", "toggle", "Toggle", priority=True),
+        Binding("space", "toggle_option", "Toggle", priority=True),
         Binding("escape", "cancel", "Cancel", priority=True),
     ]
 
@@ -207,7 +207,7 @@ class InlineAskUserWidget(Vertical, can_focus=True):
             self._refresh()
 
 
-    def action_toggle(self) -> None:
+    def action_toggle_option(self) -> None:
         if self._on_submit:
             return
         q = self._questions[self._q_idx]

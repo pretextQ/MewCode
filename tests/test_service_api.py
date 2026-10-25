@@ -307,13 +307,14 @@ class TestObservability:
 class TestRuntime:
     @pytest.mark.asyncio
     async def test_intake_without_pool_does_not_crash(self, tmp_path: Path):
-        """池未启动时只落库不入队（boot 阶段收到告警的退化路径）。"""
+        """未启动的消费者不能对告警报告受理成功。"""
         store = JobStore(tmp_path / "jobs.db")
         runtime = ServiceRuntime(ServiceConfig(data_dir=str(tmp_path / "state")), handler=None, store=store)  # type: ignore[arg-type]
         await store.connect()
         try:
             result = await runtime.intake([JobDraft(fingerprint="fp", repo="demo")])
-            assert len(result.accepted) == 1
+            assert not result.accepted
+            assert len(result.rejected) == 1
             assert runtime.pool.queue_depth == 0
         finally:
             await store.close()
@@ -342,3 +343,42 @@ class TestRuntime:
         finally:
             await runtime.stop()
         assert seen == ["received"]
+
+
+@pytest.mark.asyncio
+async def test_review_decision_is_authenticated_and_final(tmp_path):
+    async with service_env(tmp_path, token="s3cret") as (runtime, client):
+        job = await runtime.store.create_job(fingerprint="review", repo="demo")
+        for state in ("triaging", "reproducing", "fixing", "verifying", "pr_opened", "ci_gate", "human_review"):
+            await runtime.store.transition(job.id, state)
+        path = f"/jobs/{job.id}/decision"
+        assert (await client.post(path, json={"decision": "merged"})).status == 401
+        headers = {"X-MewCode-Token": "s3cret"}
+        assert (await client.post(path, headers=headers, json={"decision": "merged"})).status == 200
+        assert (await runtime.store.get_or_raise(job.id)).status == "merged"
+        assert (await client.post(path, headers=headers, json={"decision": "merged"})).status == 409
+
+
+@pytest.mark.asyncio
+async def test_open_review_survives_dedup_window(tmp_path):
+    async with service_env(tmp_path, token="s3cret") as (runtime, _):
+        job = await runtime.store.create_job(fingerprint="review", repo="demo")
+        for state in ("triaging", "reproducing", "fixing", "verifying", "pr_opened", "ci_gate"):
+            await runtime.store.transition(job.id, state)
+        await runtime.store.transition(job.id, "human_review", pr_url="https://example/pr/1")
+        runtime.store._require_conn().execute("UPDATE jobs SET updated_at=? WHERE id=?",
+                                             ("2000-01-01T00:00:00Z", job.id))
+        runtime.store._require_conn().commit()
+        found = await runtime.store.find_open_by_fingerprint("demo", "review", 1)
+        assert found and found.id == job.id
+
+
+@pytest.mark.asyncio
+async def test_shutdown_rejects_webhook_without_creating_job(tmp_path):
+    async with service_env(tmp_path, alert_adapter=StubAdapter()) as (runtime, client):
+        runtime.accepting = False
+        response = await client.post("/webhook/alert", json={"drafts": [{"fingerprint": "late"}]})
+        assert response.status == 503
+        result = await runtime.intake([JobDraft(fingerprint="late", repo="demo")])
+        assert result.rejected and not result.accepted
+        assert await runtime.store.list_jobs() == []

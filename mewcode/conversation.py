@@ -75,6 +75,7 @@ class ConversationManager:
     # baseline_tokens == 0 表示"尚无锚点"（冷启动），此时退化为纯字符估算。
     baseline_tokens: int = field(default=0, init=False)
     anchor_count: int = field(default=0, init=False)
+    transient_reminders: dict[str, Message] = field(default_factory=dict)
 
     def record_usage_anchor(
         self,
@@ -126,6 +127,11 @@ class ConversationManager:
                 tool_uses=tool_uses or [],
                 thinking_blocks=thinking_blocks or [],
             )
+        )
+
+    def set_system_reminder(self, key: str, content: str) -> None:
+        self.transient_reminders[key] = Message(
+            role="user", content=f"<system-reminder>\n{content}\n</system-reminder>",
         )
 
     def add_system_reminder(self, content: str) -> None:
@@ -194,4 +200,4 @@ class ConversationManager:
 
 
     def get_messages(self) -> list[Message]:
-        return list(self.history)
+        return list(self.history) + list(self.transient_reminders.values())

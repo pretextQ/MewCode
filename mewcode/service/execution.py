@@ -414,7 +414,7 @@ class HeadlessAgentRunner:
         """探测一次并缓存；默认 fail-closed，不隐式切换宿主执行。"""
         if not self.config.sandbox.enabled:
             return False
-        if self._sandbox_decision is None:
+        if self._sandbox_decision is not True:
             available = self.sandbox is not None and await self.sandbox.available()
             self._sandbox_decision = available
             if not available and self.config.sandbox.allow_host_fallback:
@@ -665,7 +665,7 @@ class ExecutionChain:
         store: JobStore,
         runner: AgentRunner,
         *,
-        test_runner: TestRunner | None = None,
+        test_runner: TestRunner | SandboxTestRunner | None = None,
         publisher: Publisher | None = None,
         ci_gate: CIGate | None = None,
         integration_verifier: IntegrationVerifier | None = None,
@@ -767,13 +767,14 @@ class ExecutionChain:
         if policy.overrides_anything:
             await self._event(job.id, "policy_applied", policy_event_detail(policy))
 
-        # --- triaging：信息不足就不下手（不产生垃圾 PR） ---
-        if await self._transition(job.id, "triaging", reason="starting alert triage") is None:
-            return
-        ok, why = sop.has_actionable_context(job)
-        if not ok:
-            await self._escalate(job.id, f"triaging failed: {why}")
-            return
+        if job.status != "changes_requested":
+            # --- triaging：信息不足就不下手（不产生垃圾 PR） ---
+            if await self._transition(job.id, "triaging", reason="starting alert triage") is None:
+                return
+            ok, why = sop.has_actionable_context(job)
+            if not ok:
+                await self._escalate(job.id, f"triaging failed: {why}")
+                return
 
         repo_root = repo.path
         if not Path(repo_root).is_dir():
@@ -792,14 +793,15 @@ class ExecutionChain:
         work_dir = worktree.path
         await self._event(job.id, "worktree_ready", f"path={work_dir} branch={worktree.branch}")
 
-        if await self._transition(job.id, "reproducing", reason=f"isolated worktree at {work_dir}") is None:
+        if (job.status != "changes_requested"
+                and await self._transition(job.id, "reproducing", reason=f"isolated worktree at {work_dir}") is None):
             return
         baseline = await self._run_tests(job, repo, work_dir, phase="baseline")
 
         # --- 修复 → 验证 → 发布 → CI 门禁 ---
         # 外层循环处理"CI 红了"：带着 CI 失败信息回到 fixing 重来，
         # 重试预算仍由状态机的 attempts 上限强制（超限由内层 escalate）。
-        feedback = ""
+        feedback = job.last_error if job.status == "changes_requested" else ""
         while True:
             context = await self._fix_and_verify(
                 job, repo, worktree, baseline, feedback, target_branch
@@ -857,13 +859,28 @@ class ExecutionChain:
                 await self._event(job.id, "agent_prompt", prompt)
             await self._notify(job.id, "fixing", f"agent run attempt {attempt}")
 
+            attempt_usage = [0, 0]
+            record_event = self._make_on_event(job)
+
+            def on_attempt_event(
+                event: dict[str, Any], usage_counts: list[int] = attempt_usage,
+                emit: Callable[[dict[str, Any]], None] = record_event,
+            ) -> None:
+                if event.get("type") == "usage":
+                    usage = event.get("usage") or {}
+                    usage_counts[0] = max(usage_counts[0], int(usage.get("inputTokens", 0)))
+                    usage_counts[1] = max(usage_counts[1], int(usage.get("outputTokens", 0)))
+                emit(event)
+
             try:
                 # Job objects are snapshots: refresh cumulative usage before
                 # every attempt, including retries following a failed CI gate.
                 job = await self.store.get_or_raise(job.id)
-                outcome = await self.runner.run(job, work_dir, prompt, self._make_on_event(job))
+                outcome = await self.runner.run(job, work_dir, prompt, on_attempt_event)
             except TokenBudgetExceeded as e:
-                await self.store.add_usage(job.id, e.input_tokens, e.output_tokens)
+                await self.store.add_usage(
+                    job.id, max(e.input_tokens, attempt_usage[0]), max(e.output_tokens, attempt_usage[1])
+                )
                 await self._event(
                     job.id, "agent_finished",
                     f"attempt={attempt} budget_exceeded=true tokens_in={e.input_tokens} tokens_out={e.output_tokens}",
@@ -871,8 +888,10 @@ class ExecutionChain:
                 await self._escalate(job.id, f"cost guard: {e}")
                 return None
             except asyncio.CancelledError:
+                await self.store.add_usage(job.id, *attempt_usage)
                 raise
             except Exception as e:
+                await self.store.add_usage(job.id, *attempt_usage)
                 await self._event(job.id, "agent_error", f"{type(e).__name__}: {e}")
                 await self._escalate(job.id, f"agent run failed: {type(e).__name__}: {e}")
                 return None
@@ -922,14 +941,15 @@ class ExecutionChain:
                 await self._record_integration(job.id, integration)
 
             if integration is not None and integration.ran and not integration.passed:
-                feedback = await self._verify_failed(
+                next_feedback = await self._verify_failed(
                     job,
                     attempt,
                     f"integration verification failed: {integration.summary()}",
                     integration.failure_feedback(),
                 )
-                if feedback is None:
+                if next_feedback is None:
                     return None
+                feedback = next_feedback
                 continue
 
             if verify is None or verify.passed:
@@ -948,11 +968,12 @@ class ExecutionChain:
                 )
 
             # 单测失败：记录后重试（是否允许重试由状态机的 attempts 上限决定）
-            feedback = await self._verify_failed(
+            next_feedback = await self._verify_failed(
                 job, attempt, f"verification failed: {verify.summary()}", verify.output or ""
             )
-            if feedback is None:
+            if next_feedback is None:
                 return None
+            feedback = next_feedback
 
     async def _verify_failed(
         self, job: Job, attempt: int, reason: str, output: str

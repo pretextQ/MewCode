@@ -93,7 +93,7 @@ async def execute_agent(action: Action, ctx: HookContext) -> ActionResult:
     log.info("Agent executor stub called with prompt: %s", prompt[:100])
     return ActionResult(
         output="agent executor not yet implemented",
-        success=True,
+        success=False,
     )
 
 

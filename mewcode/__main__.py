@@ -142,11 +142,12 @@ async def _serve(config: AppConfig, host: str, port: int, recover: bool = True) 
         await stop.wait()
     finally:
         print("shutting down: draining in-flight jobs...", flush=True)
+        runtime.accepting = False
+        await http_runner.cleanup()
         await runtime.stop()
         # 取消路径上可能还有 compose down 在跑：等它收尾，别把依赖环境留在宿主上
         # （仓库已知坑：后台子进程显式收尾，不靠进程退出兜底）
         await integration_verifier.drain_cleanup_tasks()
-        await http_runner.cleanup()
 
 
 def _install_signal_handlers(stop: asyncio.Event) -> None:

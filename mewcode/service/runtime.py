@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -72,14 +73,19 @@ class ServiceRuntime:
         )
         self.worktree_cleanup_cutoff_hours = worktree_cleanup_cutoff_hours
         self._data_dir = data_dir
+        self._intake_lock = asyncio.Lock()
+        self._maintenance_task: asyncio.Task | None = None
+        self.accepting = False
 
     # -- 生命周期 ---------------------------------------------------------
 
     async def start(self, recover: bool = True) -> None:
         await self.store.connect()
         await self.pool.start()
+        self.accepting = True
         if self.worktree_cleanup_cutoff_hours is not None:
             await self._cleanup_worktrees()
+            self._maintenance_task = asyncio.create_task(self._maintain_worktrees())
         if recover:
             await self.pool.requeue_unfinished()
         log.info(
@@ -89,11 +95,20 @@ class ServiceRuntime:
             self.config.data_dir,
         )
 
+    async def _maintain_worktrees(self) -> None:
+        while True:
+            await asyncio.sleep(3600)
+            try:
+                await self._cleanup_worktrees()
+            except Exception:
+                log.exception("periodic worktree cleanup failed")
+
     async def _cleanup_worktrees(self) -> None:
         """启动时顺带清一次陈旧 worktree（架构文档风险表：24/7 运行磁盘只增不减）。"""
         from mewcode.worktree import WorktreeManager
         from mewcode.worktree.cleanup import cleanup_stale_worktrees
 
+        protected = {j.id for j in await self.store.list_unfinished()}
         for name, repo in self.config.repos.items():
             path = Path(repo.path)
             if not path.is_dir():
@@ -101,7 +116,7 @@ class ServiceRuntime:
             try:
                 manager = WorktreeManager(repo_root=str(path), symlink_directories=[])
                 removed = await cleanup_stale_worktrees(
-                    manager, self.worktree_cleanup_cutoff_hours or 24
+                    manager, self.worktree_cleanup_cutoff_hours or 24, protected_names=protected
                 )
                 if removed:
                     log.info("cleaned %d stale worktree(s) in %s", removed, name)
@@ -109,12 +124,27 @@ class ServiceRuntime:
                 log.warning("worktree cleanup failed for %s: %s", name, e)
 
     async def stop(self) -> None:
-        await self.pool.stop()
-        await self.store.close()
+        self.accepting = False
+        if self._maintenance_task:
+            self._maintenance_task.cancel()
+            await asyncio.gather(self._maintenance_task, return_exceptions=True)
+            self._maintenance_task = None
+        async with self._intake_lock:
+            await self.pool.stop()
+            await self.store.close()
 
     # -- 接入 -------------------------------------------------------------
 
     async def intake(self, drafts: list[JobDraft]) -> IntakeResult:
+        async with self._intake_lock:
+            if not self.accepting or not self.pool.running:
+                return IntakeResult(rejected=[{
+                    "repo": d.repo, "fingerprint": d.fingerprint, "title": d.title,
+                    "reason": "service is not accepting jobs",
+                } for d in drafts])
+            return await self._intake(drafts)
+
+    async def _intake(self, drafts: list[JobDraft]) -> IntakeResult:
         """去重后落库并入队；返回本次受理结果。
 
         去重语义（架构文档第四节）：同仓库 + 同指纹 + 未完结 + 窗口内 =>
@@ -166,8 +196,7 @@ class ServiceRuntime:
                 result.deduped.append(job)
                 log.info("job %s: merged duplicate alert (fingerprint=%s)", job.id, draft.fingerprint)
                 continue
-            if self.pool.running:
-                await self.pool.submit(job.id)
+            await self.pool.submit(job.id)
             result.accepted.append(job)
             if self.notifier is not None:
                 try:

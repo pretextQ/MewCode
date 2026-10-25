@@ -28,6 +28,9 @@ class MCPManager:
 
 
     def load_configs(self, configs: list[MCPServerConfig]) -> None:
+        names = [cfg.name for cfg in configs]
+        if len(names) != len(set(names)) or set(names) & self._configs.keys():
+            raise ValueError("duplicate MCP server name")
         for cfg in configs:
             self._configs[cfg.name] = cfg
 
@@ -76,6 +79,8 @@ class MCPManager:
                     wrapper = MCPToolWrapper(name, tool_def, client)
                     if not defer:
                         wrapper.should_defer = False
+                    if registry.get(wrapper.name) is not None:
+                        raise ValueError(f"MCP tool name collision: {wrapper.name}")
                     registry.register(wrapper)
                     logger.info("Registered MCP tool: %s", wrapper.name)
 

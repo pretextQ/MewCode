@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -292,13 +293,8 @@ class AgentTool(Tool[AgentToolParams]):
         sub_agent.parent_id = self._parent_agent.agent_id
         sub_agent.trace_id = self._parent_agent.trace_id or self._parent_agent.agent_id
 
-        # fork 子 agent 继承父 agent 的替换状态，确保共享的 tool_use_id 做出一致的
-        # 决策——这样父子共享的 prompt cache 前缀才能保持字节级一致
         if p.subagent_type is None:
-            from mewcode.context import clone_replacement_state
-            sub_agent.replacement_state = clone_replacement_state(
-                self._parent_agent.replacement_state
-            )
+            sub_agent.inherit_tool_results(self._parent_agent, conversation)
 
         # 注册追踪节点
         trace_node = self._trace_manager.create(
@@ -335,6 +331,10 @@ class AgentTool(Tool[AgentToolParams]):
                 result_text = await sub_agent.run_to_completion("", conversation)
             else:
                 result_text = await sub_agent.run_to_completion(p.prompt)
+        except asyncio.CancelledError:
+            self._trace_manager.complete(trace_node.agent_id, "cancelled")
+            await sub_agent.cancel_background_tasks()
+            raise
         except Exception as e:
             self._trace_manager.complete(trace_node.agent_id, "failed")
             return ToolResult(
@@ -604,13 +604,8 @@ class AgentTool(Tool[AgentToolParams]):
                 is_error=True,
             )
 
-        from mewcode.agent import Agent as AgentClass
         from mewcode.agents.parser import AgentDef
-        from mewcode.agents.tool_filter import resolve_agent_tools
-        from mewcode.worktree.integration import (
-            build_worktree_notice,
-            generate_worktree_name,
-        )
+        from mewcode.worktree.integration import generate_worktree_name
 
         definition: AgentDef | None = None
         if p.subagent_type:
@@ -641,6 +636,26 @@ class AgentTool(Tool[AgentToolParams]):
                 output=f"Failed to create worktree: {e}",
                 is_error=True,
             )
+
+        result: ToolResult | None = None
+        try:
+            result = await self._run_in_worktree(p, definition, wt)
+        except Exception as e:
+            result = ToolResult(output=f"Sub-agent setup failed: {e}", is_error=True)
+        finally:
+            try:
+                cleanup = await self._worktree_manager.auto_cleanup(wt_name, wt.head_commit)
+                if cleanup.kept and result is not None:
+                    result.output += f"\n[Worktree preserved at {cleanup.path}, branch {cleanup.branch}]"
+            except Exception:
+                log.exception("failed to clean up sub-agent worktree %s", wt.path)
+        assert result is not None
+        return result
+
+    async def _run_in_worktree(self, p: AgentToolParams, definition: AgentDef, wt: Any) -> ToolResult:
+        from mewcode.agent import Agent as AgentClass
+        from mewcode.agents.tool_filter import resolve_agent_tools
+        from mewcode.worktree.integration import build_worktree_notice
 
         notice = build_worktree_notice(self._parent_agent.work_dir, wt.path)
         task = notice + "\n\n" + p.prompt
@@ -685,6 +700,10 @@ class AgentTool(Tool[AgentToolParams]):
 
         try:
             result_text = await sub_agent.run_to_completion(task)
+        except asyncio.CancelledError:
+            self._trace_manager.complete(trace_node.agent_id, "cancelled")
+            await sub_agent.cancel_background_tasks()
+            raise
         except Exception as e:
             self._trace_manager.complete(trace_node.agent_id, "failed")
             return ToolResult(
@@ -698,12 +717,6 @@ class AgentTool(Tool[AgentToolParams]):
             output_tokens=sub_agent.total_output_tokens,
         )
         self._trace_manager.complete(trace_node.agent_id, "completed")
-
-        cleanup = await self._worktree_manager.auto_cleanup(wt_name, wt.head_commit)
-        if cleanup.kept:
-            result_text = (result_text or "") + (
-                f"\n[Worktree preserved at {cleanup.path}, branch {cleanup.branch}]"
-            )
 
         return ToolResult(output=result_text or "(sub-agent returned no output)")
 

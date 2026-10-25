@@ -14,3 +14,7 @@ build/
 CLAUDE.md
 docs/
 .coverage
+
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/

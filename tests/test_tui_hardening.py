@@ -94,27 +94,20 @@ async def test_send_message_reentrancy_guard(app_factory):
         app.agent = agent
 
         t1 = asyncio.create_task(app._send_message("hello"))
-        # 等条件而不是等固定时长：CI（尤其 ubuntu）上 0.1s 可能不够第一轮跑到
-        # 流式位，固定 sleep 会周期性假失败（a6434e5 在 ubuntu 上就是这么挂的）。
-        for _ in range(200):
-            if app._streaming is True:
-                break
-            await asyncio.sleep(0.05)
-        # 第一个在跑（流式位已置）
-        assert app._streaming is True
-        seen: list[str] = []
-        app._show_system_message = lambda text: seen.append(text)
-
-        # 第二个立即返回，不并行
-        await app._send_message("hello again")
-        assert any("忽略重复请求" in s for s in seen)
-        assert agent.runs == 1, f"第二个实例启动了新的 agent 循环: {agent.runs}"
-
-        t1.cancel()
         try:
-            await t1
-        except asyncio.CancelledError:
-            pass
+            # _streaming 在 UI 初始化前置位，不能用它判断 agent 循环已启动。
+            await asyncio.wait_for(agent.started.wait(), timeout=10)
+            assert app._streaming is True
+            seen: list[str] = []
+            app._show_system_message = lambda text: seen.append(text)
+
+            # 第二个立即返回，不并行
+            await app._send_message("hello again")
+            assert any("忽略重复请求" in s for s in seen)
+            assert agent.runs == 1, f"第二个实例启动了新的 agent 循环: {agent.runs}"
+        finally:
+            t1.cancel()
+            await asyncio.gather(t1, return_exceptions=True)
 
 
 class _SlowAgent:
@@ -125,9 +118,11 @@ class _SlowAgent:
 
     def __init__(self) -> None:
         self.runs = 0
+        self.started = asyncio.Event()
 
     async def run(self, conv):
         self.runs += 1
+        self.started.set()
         yield TextDelta(text="working ")
         await asyncio.sleep(30)
 

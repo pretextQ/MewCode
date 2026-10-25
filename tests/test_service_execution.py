@@ -147,6 +147,20 @@ async def make_job(store: JobStore, **payload_overrides):
 
 class TestHappyPath:
     @pytest.mark.asyncio
+    async def test_changes_requested_resumes_existing_worktree(self, tmp_path: Path, demo_repo: Path):
+        async with chain_env(tmp_path, demo_repo, publisher=FakePublisher()) as (store, chain, runner, _):
+            job = await make_job(store)
+            await chain(job)
+            await store.transition(job.id, "ci_gate")
+            await store.transition(job.id, "human_review")
+            job = await store.transition(job.id, "changes_requested", last_error="please add coverage")
+            await chain(job)
+            assert (await store.get_or_raise(job.id)).status == "pr_opened"
+            assert len(runner.calls) == 2
+            assert runner.calls[0]["work_dir"] == runner.calls[1]["work_dir"]
+            assert "please add coverage" in runner.calls[1]["prompt"]
+
+    @pytest.mark.asyncio
     async def test_worker_recovers_with_cached_worktree(self, tmp_path: Path, demo_repo: Path):
         from mewcode.service.worker import WorkerPool
 
@@ -1130,3 +1144,25 @@ class TestSelfCheckInPRBody:
 
         body = build_pr_body(self.make_job(), self.make_ctx("ROOT CAUSE: a\nFIX: b"), [])
         assert "规范自查" not in body
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancelled", [False, True])
+async def test_failed_attempt_usage_is_billed(tmp_path, demo_repo, cancelled):
+    async with chain_env(tmp_path, demo_repo) as (store, chain, _, _):
+        class FailingRunner:
+            async def run(self, job, work_dir, prompt, on_event):
+                on_event({"type": "usage", "usage": {"inputTokens": 17, "outputTokens": 9}})
+                if cancelled:
+                    raise asyncio.CancelledError()
+                raise RuntimeError("failed after billing")
+
+        chain.runner = FailingRunner()
+        job = await make_job(store)
+        if cancelled:
+            with pytest.raises(asyncio.CancelledError):
+                await chain(job)
+        else:
+            await chain(job)
+        saved = await store.get_or_raise(job.id)
+        assert (saved.tokens_in, saved.tokens_out) == (17, 9)

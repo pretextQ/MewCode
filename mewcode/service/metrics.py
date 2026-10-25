@@ -331,9 +331,9 @@ async def cost_report(store: JobStore, *, model: str = "", repo: str | None = No
         for name, row in sorted(rows.items())
     ]
     total = _totals({
-        "jobs": sum(r["jobs"] for r in repos),
-        "tokens_in": sum(r["tokens_in"] for r in repos),
-        "tokens_out": sum(r["tokens_out"] for r in repos),
+        "jobs": sum(r["jobs"] for r in rows.values()),
+        "tokens_in": sum(r["tokens_in"] for r in rows.values()),
+        "tokens_out": sum(r["tokens_out"] for r in rows.values()),
     })
     return {
         "unit": "tokens",

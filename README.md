@@ -24,7 +24,7 @@
 
 **执行内核（CLI / TUI）**
 - 工具集：文件读写编辑、Bash、Glob/Grep、子代理、任务管理；权限分层管线（危险命令检测 → 路径沙箱 → 规则引擎 → 模式判定），deny 优先于白名单
-- Skill 机制（内置 incident-triage / org-code-style 等，仓库级 `.mewcode/skills/` 可覆盖）与 MCP 接入（stdio / Streamable HTTP）
+- Skill 机制（内置 incident-triage / org-code-style 等，仓库级 `.mewcode/skills/` 可覆盖普通 skill；服务的 org-code-style 自查清单固定取内置版本）与 MCP 接入（stdio / Streamable HTTP）
 - 上下文压缩、任务状态机、hook 引擎；Windows 是一等公民平台（见[平台说明](#平台说明)）
 
 **服务化（headless）**
@@ -130,6 +130,11 @@ uv run python scripts/m1_demo.py alert --port 9300 --repo demo --bug null_deref
 
 之后只需观察：job 依次经过 `received → triaging → reproducing → fixing → verifying → pr_opened → ci_gate → human_review`，PR 出现在仓库里，CI 结论自动写回审计。每次状态转移都落库（SQLite），既是状态机也是审计日志。
 
+人工审查后，使用已配置的 `service.webhook_token` 调用 `POST /jobs/{id}/decision`，
+JSON 为 `{"decision": "merged", "reason": "人工确认已合并"}`。可选结论为
+`merged`、`changes_requested`、`escalate`；修改请求会携带原因重新入队，此端点不会操作远端合并。
+等待人工审查且已有 PR 的任务跨去重窗口继续合并重复告警。
+
 失败路径同样是设计的一部分：信息不足的告警在 triaging 即 escalate（不硬修）、agent 无改动收敛为 `cant_repro`、验证/CI 失败带输出重试至上限、重复告警在窗口内去重合并、服务重启后未完结 job 自动恢复（等人工的 job 不会被重复重跑）。
 
 ### 3. 多仓库策略（可选）
@@ -167,11 +172,11 @@ uv run mewcode serve --port 9300
 
 # 基线：三类真机 bug 用例（config_error / null_deref / unhandled_timeout）批量回放
 uv run python scripts/m3_replay.py --label baseline --fingerprint-prefix replay-1 \
-    --repo-path /path/to/demo-repo
+    --repo-path /path/to/demo-repo --out .mewcode/replay/baseline.json
 
 # 改一处 skill 规则后重跑：必须换 fingerprint 前缀（服务端 1800s 去重窗口），带 --compare 出 A/B 对比
 uv run python scripts/m3_replay.py --label after --fingerprint-prefix replay-2 \
-    --repo-path /path/to/demo-repo --compare docs/evolution/replay/baseline.json
+    --repo-path /path/to/demo-repo --compare .mewcode/replay/baseline.json --out .mewcode/replay/after.json
 ```
 
 脚本在每单告警发送前先把 demo 仓重置到该 bug 的现场并推 main（保证 PR diff 恰好是"bug→修复"），轮询 job 到 `human_review`/终态，再拉取 PR diff 统计规范标记（默认找 `# fix(...)` 追溯注释，可换正则），输出 JSON+Markdown 报告。
@@ -207,11 +212,16 @@ mewcode/
 ├── permissions/        # 权限管线（危险命令 / 路径沙箱 / 规则引擎 / 模式）
 ├── mcp/                # MCP 客户端与内置 server（logs 接 Loki / ci 接 GitHub）
 ├── skills/             # Skill 加载与内置规范包
+├── memory/             # 长期记忆、会话记录与恢复
+├── context/            # 压缩、工具结果预算与落盘
+├── hooks/              # hook 配置、执行与生命周期
 ├── worktree/           # git worktree 管理（创建 / 快速恢复 / 陈旧清理）
 ├── teams/ agents/      # 多 agent 协作（子代理 / 团队）
 └── service/            # 无头服务层
     ├── api.py          #   webhook / healthz / jobs 查询
     ├── triggers/       #   Alertmanager / 手动触发适配
+    ├── runtime.py      #   接入、周期维护与启停编排
+    ├── sop.py          #   告警排查提示词与规范注入
     ├── jobs.py         #   SQLite JobStore + 状态机 + 去重
     ├── worker.py       #   有界并发消费池（超时收敛 / 优雅退出 / 恢复）
     ├── execution.py    #   执行链（worktree → agent → 验证 → 发布）
@@ -226,13 +236,15 @@ mewcode/
 scripts/
 ├── m1_demo.py          # demo 仓库构建 + 模拟告警发送
 ├── m1_github_setup.py  # demo 仓库一键建仓
+├── verify_subagent.py  # 无真实模型调用的子代理组件验证
+├── mewtest.sh          # tmux 交互式冒烟测试（需本地配置）
 └── m3_replay.py        # 评估集回放：批量告警 → 报告（成功率/MTTR/token）+ A/B 对比
 ```
 
 ## 测试
 
 ```bash
-uv run pytest                                          # 全量套件（1180+ 用例）
+uv run pytest                                          # 全量套件（用例数以 pytest --collect-only -q 为准）
 MEWCODE_DOCKER_TESTS=1 uv run pytest tests/test_sandbox_live.py   # 真机容器测试（需 Docker）
 ```
 
@@ -242,6 +254,9 @@ MEWCODE_DOCKER_TESTS=1 uv run pytest tests/test_sandbox_live.py   # 真机容器
 ## 平台说明
 
 Windows 是一等公民运行平台，已知边界（GBK 编码读取、行尾保持、进程树清理等）
+架构与服务生命周期见 [guides/architecture.md](guides/architecture.md)。
 见 [guides/windows-platform-notes.md](guides/windows-platform-notes.md)。
 权限分层语义见 [guides/permission-semantics.md](guides/permission-semantics.md)，
 hook stdin JSON 契约见 [guides/hook-contract.md](guides/hook-contract.md)。
+
+本轮审查修复、提交映射与验证边界见 [维护交接](guides/maintenance.md)。

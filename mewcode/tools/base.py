@@ -18,6 +18,16 @@ ToolCategory = Literal["read", "write", "command"]
 ParamsT = TypeVar("ParamsT", bound=BaseModel)
 
 
+def decode_output(raw: bytes) -> str:
+    """Prefer UTF-8; accept the host code page for legacy command/file output."""
+    for encoding in ("utf-8-sig", locale.getpreferredencoding(False), "oem", "mbcs"):
+        try:
+            return raw.decode(encoding)
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return raw.decode("utf-8", errors="replace")
+
+
 def search_path_allowed(base: Path, candidate: Path) -> bool:
     """Keep search results inside the requested directory, resolving symlinks."""
     try:
@@ -60,13 +70,19 @@ def detect_encoding(path: Path) -> str:
     return "utf-8"
 
 
-def read_text_preserve(path: Path) -> str:
+def read_text_preserve(path: Path, max_bytes: int | None = None) -> str:
     """读取文本：newline='' 保持行尾原样，编码走探测回退。
 
     全部候选失败时按 utf-8 宽松解码兜底（不可解码字节→U+FFFD），
     不让工具在混合编码文件上直接崩掉。
     """
     enc = detect_encoding(path)
+    if max_bytes is not None:
+        with path.open("rb") as stream:
+            raw = stream.read(max_bytes + 1)
+        if len(raw) > max_bytes:
+            raise ValueError(f"file exceeds {max_bytes} byte read limit")
+        return raw.decode(enc, errors="replace")
     try:
         with open(path, encoding=enc, newline="") as f:
             return f.read()

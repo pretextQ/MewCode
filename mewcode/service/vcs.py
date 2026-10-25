@@ -411,7 +411,7 @@ class GitHubVCS:
             await asyncio.sleep(interval)
 
     async def _collect_checks(self, repo_slug: str, ref: str) -> CheckStatus:
-        runs = []
+        runs: list[dict[str, Any]] = []
         for page in range(1, 101):
             data = await self._api("GET", f"/repos/{repo_slug}/commits/{ref}/check-runs",
                                    params={"per_page": 100, "page": page})

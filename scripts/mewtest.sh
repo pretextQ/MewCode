@@ -13,14 +13,13 @@ set -euo pipefail
 
 SESSION="mewtest"
 MEWCODE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-BINARY="$MEWCODE_DIR/mewcode"
 WIDTH=120
 HEIGHT=40
 
 start() {
     tmux kill-session -t "$SESSION" 2>/dev/null || true
     tmux new-session -d -s "$SESSION" -x "$WIDTH" -y "$HEIGHT" \
-        "cd '$MEWCODE_DIR' && '$BINARY'"
+        -c "$MEWCODE_DIR" "uv run mewcode"
 
     local timeout=10
     local elapsed=0

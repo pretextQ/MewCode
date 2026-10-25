@@ -297,7 +297,7 @@ class TestAgentExecutor:
         action = Action(type="agent", prompt="Check $FILE_PATH")
         ctx = HookContext(file_path="test.py")
         result = await execute_agent(action, ctx)
-        assert result.success is True
+        assert result.success is False
         assert "not yet implemented" in result.output
 
 class TestExecuteAction:

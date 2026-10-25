@@ -130,6 +130,8 @@ def parse_retry_after(retry: str | None) -> float | None:
 
 
 class LLMClient(ABC):
+    max_output_tokens: int = 4096
+
     @abstractmethod
     async def stream(
         self,

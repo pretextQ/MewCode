@@ -179,7 +179,8 @@ class VCSConfig:
     base_branch: str = "master"
     #: CI 轮询间隔与总超时
     ci_poll_interval_seconds: int = 20
-    ci_timeout_seconds: int = 1800
+    # Reserve half the default job deadline for triage, fixing and publishing.
+    ci_timeout_seconds: int = 900
     #: 推上去多久还没有任何 CI 检查就认为该仓库没配 CI（不阻塞、但记录在案）
     ci_none_grace_seconds: int = 120
 

@@ -747,3 +747,82 @@ async def test_completion_preserves_thinking_across_tool_roundtrip(tmp_path):
     agent = Agent(client, create_default_registry(), "anthropic", work_dir=str(tmp_path))
     assert await agent.run_to_completion("read", conversation=conv) == "done"
     assert conv.history[-1].thinking_blocks[0].signature == "final-signature"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("headless", [False, True])
+@pytest.mark.parametrize("always_overflow", [False, True])
+async def test_context_overflow_compacts_and_retries_once(tmp_path, monkeypatch, headless, always_overflow):
+    from mewcode.client import ContextOverflowError
+    from mewcode.context import CompactBoundary, CompactEvent
+
+    class OverflowClient(MockLLMClient):
+        calls = 0
+
+        async def stream(self, conversation, system="", tools=None):
+            self.calls += 1
+            if self.calls == 1 or always_overflow:
+                raise ContextOverflowError("too long")
+            yield TextDelta("recovered")
+            yield StreamEnd("end_turn")
+
+    manuals = []
+
+    async def compact(conversation, *args, manual=False, **kwargs):
+        if not manual:
+            return None
+        manuals.append(manual)
+        return CompactEvent(before_tokens=100, boundary=CompactBoundary(summary="short", keep=[]))
+
+    monkeypatch.setattr("mewcode.agent.auto_compact", compact)
+    client = OverflowClient([])
+    agent = Agent(client, create_default_registry(), "anthropic", work_dir=str(tmp_path))
+
+    async def run():
+        if headless:
+            return await agent.run_to_completion("hello")
+        conv = ConversationManager()
+        conv.add_user_message("hello")
+        return [e async for e in agent.run(conv)]
+
+    if always_overflow:
+        with pytest.raises(ContextOverflowError):
+            await run()
+    else:
+        await run()
+    assert client.calls == 2
+    assert manuals == [True]
+
+
+def test_fork_tool_results_survive_parent_compaction(tmp_path):
+    from mewcode.context import cleanup_tool_results
+
+    parent = Agent(MockLLMClient([]), create_default_registry(), "anthropic", work_dir=str(tmp_path))
+    child = Agent(MockLLMClient([]), create_default_registry(), "anthropic", work_dir=str(tmp_path))
+    assert parent.session_dir != child.session_dir
+    source = parent.session_dir / "tool.txt"
+    source.write_text("large result", encoding="utf-8")
+    parent.replacement_state.replacements["tool"] = str(source)
+    conv = ConversationManager()
+    child.inherit_tool_results(parent, conv)
+    cleanup_tool_results(parent.session_dir)
+    copied = child.replacement_state.replacements["tool"]
+    assert copied != str(source)
+    assert (child.session_dir / "tool.txt").read_text() == "large result"
+
+
+def test_iteration_reminders_are_replaced_and_not_persisted():
+    from pathlib import Path
+    from tempfile import TemporaryDirectory
+
+    from mewcode.context import apply_tool_result_budget, create_replacement_state
+
+    conv = ConversationManager()
+    conv.add_user_message("hello")
+    for i in range(100):
+        conv.set_system_reminder("plan", f"iteration {i}")
+    assert len(conv.history) == 1
+    assert len(conv.get_messages()) == 2
+    with TemporaryDirectory() as directory:
+        api, _ = apply_tool_result_budget(conv, Path(directory), create_replacement_state())
+        assert api.get_messages()[-1].content == conv.get_messages()[-1].content

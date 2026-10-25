@@ -30,7 +30,9 @@ def _is_ephemeral(name: str) -> bool:
     return any(p.match(name) for p in EPHEMERAL_PATTERNS)
 
 
-async def cleanup_stale_worktrees(manager: WorktreeManager, cutoff_hours: int) -> int:
+async def cleanup_stale_worktrees(
+    manager: WorktreeManager, cutoff_hours: int, *, protected_names: set[str] | None = None,
+) -> int:
     cutoff = datetime.now() - timedelta(hours=cutoff_hours)
     removed = 0
     worktree_dir = Path(manager.worktree_dir)
@@ -39,11 +41,12 @@ async def cleanup_stale_worktrees(manager: WorktreeManager, cutoff_hours: int) -
         return 0
 
     for entry in worktree_dir.iterdir():
-        if not entry.is_dir():
+        if (not entry.is_dir() or entry.is_symlink()
+                or entry.resolve().parent != worktree_dir.resolve()):
             continue
         name = entry.name
 
-        if not _is_ephemeral(name):
+        if not _is_ephemeral(name) or name in (protected_names or set()):
             continue
 
         if manager.current_session and manager.current_session.worktree_name == name:
@@ -75,11 +78,15 @@ async def cleanup_stale_worktrees(manager: WorktreeManager, cutoff_hours: int) -
                     manager._run_git,
                     ["worktree", "remove", "--force", str(entry)],
                 )
+                if result.returncode != 0:
+                    continue
                 if result.returncode == 0:
                     await asyncio.sleep(0.1)
                     await asyncio.to_thread(
                         manager._run_git, ["branch", "-D", f"worktree-{flat_name}"]
                     )
+            if re.fullmatch(r"job-[0-9a-f]{12}", name):
+                await asyncio.to_thread(manager._run_git, ["branch", "-D", f"mewfix/{name}"])
             removed += 1
             log.info("Cleaned up stale worktree: %s", name)
         except Exception as e:
