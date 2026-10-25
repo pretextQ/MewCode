@@ -10,7 +10,7 @@ import subprocess
 import sys
 import uuid
 from ctypes import wintypes
-from typing import Any
+from typing import Any, cast
 
 REAP_TIMEOUT = 5
 
@@ -51,21 +51,25 @@ sys.exit(code)
 """
 
 
+# Windows-only ctypes exports are absent from POSIX type stubs.
+_windows_ctypes = cast(Any, ctypes)
+
+
 class _WindowsJob:
     def __init__(self) -> None:
         self.name = "Local\\MewCode-command-" + uuid.uuid4().hex
-        self.kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        self.kernel = _windows_ctypes.WinDLL("kernel32", use_last_error=True)
         self.kernel.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
         self.kernel.CreateJobObjectW.restype = wintypes.HANDLE
         self.kernel.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
         self.kernel.CloseHandle.argtypes = [wintypes.HANDLE]
         self.handle = self.kernel.CreateJobObjectW(None, self.name)
         if not self.handle:
-            raise ctypes.WinError(ctypes.get_last_error())
+            raise _windows_ctypes.WinError(_windows_ctypes.get_last_error())
 
     def terminate(self) -> None:
         if self.handle and not self.kernel.TerminateJobObject(self.handle, 1):
-            raise ctypes.WinError(ctypes.get_last_error())
+            raise _windows_ctypes.WinError(_windows_ctypes.get_last_error())
 
     def close(self) -> None:
         if self.handle:
@@ -133,7 +137,7 @@ async def _kill_tree(proc: asyncio.subprocess.Process) -> None:
                 )
                 if result.returncode and proc.returncode is None:
                     proc.kill()
-        else:
+        elif sys.platform != "win32":
             try:
                 # The process group retains its ID even after its leader exits.
                 os.killpg(proc.pid, signal.SIGKILL)

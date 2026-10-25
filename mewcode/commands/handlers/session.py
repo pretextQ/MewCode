@@ -48,7 +48,7 @@ async def handle_session(ctx: CommandContext) -> None:
             if not metas:
                 ctx.ui.add_system_message("没有已保存的会话。")
                 return
-            lines: list[str] = ["可恢复的会话（使用 /session resume <id> 或 /session resume <序号>）："]
+            lines = ["可恢复的会话（使用 /session resume <id> 或 /session resume <序号>）："]
             for i, m in enumerate(metas[:15], 1):
                 ts = m.last_active.strftime("%Y-%m-%d %H:%M")
                 title = m.title or "(未命名)"

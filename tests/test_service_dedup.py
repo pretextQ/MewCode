@@ -19,6 +19,7 @@ async def test_concurrent_intake_enqueues_and_notifies_once(tmp_path):
     await store.connect()
     runtime = ServiceRuntime(ServiceConfig(), AsyncMock(), store=store, notifier=AsyncMock())
     runtime.pool = SimpleNamespace(running=True, submit=AsyncMock())
+    runtime.accepting = True
     try:
         draft = JobDraft(fingerprint="same", repo="demo", title="incident")
         results = await asyncio.gather(*(runtime.intake([draft]) for _ in range(20)))

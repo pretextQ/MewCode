@@ -665,7 +665,7 @@ class ExecutionChain:
         store: JobStore,
         runner: AgentRunner,
         *,
-        test_runner: TestRunner | None = None,
+        test_runner: TestRunner | SandboxTestRunner | None = None,
         publisher: Publisher | None = None,
         ci_gate: CIGate | None = None,
         integration_verifier: IntegrationVerifier | None = None,
@@ -941,14 +941,15 @@ class ExecutionChain:
                 await self._record_integration(job.id, integration)
 
             if integration is not None and integration.ran and not integration.passed:
-                feedback = await self._verify_failed(
+                next_feedback = await self._verify_failed(
                     job,
                     attempt,
                     f"integration verification failed: {integration.summary()}",
                     integration.failure_feedback(),
                 )
-                if feedback is None:
+                if next_feedback is None:
                     return None
+                feedback = next_feedback
                 continue
 
             if verify is None or verify.passed:
@@ -967,11 +968,12 @@ class ExecutionChain:
                 )
 
             # 单测失败：记录后重试（是否允许重试由状态机的 attempts 上限决定）
-            feedback = await self._verify_failed(
+            next_feedback = await self._verify_failed(
                 job, attempt, f"verification failed: {verify.summary()}", verify.output or ""
             )
-            if feedback is None:
+            if next_feedback is None:
                 return None
+            feedback = next_feedback
 
     async def _verify_failed(
         self, job: Job, attempt: int, reason: str, output: str

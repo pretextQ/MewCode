@@ -5,7 +5,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
-from mewcode.commands.registry import Command, CommandContext, CommandRegistry, CommandType
+from mewcode.commands.registry import Command, CommandContext, CommandHandler, CommandRegistry, CommandType
 
 if TYPE_CHECKING:
     from mewcode.skills.executor import SkillExecutor
@@ -37,7 +37,7 @@ def register_skill_commands(
         s_desc = skill_desc
 
 
-        def make_handler(name: str) -> callable:
+        def make_handler(name: str) -> CommandHandler:
 
 
             async def handler(ctx: CommandContext) -> None:

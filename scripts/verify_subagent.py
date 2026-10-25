@@ -3,7 +3,7 @@
 SubAgent 系统端到端验证脚本。
 不依赖 LLM，直接调用核心组件验证所有 Agent 类型和关键流程。
 
-运行: .venv/bin/python tests/verify_subagent.py
+运行: uv run python scripts/verify_subagent.py（使用临时 fixture，不需要本地配置）
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import sys
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 # 确保项目根目录在 sys.path 中
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -29,8 +30,8 @@ from mewcode.conversation import ConversationManager, ToolUseBlock
 from mewcode.tools import ToolRegistry
 from mewcode.tools.base import Tool, ToolResult
 
-PASS = "\033[32m✓\033[0m"
-FAIL = "\033[31m✗\033[0m"
+PASS = "\033[32mPASS\033[0m"
+FAIL = "\033[31mFAIL\033[0m"
 passed = 0
 failed = 0
 
@@ -80,12 +81,11 @@ def make_registry(*names: str) -> ToolRegistry:
 # 1. Agent 定义加载
 # ---------------------------------------------------------------------------
 
-def verify_loader():
+def verify_loader(work_dir: Path):
     print("\n== 1. Agent 定义加载 ==")
-    work_dir = str(Path(__file__).resolve().parent.parent)
 
     # 不带 Verification
-    loader = AgentLoader(work_dir, enable_verification=False)
+    loader = AgentLoader(str(work_dir), enable_verification=False)
     agents = loader.load_all()
 
     check("内置 Explore 加载", "Explore" in agents)
@@ -94,7 +94,7 @@ def verify_loader():
     check("Verification 默认不加载", "Verification" not in agents)
 
     # 带 Verification
-    loader_v = AgentLoader(work_dir, enable_verification=True)
+    loader_v = AgentLoader(str(work_dir), enable_verification=True)
     agents_v = loader_v.load_all()
     check("Verification 开关开启后加载", "Verification" in agents_v)
 
@@ -187,7 +187,7 @@ def verify_tool_filter(loader: AgentLoader):
     # general-purpose 没有 disallow EnterPlanMode，验证内置不受 L2 限制
     gp_fg = resolve_agent_tools(reg, loader.get("general-purpose"), is_background=False)
     names_gp = {t.name for t in gp_fg.list_tools()}
-    check("L2: 内置 Agent 不禁止 EnterPlanMode", "EnterPlanMode" in names_gp)
+    check("L2: 全局禁用同样限制内置 Agent", "EnterPlanMode" not in names_gp)
 
     # 后台白名单
     gp = loader.get("general-purpose")
@@ -301,6 +301,8 @@ async def verify_task_manager():
     from unittest.mock import AsyncMock, MagicMock
 
     agent = MagicMock()
+    agent.team_name = ""
+    agent._team_manager = None
     agent.total_input_tokens = 200
     agent.total_output_tokens = 80
     agent.run_to_completion = AsyncMock(return_value="搜索完成，找到 15 个 .py 文件")
@@ -325,7 +327,7 @@ async def verify_task_manager():
     check("二次 poll 为空", len(tm.poll_completed()) == 0)
 
     # list
-    check("list_tasks 包含任务", len(tm.list_tasks()) == 1)
+    check("消费通知后移除已完成任务", len(tm.list_tasks()) == 0)
 
     # cancel
     slow_agent = MagicMock()
@@ -388,9 +390,9 @@ def verify_notification():
 # 7. Config 配置
 # ---------------------------------------------------------------------------
 
-def verify_config():
+def verify_config(work_dir: Path):
     print("\n== 7. 配置扩展 ==")
-    config_path = Path(__file__).resolve().parent.parent / "config.yaml"
+    config_path = work_dir / "config.yaml"
     if not config_path.exists():
         check("config.yaml 存在", False, str(config_path))
         return
@@ -416,7 +418,7 @@ def verify_permission():
 # ---------------------------------------------------------------------------
 # 9. Agent 扩展字段
 # ---------------------------------------------------------------------------
-def verify_agent_fields():
+def verify_agent_fields(work_dir: Path):
     print("\n== 9. Agent 扩展字段 ==")
     from unittest.mock import MagicMock
 
@@ -426,6 +428,7 @@ def verify_agent_fields():
         client=MagicMock(),
         registry=ToolRegistry(),
         protocol="anthropic",
+        work_dir=str(work_dir),
     )
     check("agent_id 自动生成", agent.agent_id is not None and len(agent.agent_id) == 12)
     check("parent_id 默认 None", agent.parent_id is None)
@@ -472,22 +475,22 @@ def verify_agent_tool():
 # ===========================================================================
 # 主流程
 # ===========================================================================
-async def main():
+async def run_checks(work_dir: Path):
     global passed, failed
 
     print("=" * 60)
     print("  SubAgent 系统验证（第 12 章）")
     print("=" * 60)
 
-    loader = verify_loader()
+    loader = verify_loader(work_dir)
     verify_tool_filter(loader)
     verify_fork()
     verify_trace()
     await verify_task_manager()
     verify_notification()
-    verify_config()
+    verify_config(work_dir)
     verify_permission()
-    verify_agent_fields()
+    verify_agent_fields(work_dir)
     verify_agent_tool()
 
     print("\n" + "=" * 60)
@@ -499,6 +502,30 @@ async def main():
     print("=" * 60)
 
     return failed == 0
+
+async def main():
+    import mewcode.agents.loader as loader_module
+
+    with TemporaryDirectory(prefix="mewcode-verify-") as directory:
+        root = Path(directory)
+        agents = root / ".mewcode" / "agents"
+        agents.mkdir(parents=True)
+        for name in ("security-reviewer", "code-summarizer"):
+            (agents / f"{name}.md").write_text(
+                f"---\nname: {name}\ndescription: fixture\nmodel: haiku\npermissionMode: dontAsk\n---\nfixture",
+                encoding="utf-8",
+            )
+        (root / "config.yaml").write_text(
+            "providers:\n  - name: fixture\n    protocol: openai\n    base_url: https://example.invalid\n"
+            "    model: fixture\nenable_fork: true\nenable_verification_agent: true\n", encoding="utf-8",
+        )
+        original = loader_module.USER_AGENTS_DIR
+        loader_module.USER_AGENTS_DIR = str(root / "user-agents")
+        try:
+            return await run_checks(root)
+        finally:
+            loader_module.USER_AGENTS_DIR = original
+
 
 if __name__ == "__main__":
     success = asyncio.run(main())

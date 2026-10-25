@@ -17,6 +17,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -280,6 +281,8 @@ async def make_runtime(tmp_path: Path, policy: str | None = None):
 
     config = ServiceConfig(repos={"demo": RepoConfig(name="demo", path=str(repo))})
     runtime = ServiceRuntime(config, handler=noop_handler, store=store)
+    runtime.accepting = True
+    runtime.pool = SimpleNamespace(running=True, submit=AsyncMock())
     return runtime, store
 
 

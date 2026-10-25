@@ -13,6 +13,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from mewcode.cache import FileCache
 from mewcode.client import ContextOverflowError, LLMClient
 from mewcode.context import (
     CompactBoundary,
@@ -29,6 +30,7 @@ from mewcode.context import (
 from mewcode.conversation import ConversationManager, ToolResultBlock, ToolUseBlock
 from mewcode.conversation import ThinkingBlock as ConvThinkingBlock
 from mewcode.hooks import HookContext, HookEngine
+from mewcode.hooks.engine import OwnedHookEngine
 from mewcode.memory.auto_memory import MemoryManager
 from mewcode.permissions import (
     PermissionChecker,
@@ -267,7 +269,7 @@ class Agent:
         context_window: int = 200_000,
         instructions_content: str = "",
         memory_manager: MemoryManager | None = None,
-        hook_engine: HookEngine | None = None,
+        hook_engine: HookEngine | OwnedHookEngine | None = None,
     ) -> None:
         self.client = client
         self.registry = registry
@@ -293,7 +295,8 @@ class Agent:
         self.total_output_tokens = 0
         self.instructions_content = instructions_content
         self.memory_manager = memory_manager
-        self.hook_engine = hook_engine
+        self.file_cache: FileCache | None = None
+        self.hook_engine: HookEngine | OwnedHookEngine | None = hook_engine
         self._loop_count = 0
         self._extracting = False
         self.session_id: str = ""
@@ -371,10 +374,11 @@ class Agent:
             self._agent_catalog_list = catalog_list
 
     def _build_hook_context(self, event: str, **kwargs: str | dict) -> HookContext:
+        tool_args = kwargs.get("tool_args", {})
         return HookContext(
             event_name=event,
             tool_name=str(kwargs.get("tool_name", "")),
-            tool_args=kwargs.get("tool_args", {}),
+            tool_args=tool_args if isinstance(tool_args, dict) else {},
             file_path=str(kwargs.get("file_path", "")),
             message=str(kwargs.get("message", "")),
             error=str(kwargs.get("error", "")),
@@ -508,9 +512,9 @@ class Agent:
                 conversation.transient_reminders.pop("plan", None)
 
             if self.hook_engine:
-                for note in self.hook_engine.drain_notifications():
+                for notification in self.hook_engine.drain_notifications():
                     conversation.add_system_reminder(
-                        f"Hook [{note.hook_id}] {note.event}: {note.output}"
+                        f"Hook [{notification.hook_id}] {notification.event}: {notification.output}"
                     )
 
             deferred_names = self.registry.get_deferred_tool_names()
@@ -704,11 +708,11 @@ class Agent:
                             )
                             continue
 
-                        async for item in self._execute_tool(tc):
-                            if isinstance(item, PermissionRequest):
-                                yield item
+                        async for execution_item in self._execute_tool(tc):
+                            if isinstance(execution_item, PermissionRequest):
+                                yield execution_item
                             else:
-                                result, elapsed, is_unknown = item
+                                result, elapsed, is_unknown = execution_item
 
                         if result is None:
                             result = ToolResult(output="Error: no result from tool", is_error=True)
@@ -985,6 +989,7 @@ class Agent:
 
             if self.permission_checker:
                 tool = self.registry.get(tc.tool_name)
+                assert tool is not None
                 decision = self.permission_checker.check(tool, tc.arguments)
                 if decision.effect == "ask":
                     interactive.append(i)
@@ -1221,9 +1226,10 @@ class Agent:
     ) -> AsyncIterator[AgentEvent]:
         for attempt in range(2):
             try:
-                stream = self._stream_with_retry(
-                    lambda conv=api_conv: self.client.stream(conv, system=system, tools=tools)
-                )
+                def request(conv: ConversationManager = api_conv) -> AsyncIterator[StreamEvent]:
+                    return self.client.stream(conv, system=system, tools=tools)
+
+                stream = self._stream_with_retry(request)
                 async for event in collector.consume(stream):
                     yield event
                 return
