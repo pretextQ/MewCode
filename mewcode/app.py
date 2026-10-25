@@ -7,6 +7,7 @@ import random
 import re
 import time as _time
 from collections.abc import Coroutine
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -16,6 +17,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message as TMessage
 from textual.theme import Theme
+from textual.timer import Timer
 from textual.widgets import Markdown, OptionList, Static, TextArea
 from textual.widgets.option_list import Option
 
@@ -610,8 +612,10 @@ class MewCodeApp(App):
         self._thinking_start: float = 0.0
         self._thinking_verb: str = ""
         self._spinner_idx: int = 0
-        self._spinner_timer = None
+        self._spinner_timer: Timer | None = None
         self._spinner_label: Static | None = None
+        self._pending_askuser_event: AskUserEvent | None = None
+        self._pending_perm_request: PermissionRequest | None = None
         self._mcp_server_info: str = ""
         self._agent_task: asyncio.Task[None] | None = None
         self._subagent_start_time: float | None = None
@@ -639,13 +643,17 @@ class MewCodeApp(App):
         self._mcp_instructions_ok: bool = False
         self._mcp_connecting: bool = False
         self._teammate_tree: TeammateTree | None = None
-        self._teammate_timer = None
+        self._teammate_timer: Timer | None = None
 
     @staticmethod
     def _make_banner(model: str = "", work_dir: str = "") -> RichText:
         t = RichText()
         t.append(" /\\_/\\    ", style="bold color(99)")
-        t.append("MewCode v0.1.0\n", style="color(242)")
+        try:
+            release = "v" + version("mewcode")
+        except PackageNotFoundError:
+            release = "development"
+        t.append(f"MewCode {release}\n", style="color(242)")
         t.append("( o.o )   ", style="bold color(99)")
         t.append(f"{model}\n" if model else "\n", style="color(242)")
         t.append(" > ^ <    ", style="bold color(99)")
@@ -977,6 +985,8 @@ class MewCodeApp(App):
 
 
     def _build_command_context(self, args: str) -> CommandContext:
+        if self.agent is None or self.session_manager is None or self.memory_manager is None:
+            raise RuntimeError("select a provider before running commands")
         return CommandContext(
             args=args,
             agent=self.agent,
@@ -1035,12 +1045,12 @@ class MewCodeApp(App):
         if name == "":
             commands = self.command_registry.list_commands()
             lines = ["可用命令："]
-            for cmd in commands:
-                aliases_str = ", ".join(f"/{a}" for a in cmd.aliases)
-                name_part = f"/{cmd.name}"
+            for listed_command in commands:
+                aliases_str = ", ".join(f"/{a}" for a in listed_command.aliases)
+                name_part = f"/{listed_command.name}"
                 if aliases_str:
                     name_part += f", {aliases_str}"
-                lines.append(f"  {name_part:<24} {cmd.description}")
+                lines.append(f"  {name_part:<24} {listed_command.description}")
             self._show_system_message("\n".join(lines))
             return
 
@@ -1181,13 +1191,13 @@ class MewCodeApp(App):
                     if isinstance(child, ToolCallBlock) and child.tool_name in COLLAPSIBLE_TOOLS:
                         child.display = summary._expanded
 
-        for block in self.query(SubAgentBlock):
-            if block._done:
-                block._collapsed = not block._collapsed
-                block._render_done()
+        for subagent_block in self.query(SubAgentBlock):
+            if subagent_block._done:
+                subagent_block._collapsed = not subagent_block._collapsed
+                subagent_block._render_done()
 
     @staticmethod
-    def _focused_dialog(focused) -> object | None:
+    def _focused_dialog(focused) -> InlineAskUserWidget | InlinePlanWidget | InlinePermissionWidget | None:
         """App 级 priority 绑定先于聚焦组件命中；弹窗聚焦时把 Esc /
         shift+tab 转发给弹窗自身，而不是吞掉（否则 Esc 会取消整个
         agent 运行、plan 弹窗的 shift+tab 成为死绑定）。"""
@@ -1197,9 +1207,8 @@ class MewCodeApp(App):
         from mewcode.permission_dialog import InlinePermissionWidget
         from mewcode.plan_dialog import InlinePlanWidget
 
-        for cls in (InlineAskUserWidget, InlinePlanWidget, InlinePermissionWidget):
-            if isinstance(focused, cls):
-                return focused
+        if isinstance(focused, (InlineAskUserWidget, InlinePlanWidget, InlinePermissionWidget)):
+            return focused
         return None
 
     def action_cancel(self) -> None:
@@ -1325,13 +1334,14 @@ class MewCodeApp(App):
         # 准备 AI 回复区域
         ai_row = Vertical(classes="ai-row")
         await chat.mount(ai_row)
-        streaming_label = Static("", classes="message ai-message")
+        streaming_label: Static | None = Static("", classes="message ai-message")
+        assert streaming_label is not None
         await ai_row.mount(streaming_label)
 
         accumulated_text = ""
         streaming_rich = None
         last_stream_refresh = 0.0
-        tool_blocks: dict[str, ToolCallBlock] = {}
+        tool_blocks: dict[str, ToolCallBlock | SubAgentBlock] = {}
 
         # 在聊天区底部启动持续旋转的加载动画
         self._thinking_start = _time.monotonic()
@@ -1402,7 +1412,7 @@ class MewCodeApp(App):
                     if _is_subagent_tool(event.tool_name):
                         agent_type = event.arguments.get("subagent_type", "")
                         desc = event.arguments.get("description", "")
-                        block = SubAgentBlock(
+                        block: ToolCallBlock | SubAgentBlock = SubAgentBlock(
                             agent_type or "agent",
                             desc,
                             classes="tool-block subagent-block",
@@ -1430,9 +1440,9 @@ class MewCodeApp(App):
                     await self._handle_permission_request(event)
 
                 elif isinstance(event, ToolResultEvent):
-                    block = tool_blocks.get(event.tool_id)
-                    if block:
-                        block.set_result(event.output, event.is_error, event.elapsed)
+                    completed_block = tool_blocks.get(event.tool_id)
+                    if completed_block:
+                        completed_block.set_result(event.output, event.is_error, event.elapsed)
                     self.call_after_refresh(chat.scroll_end, animate=False)
 
                     ask_tool = self.registry.get("AskUserQuestion")
@@ -1441,7 +1451,9 @@ class MewCodeApp(App):
                         and ask_tool.current_question() is not None
                     ):
                         # 兜底：工具已完成但事件仍挂起（异步完成场景）
-                        await self._handle_askuser(ask_tool.current_question())
+                        pending_question = ask_tool.current_question()
+                        if pending_question is not None:
+                            await self._handle_askuser(pending_question)
 
                 elif isinstance(event, TurnComplete):
                     streaming_rich = None

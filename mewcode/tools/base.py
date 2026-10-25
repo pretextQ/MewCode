@@ -20,7 +20,7 @@ ParamsT = TypeVar("ParamsT", bound=BaseModel)
 
 def decode_output(raw: bytes) -> str:
     """Prefer UTF-8; accept the host code page for legacy command/file output."""
-    for encoding in ("utf-8-sig", "oem", locale.getpreferredencoding(False), "mbcs"):
+    for encoding in ("utf-8-sig", locale.getpreferredencoding(False), "oem", "mbcs"):
         try:
             return raw.decode(encoding)
         except (UnicodeDecodeError, LookupError):

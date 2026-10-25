@@ -32,7 +32,7 @@ class BackgroundTask:
     result: str = ""
     start_time: float = field(default_factory=time.monotonic)
     end_time: float | None = None
-    cancel: Callable[[], None] | None = None
+    cancel: Callable[[], bool] | None = None
     progress: ProgressInfo = field(default_factory=ProgressInfo)
 
 

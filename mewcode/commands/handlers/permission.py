@@ -34,14 +34,14 @@ async def handle_permission(ctx: CommandContext) -> None:
             modes = ", ".join(_MODE_NAMES.keys())
             ctx.ui.add_system_message(f"用法: /permission mode <模式>\n可选: {modes}")
             return
-        mode = _MODE_NAMES.get(mode_str)
-        if mode is None:
+        selected_mode = _MODE_NAMES.get(mode_str)
+        if selected_mode is None:
             modes = ", ".join(_MODE_NAMES.keys())
             ctx.ui.add_system_message(f"未知模式: {mode_str}\n可选: {modes}")
             return
-        ctx.agent.set_permission_mode(mode)
+        ctx.agent.set_permission_mode(selected_mode)
         ctx.ui.refresh_status()
-        ctx.ui.add_system_message(f"权限模式已切换为: {mode.value}")
+        ctx.ui.add_system_message(f"权限模式已切换为: {selected_mode.value}")
 
     elif sub == "rules":
         checker = ctx.agent.permission_checker
@@ -74,7 +74,7 @@ async def handle_permission(ctx: CommandContext) -> None:
             )
             return
         try:
-            rule = parse_rule(rule_parts[0], rule_parts[1])
+            rule = parse_rule(rule_parts[0], "allow" if rule_parts[1] == "allow" else "deny")
         except ValueError as e:
             ctx.ui.add_system_message(str(e))
             return

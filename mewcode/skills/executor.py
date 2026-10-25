@@ -141,7 +141,7 @@ class SkillExecutor:
 
         history = self.agent._conversation.history if hasattr(self.agent, '_conversation') else []
         if not history:
-            main_history = []
+            main_history: list[Message] = []
         else:
             main_history = history
 

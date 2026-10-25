@@ -7,6 +7,8 @@ from __future__ import annotations
 import json
 from contextlib import asynccontextmanager
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -252,6 +254,8 @@ class TestIntakeNotification:
                 store=store,
                 notifier=notifier,
             )
+            runtime.accepting = True
+            runtime.pool = SimpleNamespace(running=True, submit=AsyncMock())
             await runtime.intake([JobDraft(fingerprint="fp", repo="demo", title="5xx 突增")])
 
         assert len(captured) == 1
@@ -274,5 +278,7 @@ class TestIntakeNotification:
                 store=store,
                 notifier=Boom(),
             )
+            runtime.accepting = True
+            runtime.pool = SimpleNamespace(running=True, submit=AsyncMock())
             result = await runtime.intake([JobDraft(fingerprint="fp", repo="demo", title="t")])
         assert len(result.accepted) == 1   # 通知炸了也要受理成功

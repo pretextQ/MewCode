@@ -6,6 +6,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -44,7 +45,8 @@ def is_running(pid):
     stat = Path(f"/proc/{pid}/stat")
     try:
         return not (stat.exists() and stat.read_text().rsplit(")", 1)[1].split()[0] == "Z")
-    except FileNotFoundError:
+    except (FileNotFoundError, ProcessLookupError):
+        # The process can exit after the existence check or while reading /proc.
         return False
 
 
@@ -54,6 +56,19 @@ async def wait_for_descendants(root):
         if time.monotonic() > deadline:
             pytest.fail("descendants did not start")
         await asyncio.sleep(0.01)
+
+
+@pytest.mark.parametrize("error", [FileNotFoundError, ProcessLookupError])
+def test_process_exit_while_reading_stat(monkeypatch, error):
+    # Exercise both Linux /proc disappearance errors, including on Windows.
+    monkeypatch.setattr(sys.modules[__name__], "os", SimpleNamespace(name="posix", kill=lambda pid, sig: None))
+    monkeypatch.setattr(Path, "exists", lambda self: True)
+
+    def vanished(self):
+        raise error("process exited during read")
+
+    monkeypatch.setattr(Path, "read_text", vanished)
+    assert not is_running(12345)
 
 
 async def assert_reaped(root):

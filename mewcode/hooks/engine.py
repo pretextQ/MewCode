@@ -172,6 +172,9 @@ class OwnedHookEngine:
         self.hooks = engine.hooks
 
 
+    def for_owner(self, owner: str) -> OwnedHookEngine:
+        return self._engine.for_owner(owner)
+
     def find_matching_hooks(self, event: str, ctx: HookContext) -> list[Hook]:
         return self._engine.find_matching_hooks(event, ctx)
 
