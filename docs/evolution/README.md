@@ -1,6 +1,7 @@
 # 演进与验证证据
 
 后续计划：[借鉴 PR-Agent 的改进计划](05-pr-review-improvements.md)（2026-10-25 记录，尚未实施）。
+待立项笔记：[借鉴 Tianshu 的内核监督闭环](06-tianshu-supervision-notes.md)、[借鉴 Tianshu 的测试体系](07-tianshu-test-notes.md)（均于 2026-10-27 对照上游固定提交完成静态审阅与修订，尚未实施）。
 
 更新日期：2026-10-09。M1–M3 已完成；R1–R5 修复后的当前基线为 3f10408。
 

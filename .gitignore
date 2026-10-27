@@ -12,7 +12,15 @@ build/
 !.mewcode/skills/
 .claude/
 CLAUDE.md
-docs/
+docs/*
+!docs/README.md
+!docs/next-session-prompt.md
+!docs/evolution/
+docs/evolution/*
+!docs/evolution/README.md
+!docs/evolution/05-pr-review-improvements.md
+!docs/evolution/06-tianshu-supervision-notes.md
+!docs/evolution/07-tianshu-test-notes.md
 .coverage
 
 .mypy_cache/
