@@ -1,0 +1,41 @@
+[
+  {
+    "id": "hidden_error",
+    "expected_issue": true,
+    "before": "def parse_value(value):\n    return int(value)\n",
+    "after": "def parse_value(value):\n    try:\n        return int(value)\n    except Exception:\n        return None\n",
+    "anchor": {"side": "new", "line": 4},
+    "label": "Suppressing all parse errors hides the failure instead of fixing its cause."
+  },
+  {
+    "id": "unbounded_retry",
+    "expected_issue": true,
+    "before": "def load(fetch):\n    return fetch()\n",
+    "after": "def load(fetch):\n    while True:\n        try:\n            return fetch()\n        except Exception:\n            continue\n",
+    "anchor": {"side": "new", "line": 2},
+    "label": "Retries have no attempt limit, delay or cancellation boundary."
+  },
+  {
+    "id": "removed_permission_check",
+    "expected_issue": true,
+    "before": "def read_secret(authorized):\n    if not authorized:\n        raise PermissionError()\n    return secret\n",
+    "after": "def read_secret(authorized):\n    return secret\n",
+    "anchor": {"side": "old", "line": 2},
+    "label": "Removing authorization exposes the secret to unauthorized callers."
+  },
+  {
+    "id": "correct_arithmetic_fix",
+    "expected_issue": false,
+    "before": "def add(a, b):\n    return a - b\n",
+    "after": "def add(a, b):\n    return a + b\n",
+    "label": "The operator change fixes the supplied arithmetic failure."
+  },
+  {
+    "id": "large_diff_unresolved_cause",
+    "expected_issue": true,
+    "before": "def add(a, b):\n    return a - b\n",
+    "after": "def add(a, b):\n    return a - b\n",
+    "padding_lines": 5000,
+    "label": "Added filler leaves the original arithmetic defect unresolved; a partial input must stay incomplete."
+  }
+]

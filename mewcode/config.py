@@ -229,6 +229,19 @@ class SandboxConfig:
 
 
 @dataclass
+class ReviewConfig:
+    """Optional, advisory-only review using a fresh context on the service provider."""
+
+    enabled: bool = False
+    max_input_bytes: int = 12_000
+    max_output_tokens: int = 2048
+    token_budget: int = 24_000
+    max_calls_per_job: int = 2
+    timeout_seconds: int = 60
+    max_evidence_bytes: int = 20_000_000
+
+
+@dataclass
 class ServiceConfig:
     host: str = "127.0.0.1"
     port: int = 8321
@@ -253,6 +266,7 @@ class ServiceConfig:
     #: 内部工具链（M2 W3）：只读 MCP server。直跑时在服务进程内连接；沙箱
     #: 模式下随最小配置写进容器、在容器内连接（见 service/sandbox.py）。
     mcp_servers: list[MCPServerConfig] = field(default_factory=list)
+    review: ReviewConfig = field(default_factory=ReviewConfig)
 
 
 @dataclass
@@ -327,6 +341,7 @@ def _load_single_file(path: Path) -> AppConfig:
         # None 与 [] 语义不同（未配置 vs 明确关闭），不能合并成同一个值
         skills=None if svc["skills"] is None else list(svc["skills"]),
         token_budget=svc["token_budget"],
+        review=ReviewConfig(**svc["review"]),
         notify=NotifyConfig(
             type=svc["notify"]["type"],
             webhook_url=svc["notify"]["webhook_url"],

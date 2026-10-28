@@ -56,6 +56,14 @@ mcp_servers:
 #   dedup_window_seconds: 1800 # 同指纹告警去重窗口
 #   data_dir: .mewcode/service # jobs.db 等运行时状态
 #   token_budget: 0            # 单 job token 预算，0 = 不限
+#   review:                    # 固定提交上的独立审查，仅提供意见，默认关闭
+#     enabled: false
+#     max_input_bytes: 12000   # 实际 user JSON 的 UTF-8 字节预算
+#     max_output_tokens: 2048
+#     token_budget: 24000      # 单 job 审查累计 token 预算，仍受上方总预算约束
+#     max_calls_per_job: 2     # 每次固定提交最多单次请求；跨 CI 重试累计限制
+#     timeout_seconds: 60
+#     max_evidence_bytes: 20000000 # 完整 diff 超过此值时保留证据但不送模型
 #   repo_label: repository     # 告警里承载仓库名的 label
 #   notify:
 #     type: none               # none | slack | dingtalk | wecom

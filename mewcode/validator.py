@@ -307,6 +307,29 @@ def _validate_sandbox(raw: dict | None) -> dict:
     return merged
 
 
+def validate_review(raw: object) -> dict:
+    defaults = {
+        "enabled": False, "max_input_bytes": 12_000, "max_output_tokens": 2048,
+        "token_budget": 24_000, "max_calls_per_job": 2, "timeout_seconds": 60,
+        "max_evidence_bytes": 20_000_000,
+    }
+    if raw is None:
+        return defaults
+    if not isinstance(raw, dict) or raw.keys() - defaults.keys():
+        raise ConfigError("'service.review' must be a mapping with known review settings")
+    result = {**defaults, **raw}
+    result["enabled"] = validate_bool_field(result["enabled"], "service.review.enabled")
+    for key in defaults.keys() - {"enabled"}:
+        result[key] = _positive_int(result[key], f"service.review.{key}")
+    for key, maximum in {
+        "max_input_bytes": 200_000, "max_output_tokens": 16_384,
+        "max_calls_per_job": 10, "timeout_seconds": 600, "max_evidence_bytes": 100_000_000,
+    }.items():
+        if result[key] > maximum:
+            raise ConfigError(f"'service.review.{key}' must be <= {maximum}")
+    return result
+
+
 def validate_service(raw_service: dict | None) -> dict:
     """校验 ``service:`` 配置段（M1 无头服务），返回清洗后的字典。
 
@@ -327,6 +350,7 @@ def validate_service(raw_service: dict | None) -> dict:
         # 两者必须可区分：验收标准里的"关闭规范"就是写 skills: []
         "skills": None,
         "token_budget": 0,
+        "review": validate_review(None),
         "mcp_servers": [],
         "notify": {"type": "none", "webhook_url": "", "timeout_seconds": 10},
         # 沙箱默认值同样走校验器：两条返回路径（有/无 service 段）必须给出同一份默认值
@@ -441,6 +465,7 @@ def validate_service(raw_service: dict | None) -> dict:
         "repo_label": _optional_str(merged["repo_label"], "service.repo_label") or "repository",
         "skills": skills,
         "token_budget": token_budget,
+        "review": validate_review(raw_service.get("review")),
         "mcp_servers": validate_mcp_servers(raw_service.get("mcp_servers")),
         "notify": notify,
         "vcs": vcs,

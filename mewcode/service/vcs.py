@@ -75,7 +75,7 @@ class VCSProvider(Protocol):
 
     async def commit_all(self, work_dir: str, message: str, exclude: tuple[str, ...] = ()) -> bool: ...
 
-    async def push(self, work_dir: str, branch: str) -> None: ...
+    async def push(self, work_dir: str, branch: str, *, expected_sha: str = "") -> None: ...
 
     async def head_sha(self, work_dir: str) -> str: ...
 
@@ -283,12 +283,14 @@ class GitHubVCS:
         user = "x-access-token" if "github" in host else "git"
         return f"{protocol}://{user}@{host}/{slug}.git"
 
-    async def push(self, work_dir: str, branch: str) -> None:
+    async def push(self, work_dir: str, branch: str, *, expected_sha: str = "") -> None:
+        if expected_sha and not re.fullmatch(r"(?:[a-f0-9]{40}|[a-f0-9]{64})", expected_sha):
+            raise VCSError("invalid pinned push revision")
         token = await self.resolve_token(work_dir)
         url = await self.remote_url(work_dir)
         code, out = await self._git(
             work_dir,
-            ["push", url, f"HEAD:refs/heads/{branch}"],
+            ["push", url, f"{expected_sha or 'HEAD'}:refs/heads/{branch}"],
             askpass_token=token,
         )
         if code != 0:

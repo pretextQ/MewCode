@@ -67,6 +67,7 @@ async def _serve(config: AppConfig, host: str, port: int, recover: bool = True) 
     from mewcode.service.notify import RepoPolicyNotifier, build_notifier
     from mewcode.service.policy import RepoPolicyLoader
     from mewcode.service.publisher import GitHubCIGate, PullRequestPublisher
+    from mewcode.service.review import ReviewService
     from mewcode.service.runtime import ServiceRuntime
     from mewcode.service.sandbox import DockerSandbox
     from mewcode.service.triggers import build_adapters
@@ -112,7 +113,10 @@ async def _serve(config: AppConfig, host: str, port: int, recover: bool = True) 
         test_runner=SandboxTestRunner(
             sandbox, allow_host_fallback=service.sandbox.allow_host_fallback
         ) if sandbox else None,
-        publisher=PullRequestPublisher(vcs, store, service) if vcs else None,
+        publisher=PullRequestPublisher(
+            vcs, store, service, ReviewService(service, store, provider, policy_loader=policy_loader)
+            if service.review.enabled else None,
+        ) if vcs else None,
         ci_gate=GitHubCIGate(vcs) if vcs else None,
         integration_verifier=integration_verifier,
         notifier=notifier,

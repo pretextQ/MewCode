@@ -35,6 +35,7 @@ from mewcode.processes import create_shell_process, kill_process_tree, release_p
 from . import sop
 from .jobs import InvalidTransition, Job, JobStore
 from .policy import PolicyError, RepoPolicy, RepoPolicyLoader
+from .review_models import ReviewResult
 from .sandbox import SandboxUnavailable
 
 log = logging.getLogger(__name__)
@@ -231,6 +232,7 @@ class ExecutionContext:
     #: 目标分支（M3 W2 仓库策略）：worktree 基线与 PR base 共用；空 = publisher
     #: 回落到服务配置 vcs.base_branch
     target_branch: str = ""
+    review: ReviewResult | None = None
 
     def diff_stat(self) -> str:
         added = sum(

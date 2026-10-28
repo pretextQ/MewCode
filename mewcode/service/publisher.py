@@ -9,6 +9,7 @@ PR body 由**服务层结构化拼装**（告警摘要 / 根因分析 / 修复�
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from typing import Any
@@ -17,6 +18,9 @@ from mewcode.config import ServiceConfig
 
 from .execution import COMMIT_EXCLUDES, ExecutionContext, PublishResult
 from .jobs import Job, JobStore
+from .review import ReviewService
+from .review_models import ReviewResult
+from .review_render import render_review
 from .sop import extract_logs, render_alert_context
 from .vcs import CheckStatus, VCSError, VCSProvider
 
@@ -151,6 +155,8 @@ def build_pr_body(
         "",
         "## 根因分析",
         "",
+        "> 以下根因分析与修复说明为修复者自述，服务验证事实见“测试证据”。",
+        "",
         root_cause,
         "",
         "## 修复说明",
@@ -213,6 +219,7 @@ def build_pr_body(
         lines.append("")
         lines.append("> 内部工具均声明只读（MCP readOnlyHint）：可查询，不可修改外部系统。")
 
+    lines += render_review(context.review)
     lines += ["", "## 审计记录", "", f"- 修复尝试次数：{context.attempts}", ""]
     entries = filter_timeline(timeline)
     if entries:
@@ -233,10 +240,13 @@ def build_pr_body(
 class PullRequestPublisher:
     """实现 ExecutionChain 的 Publisher 契约（branch → commit → push → PR）。"""
 
-    def __init__(self, vcs: VCSProvider, store: JobStore, config: ServiceConfig) -> None:
+    def __init__(
+        self, vcs: VCSProvider, store: JobStore, config: ServiceConfig, reviewer: ReviewService | None = None,
+    ) -> None:
         self.vcs = vcs
         self.store = store
         self.config = config
+        self.reviewer = reviewer
 
     async def publish(self, job: Job, context: ExecutionContext) -> PublishResult:
         branch = f"mewfix/{job.id}"
@@ -249,7 +259,24 @@ class PullRequestPublisher:
         committed = await self.vcs.commit_all(context.work_dir, message, exclude=COMMIT_EXCLUDES)
         if not committed:
             raise VCSError("nothing to commit: worktree has no staged changes")
-        await self.vcs.push(context.work_dir, branch)
+        if self.config.review.enabled:
+            head = await self.vcs.head_sha(context.work_dir)
+            if self.reviewer is None:
+                context.review = ReviewResult(review_id="unconfigured", head_sha=head, reason="reviewer_unconfigured")
+                await self.store.add_event(job.id, "review_finished", json.dumps(context.review.to_dict()))
+            else:
+                try:
+                    context.review = await self.reviewer.run(job, context, head)
+                except Exception as exc:
+                    context.review = ReviewResult(
+                        review_id="unavailable", head_sha=head, reason=f"review_unavailable:{type(exc).__name__}",
+                    )
+                    await self.store.add_event(job.id, "review_finished", json.dumps(context.review.to_dict()))
+            if await self.vcs.head_sha(context.work_dir) != head:
+                raise VCSError("head changed during independent review; refusing to publish stale evidence")
+            await self.vcs.push(context.work_dir, branch, expected_sha=head)
+        else:
+            await self.vcs.push(context.work_dir, branch)
 
         slug = await self.vcs.resolve_repo_slug(context.work_dir)
         timeline = [(e.ts, e.kind, e.detail) for e in await self.store.events(job.id)]
@@ -284,5 +311,5 @@ class GitHubCIGate:
         self, job: Job, context: ExecutionContext, published: PublishResult
     ) -> CheckStatus:
         slug = await self.vcs.resolve_repo_slug(context.work_dir)
-        sha = await self.vcs.head_sha(context.work_dir)
+        sha = context.review.head_sha if context.review is not None else await self.vcs.head_sha(context.work_dir)
         return await self.vcs.poll_checks(slug, sha)

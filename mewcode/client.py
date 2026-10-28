@@ -144,6 +144,17 @@ class LLMClient(ABC):
     def set_max_output_tokens(self, tokens: int) -> None:  # noqa: B027 — 有意的默认 no-op，子类按能力覆写
         pass
 
+    async def close(self) -> None:
+        """Release an SDK transport after a standalone request (test clients may have none)."""
+        transport = getattr(self, "_client", None)
+        if transport is not None:
+            await transport.close()
+
+    def set_max_retries(self, retries: int) -> None:
+        transport = getattr(self, "_client", None)
+        if transport is not None:
+            transport.max_retries = retries
+
 
 class AnthropicClient(LLMClient):
     def __init__(self, config: ProviderConfig) -> None:
