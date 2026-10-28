@@ -5,6 +5,10 @@
 与 [06 号监督闭环笔记](06-tianshu-supervision-notes.md) 同批调研，
 独立成篇（一篇一主题）。是否立项由维护者审阅后决定。
 
+2026-10-28 实施更新：第一阶段最小工程守卫已实现（静态依赖边界、重点文件行数预算、
+四项隔离缺陷回植），实现范围和可复现命令见 [维护记录](../../guides/maintenance.md)。
+下文仍保留调研时的拟议范围；上下文注入面申报表、更多回植及监督闭环不属于本阶段。
+
 来源与方法：初稿对 `D:\projects\Tianshu-harness`（v3.37.0，Apache-2.0）做静态阅读。
 本次审阅从 GitHub 下载并比对两份笔记引用的 16 个文件，均与本地快照一致；
 固定基线为 [`23afee4733fdce04abf82e1e3fcc46d6246b9f45`](https://github.com/huiliyi37/Tianshu-harness/tree/23afee4733fdce04abf82e1e3fcc46d6246b9f45)。

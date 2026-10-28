@@ -82,5 +82,83 @@ uv lock --check
 uv run pip-audit --local
 ```
 
+## 第一阶段最小工程守卫（2026-10-28）
+
+基线为 `1e8911e`，本阶段不重新修复 R/N 历史问题，不接入模型审查或监督闭环。
+可复现检查（无真实模型、无远端 PR 操作）：
+
+```bash
+uv run --locked python scripts/engineering_guards.py
+uv run --locked python scripts/engineering_guards.py --list
+uv run --locked python scripts/verify_restored_defects.py
+uv run --locked ruff check .
+uv run --locked mypy mewcode
+uv run --locked pytest -q --timeout=120
+uv lock --check
+```
+
+### 架构边界
+
+已核对当前依赖：service 不依赖 TUI，permissions 不依赖 service，tools/impl 不依赖 agent。
+工具实现使用 `tools.base` 协议；本阶段禁止其直接导入整个 `mewcode.agent` 模块，
+以免引入 Agent 状态耦合，不限制已有 `tools/agent_tool.py` 的协调职责。
+TUI 边界包括 Textual、app、driver、各 dialog、teammate_tree 和 commands/completion。
+
+`scripts/engineering_guards.py` 用标准库 AST 检查这三个目录中的 Python 文件，
+包括函数内、TYPE_CHECKING 内的静态 import、绝对/相对 import 和包 __init__；
+文件名统一为 POSIX 路径，诊断包含文件及行号。
+字符串动态导入、运行时属性访问、重新导出及传递依赖不在本阶段覆盖范围，
+这不是任意数据流或私有属性访问分析器。新增 TUI 模块须同步评审边界清单。
+`tests/test_engineering_guards.py` 在临时目录构造违规导入，验证报告确实指出文件。
+
+### 行数与增长评审
+
+`scripts/source_budgets.json` 只登记当前超过 600 行的九个重点文件，
+为现状留少量余量；其他 `mewcode/**/*.py` 使用统一 600 行阈值，不需逐文件登记。
+按 UTF-8 文本 `splitlines()` 计算物理行（含空行与注释），CRLF/LF 口径一致。
+`--list` 显示每个文件的使用量、上限、具名/默认来源和剩余额度；删除或改名留下的条目会失败。
+
+超过上限应先考虑拆分职责。确需提高具名 ceiling 或为跨过默认阈值的文件新增条目时，
+在同一变更中说明新增职责、无法合理拆分的原因、原/新行数及上限、验证结果，供人工评审。
+不要为单个文件增长提高全局默认值；不要自动刷新全部上限来消除失败。
+文件显著缩小时应在同一评审中考虑收紧具名上限；本阶段仅执行当前上限比较，
+不自动比较 Git 历史，也不声称每次删行都会自动收紧。
+
+### 缺陷回植证据
+
+回植脚本复制包、原回归文件及 conftest 到临时目录，禁用字节码缓存，
+在独立解释器中确认导入路径来自临时副本；先测当前源码，再只修改临时副本。
+不修改共享真实源码、不读真实配置，家目录也指向临时目录。
+每个锚点必须唯一且替换后语法有效；缺少锚点立即失败。
+pytest 插件记录实际测试 node ID、执行阶段、异常类型、末帧文件与断言源码。
+RED 只接受指定现有回归的预期 AssertionError，其他失败、收集错误、跳过、超时均使验证失败。
+
+| 回植项 | 现有回归 | 预期 RED 数量（本机） |
+| --- | --- | --- |
+| N02：移除 `%` 扩展限制 | test_permission_security::test_shell_expansion_and_unc_require_confirmation | 2 |
+| N04：恢复仅依赖旧正则的删除检查 | test_permission_security::test_recursive_delete_option_order | 5 |
+| N05：去掉 allow 规则复合命令保护 | test_permissions::TestDangerousCommandDetector::test_legacy_allow_rule_cannot_authorize_compound_shell | 5 |
+| 容器凭据：把解析后的 key 写入配置 | test_service_sandbox::TestRunAgent::test_container_config_has_no_secret | 1 |
+
+这是选定旧行为的定点回植，未逐字恢复历史提交，也不代表全部历史缺陷或任意变异覆盖。
+CI 的平台矩阵运行架构/规模守卫和普通测试；security 作业额外运行回植脚本。
+普通 pytest 包含拒绝伪 RED 证据的快速用例，耗时回植由独立命令运行。
+
+### 本次验证结果
+
+本机 Windows，Python 3.14.4，uv 0.11.7，基线 `1e8911e`，无业务源码改动或依赖变化。
+
+- 全量 `uv run --locked pytest -q --timeout=120`：1377 passed / 18 skipped，231.45 秒。
+- 最终定向 `uv run --locked pytest tests/test_engineering_guards.py tests/test_restored_defect_evidence.py -q --timeout=120`：
+  22 passed（包含全量收集后补充的证据校验用例）。
+- 最终回植命令：四项当前实现均 GREEN，恢复旧行为分别命中上述 2 / 5 / 5 / 1 个预期断言失败。
+- 架构/行数守卫及 `--list` 通过；Ruff 全仓通过；全包 mypy：159 个源文件通过；锁文件检查通过。
+- `git diff --check` 通过；本地运行日志保留于忽略目录 `.pytest_cache/engineering/`。
+
+交接时遗留的 pytest 进程在清理前已自行退出，未取得输出，因此不计入本次通过证据；
+上述全量结果来自确认其退出后启动的新运行。
+跨平台 CI 尚未运行，真实 Docker 隔离未运行，跳过项不计为通过；未调用真实模型、未创建远端 PR。
+实现验证阶段先保留本地改动供审阅；提交与推送按维护者后续明确指令执行。
+
 不要读取、打印或提交包含凭据的实际配置；配置示例仅用于说明。
 部署端仍需提供 Docker、模型凭据和 GitHub 认证。回放只在专用可丢弃仓库执行。

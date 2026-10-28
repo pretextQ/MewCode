@@ -35,6 +35,12 @@ jobs:
       - name: Type check (full package)
         run: uv run mypy mewcode
 
+      - name: Engineering guards
+        run: uv run --locked python scripts/engineering_guards.py
+
+      - name: Lock consistency
+        run: uv lock --check
+
       - name: Run tests
         shell: bash
         run: |
@@ -75,6 +81,9 @@ jobs:
 
       - name: Audit locked dependencies
         run: uv run pip-audit --local
+
+      - name: Restored defect verification
+        run: uv run --locked python scripts/verify_restored_defects.py
 
       - name: Upload security log
         if: failure()

@@ -1,0 +1,14 @@
+{
+  "default_ceiling": 600,
+  "ceilings": {
+    "mewcode/app.py": 2100,
+    "mewcode/agent.py": 1575,
+    "mewcode/service/execution.py": 1250,
+    "mewcode/context/manager.py": 900,
+    "mewcode/tools/agent_tool.py": 775,
+    "mewcode/service/jobs.py": 735,
+    "mewcode/client.py": 700,
+    "mewcode/service/sandbox.py": 650,
+    "mewcode/memory/session.py": 625
+  }
+}
