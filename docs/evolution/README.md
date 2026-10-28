@@ -1,9 +1,10 @@
 # 演进与验证证据
 
-后续计划：[借鉴 PR-Agent 的改进计划](05-pr-review-improvements.md)（2026-10-25 记录，尚未实施）。
-待立项笔记：[借鉴 Tianshu 的内核监督闭环](06-tianshu-supervision-notes.md)、[借鉴 Tianshu 的测试体系](07-tianshu-test-notes.md)（均于 2026-10-27 对照上游固定提交完成静态审阅与修订，尚未实施）。
+更新日期：2026-10-28。第一阶段工程守卫（`2fb8b06`）、第二阶段独立修复审查（`a172581`）已完成并推送。
+独立审查默认关闭、仅提供意见，见 [操作指南](../../guides/independent-review.md)。今天不再启动新阶段。
 
-更新日期：2026-10-09。M1–M3 已完成；R1–R5 修复后的当前基线为 3f10408。
+后续计划：[PR-Agent 改进路线](05-pr-review-improvements.md) 的动态上下文、分块与返工扩展，
+以及 [Tianshu 内核监督闭环](06-tianshu-supervision-notes.md)；[测试体系笔记](07-tianshu-test-notes.md) 中其余扩展仍待安排。
 
 ## 1. 里程碑
 
@@ -12,12 +13,20 @@
 | M1 | 告警接入、任务存储与去重、独立 worktree、验证及 PR 发布链路 | 告警驱动流程（本地资料：`03-m1-alert-driven.md`） |
 | M2 | Docker、Compose 集成环境、Skills 选择、只读 MCP | 能力与边界（本地资料：`04-m2-enterprise-capability.md`） |
 | M3 | 指标、回放比较、操作与演示记录 | 本文及 replay 原始数据 |
+| 阶段 1 | AST 架构守卫、重点文件预算、四项隔离回植 | `2fb8b06`；已接入检查流程 |
+| 阶段 2 | 固定提交的独立审查、diff 覆盖与证据、预算、PR/job 展示 | `a172581`；默认关闭，仅提供意见 |
+| 阶段 3 及后续 | 监督内核、行为检测、评审返工与问题跟踪 | 未启动，按后续明确指令推进 |
 
 完整历史记录（本地资料：`../history/evolution-2026-10-05.md`）保留逐项执行、PR 与提交证据；不得将其中旧的自动宿主机降级策略当作当前默认值。
 
 ## 2. 工程验证
 
-R1–R5 完成后的全量测试记录为 1242 passed / 16 skipped / 0 failed。最新 Windows、Linux、安全 CI：[通过](https://github.com/pretextQ/MewCode/actions/runs/37878984536)。
+2026-10-28 本机最终验证：1439 passed / 18 skipped；审查专项 52 passed；Ruff、全包 mypy（164 源文件）、锁文件与工程守卫通过。
+当前提交的远端跨平台 CI 结果尚未核实，真实 Docker 与真实模型效果评估未执行。
+完整验证口径见 [维护记录](../../guides/maintenance.md)。
+
+历史记录：R1–R5 完成后曾为 1242 passed / 16 skipped / 0 failed；
+[当时的 Windows/Linux/安全 CI](https://github.com/pretextQ/MewCode/actions/runs/37878984536) 不能代替当前提交的验证。
 
 测试覆盖和小样本演示不等于生产环境收益或长期可靠性。
 

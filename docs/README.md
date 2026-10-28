@@ -1,17 +1,19 @@
 # MewCode 文档索引
 
-索引更新日期：2026-10-27。以下验证摘要为 2026-10-24 历史记录；当前代码与 CI 状态以 Git 和 GitHub 为准。
-当时修复代码基线：`6d457b0`，版本 0.3.0，许可证 MIT。
-M1–M3、R1–R5、R01–R09 与本轮 N01–N41 均已完成。
-当时验证：1363 passed / 18 skipped；全包 mypy（159 个源文件）、Ruff、依赖审计与四组跨平台 CI 通过。
+索引更新日期：2026-10-28。最新功能提交：`a172581`，已推送到 `origin/master`，版本仍为 0.3.0，许可证 MIT。
+M1–M3、R1–R5、R01–R09、N01–N41，以及第一阶段工程守卫、第二阶段独立修复审查均已完成。
+最新本机验证：1439 passed / 18 skipped；全包 mypy（164 个源文件）、Ruff、锁文件与工程守卫通过。
+独立审查默认关闭、仅提供意见；真实模型效果评估、真实 Docker 和当前提交的远端跨平台 CI 结果尚未验证。
+今天的开发已结束；下次入口见 [会话交接](next-session-prompt.md)。
 
 受版本控制的交接入口见 [维护记录](../guides/maintenance.md)，本地详细记录见 本轮修复完成记录（本地资料：`fixes/review-2026-10-24-fixes.md`）。
 
 ## 当前文档
 
 - [Tianshu 监督闭环借鉴笔记](evolution/06-tianshu-supervision-notes.md)：2026-10-27 对照固定上游提交完成静态审阅与修订，待立项；明确通道预算、诊断提醒及跨模式接线边界。
-- [Tianshu 测试体系借鉴笔记](evolution/07-tianshu-test-notes.md)：2026-10-27 完成静态审阅与修订，待立项；区分已有局部守卫、上游检查范围与拟议扩展。
-- [PR-Agent 借鉴与后续改进计划](evolution/05-pr-review-improvements.md)：2026-10-25 记录，待实施；优先独立修复审查与覆盖记录。
+- [Tianshu 测试体系借鉴笔记](evolution/07-tianshu-test-notes.md)：第一阶段最小工程守卫已实施，其余拟议扩展仍待安排。
+- [PR-Agent 借鉴与后续改进计划](evolution/05-pr-review-improvements.md)：首期独立修复审查与覆盖记录已实施，后续扩展待安排。
+- [独立修复审查指南](../guides/independent-review.md)：配置、固定版本、证据、覆盖与预算边界及离线评估入口。
 - 第三轮全量审查记录（本地资料：`fixes/review-2026-10-24-full.md`）：保留原始 03f6687 审查证据；41 项发现已修复，当前状态以维护记录为准。
 - 修复总览（本地资料：`fixes/README.md`）：R1–R5 问题、提交和验证结果。
 - R1–R5 完成报告（本地资料：`fixes/review-2026-10-08-plan.md`）：修复行为和剩余边界。
