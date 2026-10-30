@@ -4,7 +4,7 @@
 
 ## 本期已实施
 
-按[授权计划](evolution/08-next-stage-plan.md)完成 A 审查边界/语义评分和 B 纯 Python 最小监督内核；最终验证和提交以本期验收及 Git 记录为准。A 提交 `c653b77` 已推送，跨平台 CI 五作业 success。B 默认关闭，无 detector；[监督指南](../guides/supervision.md)列出开关、通道、TTL、实际请求送达及 expect 边界。
+按[授权计划](evolution/08-next-stage-plan.md)完成 A 审查边界/语义评分和 B 纯 Python 最小监督内核；最终验证和提交以本期验收及 Git 记录为准。A `c653b77` 与 B `37b74ef` 已推送，两个提交各自的跨平台 CI 五作业 success。B 默认关闭，无 detector；[监督指南](../guides/supervision.md)列出开关、通道、TTL、实际请求送达及 expect 边界。
 
 真实 deepseek-flash 同契约基线/候选各五次：各有三个有效正例、一个正确负例、大 diff 均输出上限未完成，未证明质量提升。存在性命中和意见理由成立分开，历史“add 不存在”误判不能算有效检出。新增保守估计 0.136408 元，累计 0.197888 元（非账单金额）；本期不再调用模型，未来调用仍需新的明确预算范围。
 

@@ -61,4 +61,8 @@ A 评分器另补一条边界回归：显式 unreviewed 即使已填满裁定列
 
 A：[`c653b77`](https://github.com/pretextQ/MewCode/commit/c653b7773ec980c4982213570f44757d03bcf067)，已推送 origin/master。[CI 40998116499](https://github.com/pretextQ/MewCode/actions/runs/40998116499) Windows/Linux × Python 3.11/3.13 与 security regression 五个作业 success。
 
-B：本地验收通过，按计划独立提交推送；提交 SHA 与远端 CI 随后核对记录，不强推。
+B：[`37b74ef`](https://github.com/pretextQ/MewCode/commit/37b74efe2f470a5a3b443cb8875da842f67d057a)，已推送 origin/master，远端 SHA 与本地一致。[CI 40999894769](https://github.com/pretextQ/MewCode/actions/runs/40999894769) Windows/Linux × Python 3.11/3.13 与 security regression 五作业均 success，没有新增远端失败。
+
+最后仅收敛文档、记录提交和已完成的代码 CI；没有再改运行逻辑或调用模型，不因纯文档重复本机全量。文档收尾提交的远端状态以最终 Git/CI 检查为准。
+
+旧验收 20 个模型工件哈希复核一致，原模型摘要和 v1 fixture 与 a85444c 无差异。Docker live 命名空间容器无残留；其他项目已有网络未处理。
