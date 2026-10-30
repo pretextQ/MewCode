@@ -1,35 +1,55 @@
-# MewCode 文档索引
+# MewCode 当前状态与文档入口
 
-索引更新日期：2026-10-28。最新功能提交：`a172581`，已推送到 `origin/master`，版本仍为 0.3.0，许可证 MIT。
-M1–M3、R1–R5、R01–R09、N01–N41，以及第一阶段工程守卫、第二阶段独立修复审查均已完成。
-最新本机验证：1439 passed / 18 skipped；全包 mypy（164 个源文件）、Ruff、锁文件与工程守卫通过。
-独立审查默认关闭、仅提供意见；真实模型效果评估、真实 Docker 和当前提交的远端跨平台 CI 结果尚未验证。
-今天的开发已结束；下次入口见 [会话交接](next-session-prompt.md)。
+更新：2026-10-30。版本 0.3.0 / MIT；验收基线 `4cef69f`。
 
-受版本控制的交接入口见 [维护记录](../guides/maintenance.md)，本地详细记录见 本轮修复完成记录（本地资料：`fixes/review-2026-10-24-fixes.md`）。
+**M1–M3、历次整改、工程守卫及独立审查首期已完成。工程验收通过，真实模型审查仍有局部输入推断错误；运行时监督尚未开始。**
 
-## 当前文档
+## 先看这三份
 
-- [Tianshu 监督闭环借鉴笔记](evolution/06-tianshu-supervision-notes.md)：2026-10-27 对照固定上游提交完成静态审阅与修订，待立项；明确通道预算、诊断提醒及跨模式接线边界。
-- [Tianshu 测试体系借鉴笔记](evolution/07-tianshu-test-notes.md)：第一阶段最小工程守卫已实施，其余拟议扩展仍待安排。
-- [PR-Agent 借鉴与后续改进计划](evolution/05-pr-review-improvements.md)：首期独立修复审查与覆盖记录已实施，后续扩展待安排。
-- [独立修复审查指南](../guides/independent-review.md)：配置、固定版本、证据、覆盖与预算边界及离线评估入口。
-- 第三轮全量审查记录（本地资料：`fixes/review-2026-10-24-full.md`）：保留原始 03f6687 审查证据；41 项发现已修复，当前状态以维护记录为准。
-- 修复总览（本地资料：`fixes/README.md`）：R1–R5 问题、提交和验证结果。
-- R1–R5 完成报告（本地资料：`fixes/review-2026-10-08-plan.md`）：修复行为和剩余边界。
-- 架构说明（本地资料：`evolution/02-architecture.md`）：按当前实现说明执行链路。
-- [演进与验证证据](evolution/README.md)：里程碑、回放数据和指标口径。
-- 告警驱动流程（本地资料：`evolution/03-m1-alert-driven.md`）。
-- 沙箱、Skills、MCP 与 Compose（本地资料：`evolution/04-m2-enterprise-capability.md`）。
-- 项目定位与介绍（本地资料：`evolution/01-positioning.md`）：基于真实实现与实验记录。
-- 测试环境（本地资料：`fixes/test-environment.md`）：安全配置和验证方式。
-- 待评估事项（本地资料：`fixes/backlog.md`）：未修复候选与已关闭事项。
-- [下次会话交接](next-session-prompt.md)。
-- 历史档案（本地资料：`history/README.md`）：保留原始修复与演进证据。
+1. [本次验收报告](acceptance-2026-10-30.md)：实际结果、模型发现、验证范围和复现命令。
+2. [下次工作入口](next-session-prompt.md)：剩余事项及推荐顺序。
+3. [公开架构说明](../guides/architecture.md)与[独立审查指南](../guides/independent-review.md)：运行行为、开关、证据和预算。
 
-## 文档维护原则
+## 当前验收
 
-本目录通过 .gitignore 默认忽略本地资料，仅放行后续改进计划、两份 Tianshu 笔记、两份索引及会话交接文档；提交索引时须一并提交其新增目标，不要强制添加整个目录。
-标注为“本地资料”的路径未随本次提交发布；当前公开功能说明仍以仓库 README 和 guides 为准，待实施计划不代表已有功能。
+| 项目 | 2026-10-30 结果 |
+| --- | --- |
+| 全量测试 | 1439 passed / 18 skipped，246.91 秒 |
+| Docker 真机专项 | 单独启用后 15 passed，111.80 秒；不与全量结果相加当作单轮套件数 |
+| Ruff、全包 mypy | 通过；Windows/Linux 目标各 164 源文件 |
+| 锁文件、工程守卫、缺陷回植 | 通过；四项旧行为分别命中 2 / 5 / 5 / 1 个预期断言失败 |
+| 子代理、依赖审计、打包 | 86/86；未发现已知依赖漏洞（本包审计跳过）；sdist/wheel 成功 |
+| 基线远端 CI | Windows/Linux × Python 3.11/3.13 及安全作业全通过 |
+| deepseek-flash 真实审查 | 三个有效正例、一个正确负例、一个部分覆盖下的错误推断 |
 
-已删除重复的旧阶段计划，原件保留在本地备份中。历史档案中的旧状态和旧命令不代表当前实现。不要在文档中保存 API Key、访问令牌或真实配置内容。
+五次模型调用用量按最高公布费率保守折算约 0.062 元，低于本轮 1 元授权；不是账单金额。大 diff 样例不能计为有效检出，不采用未经意见复核的 100% 评分。
+
+## 功能进度
+
+| 工作线 | 状态 | 边界 |
+| --- | --- | --- |
+| CLI/TUI 与共享 Agent 内核 | 已实现 | 本次没有人工 TUI 交互验收 |
+| M1 告警 → 修复 → PR → 人工审查 | 已实现，有历史真实演示 | 本次未创建远端修复 PR；测试和 CI 按配置执行 |
+| M2 Docker / Compose / Skills / 只读 MCP | 已实现，本次真机专项通过 | 容器内 Agent 测试使用假 LLM；第三方工具声明仍需信任判断 |
+| M3 指标 / 多仓策略 / 回放 | 已实现 | 历史回放早于后续修复；没有生产收益证据 |
+| 早期 42 项、R1–R5、R01–R09、N01–N41 | 已完成 | 原始报告用于追溯，不是待修清单 |
+| 阶段 1：最小工程守卫 | 已完成 | 四项定点回植，不代表全部历史缺陷覆盖 |
+| 阶段 2：独立审查首期 | 已完成，默认关闭、仅提供意见 | 动态上下文、多轮分块、自动返工未实现；效果验收有限通过 |
+| 阶段 3：最小监督内核 | 未开始 | 事件、提醒总线、TTL、去重、预算、实际送达核销待实施 |
+
+## 深入阅读
+
+- [演进与验证证据](evolution/README.md)：里程碑与历史回放口径。
+- [PR 审查路线](evolution/05-pr-review-improvements.md)：首期边界和后续扩展。
+- [监督闭环设计](evolution/06-tianshu-supervision-notes.md)：待实施。
+- [测试体系设计与实施边界](evolution/07-tianshu-test-notes.md)：最小守卫已完成，其余是提案。
+- [维护记录与提交映射](../guides/maintenance.md)：历次整改证据。
+- 本地辅助：[项目定位](evolution/01-positioning.md)、[架构补充](evolution/02-architecture.md)、[M1](evolution/03-m1-alert-driven.md)、[M2](evolution/04-m2-enterprise-capability.md)、[测试环境](fixes/test-environment.md)、[后续事项](fixes/backlog.md)。
+- 本地整改档案：[修复总览](fixes/README.md)、[R1–R5](fixes/review-2026-10-08-plan.md)、[N01–N41 完成记录](fixes/review-2026-10-24-fixes.md)、[原始审查](fixes/review-2026-10-24-full.md)。
+- [历史档案](history/README.md)：保留当时记录，不作为当前操作说明。
+
+## 文档约定
+
+当前进度从本页进入；验证事实以最新验收报告为准。历史数字保留日期和基线，计划只有明确实施后才算交付。
+
+docs 默认忽略本地资料，仅放行索引、交接、三份设计、本次验收报告及模型摘要。标为“本地”的文件不会随普通克隆取得；公开说明在仓库 README 与 guides。不强制添加整个目录，不保存凭据或实际配置。
