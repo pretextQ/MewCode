@@ -1,0 +1,659 @@
+{
+  "date": "2026-10-30",
+  "baseline_code_sha": "a85444ccddc359e302b21db7f56896f810c637c5",
+  "candidate_base_sha": "a85444ccddc359e302b21db7f56896f810c637c5",
+  "dataset": "tests/fixtures/independent_review_cases_v2.json",
+  "dataset_sha256": "67bc21c1c953b57c4933a7ac3249abdd560010c1ef08ed3c81ddc69f0b77e54a",
+  "model": "deepseek-flash",
+  "protocol": "anthropic",
+  "settings": {
+    "max_calls_per_case": 1,
+    "max_input_bytes": 12000,
+    "max_output_tokens": 1024,
+    "timeout_seconds": 90,
+    "sdk_retries": 0
+  },
+  "price_checked": "2026-10-30",
+  "price_source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+  "highest_cny_per_million_tokens": 8,
+  "prior_cost_upper_cny": 0.06148,
+  "new_call_limit_cny": 0.9,
+  "arms": {
+    "baseline": {
+      "predictions": {
+        "hidden_error": {
+          "review_id": "914b0382db204c89a3894a5b87224da0",
+          "head_sha": "ce3da8b71fe7ad92fb3e522a3488cda4795c94ea",
+          "base_sha": "d908223eb3b0d97d50511b5083798c79edc4a82b",
+          "status": "findings",
+          "reason": "completed",
+          "summary": "The patch removes the working `int(value)` implementation and wraps it in a blanket try/except that returns None. This directly contradicts the required behavior that invalid strings raise ValueError, and it also swallows unrelated exception types. The change is a regression rather than a repair; no other files were supplied.",
+          "findings": [
+            {
+              "severity": "high",
+              "path": "a.py",
+              "side": "new",
+              "line": 5,
+              "title": "Invalid input now returns None instead of raising ValueError",
+              "detail": "The added `except Exception: return None` converts every parsing failure into a silent None result. The required contract is `parse_value` returns `int(value)` and invalid strings raise ValueError. With this patch, `parse_value('abc')` swallows the ValueError from `int('abc')` and returns None, so callers can no longer distinguish invalid input from a legitimate missing value, and the contract-breaking behavior is introduced rather than fixed. The deleted `return int(value)` (old line 2) was already contract-compliant."
+            },
+            {
+              "severity": "medium",
+              "path": "a.py",
+              "side": "new",
+              "line": 4,
+              "title": "Blanket `except Exception` hides non-parsing errors and programming faults",
+              "detail": "`except Exception` is broader than the ValueError the contract expects. Any exception raised inside `int(value)` — including TypeError for unexpected argument types (e.g. None) or errors from a custom `__int__`/`__index__` implementation — is silently mapped to None. This masks genuine bugs and prevents callers from seeing failures they previously would have received from the unguarded `int(value)` call."
+            }
+          ],
+          "coverage": [
+            {
+              "path": "a.py",
+              "old_path": "",
+              "change": "M",
+              "status": "full",
+              "reason": "sent",
+              "diff_bytes": 222,
+              "sent_bytes": 222
+            }
+          ],
+          "coverage_complete": true,
+          "input_tokens": 370,
+          "output_tokens": 610,
+          "cache_read": 128,
+          "cache_creation": 0,
+          "usage_known": true,
+          "request_attempted": true,
+          "budget_charge": 1108,
+          "elapsed_seconds": 4.562,
+          "provider": "deepseek-anthropic",
+          "model": "deepseek-flash",
+          "artifacts": {
+            "diff": "reviews\\job-5d7991594a7b\\914b0382db204c89a3894a5b87224da0\\full.diff",
+            "input": "reviews\\job-5d7991594a7b\\914b0382db204c89a3894a5b87224da0\\request.json",
+            "system": "reviews\\job-5d7991594a7b\\914b0382db204c89a3894a5b87224da0\\system.txt",
+            "response": "reviews\\job-5d7991594a7b\\914b0382db204c89a3894a5b87224da0\\response.txt"
+          },
+          "hashes": {
+            "diff": "a9da9297ead96a5f298667a48207902151e461a950b304fe603404aa4098747e",
+            "input": "88b76f27498b5341ff092de963724899bdedaf45a249521f5bf7f9a575497c31",
+            "system": "18cec53821159b5302e635ef4cadf0bb22304c7d681601e8e1cedd20f4be7865",
+            "response": "e41002a9646f9194cd3275236cebb5aea0dfe6fdcbc1244e4a6de70df813854a"
+          }
+        },
+        "unbounded_retry": {
+          "review_id": "03fb5dcb3f9c4cc2b09c64b0f1c721af",
+          "head_sha": "2ab7c1a1481badd442ddcac012d86b5947ffc752",
+          "base_sha": "afdbc10d8375c5aa8193cdd5561863117a9e1174",
+          "status": "findings",
+          "reason": "completed",
+          "summary": "The patch replaces a direct fetch call with an unconditional `while True` retry that catches every `Exception` and immediately continues. This inverts the required behavior: instead of propagating a persistent dependency failure, `load` spins forever, and it also masks non-transient/programming errors as retryable. No backoff, attempt cap, or re-raise is present in the supplied diff.",
+          "findings": [
+            {
+              "severity": "high",
+              "path": "a.py",
+              "side": "new",
+              "line": 2,
+              "title": "Unbounded retry loop hangs on persistent dependency failure",
+              "detail": "The added `while True:` loop retries `fetch()` forever. If the dependency fails persistently (the exact scenario in the required behavior), `load` never returns and never propagates the error: each failure hits `except Exception: continue` and control returns to the top of the loop with no attempt counter, deadline, or backoff. This replaces the deleted `return fetch()` (old line 2), which was the only path that surfaced the failure to the caller, so the contract 'propagate persistent dependency failure without hanging or spinning indefinitely' is violated and callers block/burn CPU indefinitely."
+            },
+            {
+              "severity": "high",
+              "path": "a.py",
+              "side": "new",
+              "line": 5,
+              "title": "Blanket exception handling converts non-transient errors into infinite retries",
+              "detail": "`except Exception:` captures every error type raised by `fetch()`, including deterministic programming errors such as `TypeError`, `AttributeError`, or validation failures that can never succeed on retry. Because the handler only executes `continue`, these errors are silently swallowed and the call is retried forever rather than raised to the caller. This hides defects and removes the fail-fast behavior of the deleted `return fetch()` line, so a permanently broken `fetch` produces an unkillable spin loop instead of a diagnosable exception."
+            }
+          ],
+          "coverage": [
+            {
+              "path": "a.py",
+              "old_path": "",
+              "change": "M",
+              "status": "full",
+              "reason": "sent",
+              "diff_bytes": 239,
+              "sent_bytes": 239
+            }
+          ],
+          "coverage_complete": true,
+          "input_tokens": 372,
+          "output_tokens": 667,
+          "cache_read": 128,
+          "cache_creation": 0,
+          "usage_known": true,
+          "request_attempted": true,
+          "budget_charge": 1167,
+          "elapsed_seconds": 4.923,
+          "provider": "deepseek-anthropic",
+          "model": "deepseek-flash",
+          "artifacts": {
+            "diff": "reviews\\job-a67425ba7dc5\\03fb5dcb3f9c4cc2b09c64b0f1c721af\\full.diff",
+            "input": "reviews\\job-a67425ba7dc5\\03fb5dcb3f9c4cc2b09c64b0f1c721af\\request.json",
+            "system": "reviews\\job-a67425ba7dc5\\03fb5dcb3f9c4cc2b09c64b0f1c721af\\system.txt",
+            "response": "reviews\\job-a67425ba7dc5\\03fb5dcb3f9c4cc2b09c64b0f1c721af\\response.txt"
+          },
+          "hashes": {
+            "diff": "536fc4490424671e8fdffd71e8c49c3b945022927ac17c3fe9a2736a695a9dfe",
+            "input": "a1481980292ec212086e2f1b6c50ffacc9459664344fd1f3d37c690a0a3fce28",
+            "system": "18cec53821159b5302e635ef4cadf0bb22304c7d681601e8e1cedd20f4be7865",
+            "response": "740c49765c22135b515838bccc3992fac94c5fcf25eaecf495106739d7189252"
+          }
+        },
+        "removed_permission_check": {
+          "review_id": "6669cd6bae41466885a7132b419b2639",
+          "head_sha": "3a57b58aad80b2ca053811b8ec948daaf0f28e2c",
+          "base_sha": "f32f43a95b8e899283b8bcb709125ec216c96cff",
+          "status": "findings",
+          "reason": "completed",
+          "summary": "The patch removes the authorization guard from read_secret, so the explicitly required PermissionError for unauthorized callers is gone; this is a direct regression of a safety check and fails the stated required behavior.",
+          "findings": [
+            {
+              "severity": "high",
+              "path": "a.py",
+              "side": "old",
+              "line": 2,
+              "title": "Authorization check deleted; read_secret(False) no longer raises PermissionError",
+              "detail": "The patch deletes the guard `if not authorized:` (old line 2) and its body `raise PermissionError()` (old line 3), leaving only `return secret`. With the guard removed, any caller passing authorized=False reaches the return statement and obtains the secret instead of raising PermissionError, violating the required behavior \"read_secret(False) must raise PermissionError; secret is defined elsewhere. Preserve authorization.\" Unauthorized access to the secret is now possible, so the original root cause is not merely unresolved but newly introduced."
+            }
+          ],
+          "coverage": [
+            {
+              "path": "a.py",
+              "old_path": "",
+              "change": "M",
+              "status": "full",
+              "reason": "sent",
+              "diff_bytes": 199,
+              "sent_bytes": 199
+            }
+          ],
+          "coverage_complete": true,
+          "input_tokens": 364,
+          "output_tokens": 388,
+          "cache_read": 128,
+          "cache_creation": 0,
+          "usage_known": true,
+          "request_attempted": true,
+          "budget_charge": 880,
+          "elapsed_seconds": 3.025,
+          "provider": "deepseek-anthropic",
+          "model": "deepseek-flash",
+          "artifacts": {
+            "diff": "reviews\\job-99d39f148beb\\6669cd6bae41466885a7132b419b2639\\full.diff",
+            "input": "reviews\\job-99d39f148beb\\6669cd6bae41466885a7132b419b2639\\request.json",
+            "system": "reviews\\job-99d39f148beb\\6669cd6bae41466885a7132b419b2639\\system.txt",
+            "response": "reviews\\job-99d39f148beb\\6669cd6bae41466885a7132b419b2639\\response.txt"
+          },
+          "hashes": {
+            "diff": "b8197ca8043fa62c0070349c9199f649feec393aef6ce912db6afa18eb10ce01",
+            "input": "3b993f1144a3c9a22da75919906d56a8a760dfa22da7dfe85e46def2f044b226",
+            "system": "18cec53821159b5302e635ef4cadf0bb22304c7d681601e8e1cedd20f4be7865",
+            "response": "8d04dd9e6239c68cc6e4e097ab09f1fa75567506ecca9b1de15c0f0888b27f9b"
+          }
+        },
+        "correct_arithmetic_fix": {
+          "review_id": "b7870501815d40299fffbf0e428f8a0c",
+          "head_sha": "368b2b1e81b00c28a2e03562e5cd1c647ad4e702",
+          "base_sha": "ea9c420e7818249ded08ea604a0ee498b3e92196",
+          "status": "no_findings",
+          "reason": "completed",
+          "summary": "The supplied diff replaces subtraction with addition in add(a, b), satisfying add(3, 2) == 5 and preserving ordinary numeric addition. No unresolved issues found within this patch.",
+          "findings": [],
+          "coverage": [
+            {
+              "path": "a.py",
+              "old_path": "",
+              "change": "M",
+              "status": "full",
+              "reason": "sent",
+              "diff_bytes": 145,
+              "sent_bytes": 145
+            }
+          ],
+          "coverage_complete": true,
+          "input_tokens": 352,
+          "output_tokens": 171,
+          "cache_read": 128,
+          "cache_creation": 0,
+          "usage_known": true,
+          "request_attempted": true,
+          "budget_charge": 651,
+          "elapsed_seconds": 1.99,
+          "provider": "deepseek-anthropic",
+          "model": "deepseek-flash",
+          "artifacts": {
+            "diff": "reviews\\job-3a264be411a6\\b7870501815d40299fffbf0e428f8a0c\\full.diff",
+            "input": "reviews\\job-3a264be411a6\\b7870501815d40299fffbf0e428f8a0c\\request.json",
+            "system": "reviews\\job-3a264be411a6\\b7870501815d40299fffbf0e428f8a0c\\system.txt",
+            "response": "reviews\\job-3a264be411a6\\b7870501815d40299fffbf0e428f8a0c\\response.txt"
+          },
+          "hashes": {
+            "diff": "67bc73118869e445dc37e70fc018dfa8891425c2cda8475c7e00e78ef38b8806",
+            "input": "6e20286d13d8c0fa5545adb0c9117667e81f23f5e7d5fac1d8ac18e8a402154c",
+            "system": "18cec53821159b5302e635ef4cadf0bb22304c7d681601e8e1cedd20f4be7865",
+            "response": "576f05f5ed226dbc8d4659900ad85fae293d32b7293f90c193eec17f76e3b798"
+          }
+        },
+        "large_diff_unresolved_cause": {
+          "review_id": "a6e56a5c397e4bee9bc29f770a63b829",
+          "head_sha": "62348ee59b17d38134e6d51b235aad3aae249691",
+          "base_sha": "c53ab449761e30817c96204aaabe55b25b12671c",
+          "status": "incomplete",
+          "reason": "incomplete_response",
+          "summary": "",
+          "findings": [],
+          "coverage": [
+            {
+              "path": "a.py",
+              "old_path": "",
+              "change": "M",
+              "status": "partial",
+              "reason": "input_budget",
+              "diff_bytes": 50130,
+              "sent_bytes": 10306
+            }
+          ],
+          "coverage_complete": false,
+          "input_tokens": 3390,
+          "output_tokens": 1024,
+          "cache_read": 128,
+          "cache_creation": 0,
+          "usage_known": true,
+          "request_attempted": true,
+          "budget_charge": 4542,
+          "elapsed_seconds": 8.271,
+          "provider": "deepseek-anthropic",
+          "model": "deepseek-flash",
+          "artifacts": {
+            "diff": "reviews\\job-afe58781c797\\a6e56a5c397e4bee9bc29f770a63b829\\full.diff",
+            "input": "reviews\\job-afe58781c797\\a6e56a5c397e4bee9bc29f770a63b829\\request.json",
+            "system": "reviews\\job-afe58781c797\\a6e56a5c397e4bee9bc29f770a63b829\\system.txt",
+            "response": "reviews\\job-afe58781c797\\a6e56a5c397e4bee9bc29f770a63b829\\response.txt"
+          },
+          "hashes": {
+            "diff": "2563aa284c7d77f099620396c5a835957cbb2af4324b292d470040008fd8f4b7",
+            "input": "e9af188394a6928ee9d1fb0ba5594c6db77325883873f1dc1e0a0ce5b6bd0f52",
+            "system": "18cec53821159b5302e635ef4cadf0bb22304c7d681601e8e1cedd20f4be7865",
+            "response": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      },
+      "adjudications": {
+        "hidden_error": [
+          {
+            "verdict": "valid",
+            "evidence": "a.py new lines 2-5 catch Exception and return None; int(abc) raises ValueError in before; contract requires propagation."
+          },
+          {
+            "verdict": "valid",
+            "evidence": "a.py new line 4 catches TypeError from int(None); before propagated it."
+          }
+        ],
+        "unbounded_retry": [
+          {
+            "verdict": "valid",
+            "evidence": "a.py new lines 2-6 retry every Exception indefinitely; persistent RuntimeError never propagates."
+          },
+          {
+            "verdict": "invalid",
+            "evidence": "Overclaim: Exception does not catch BaseException, asyncio.CancelledError, KeyboardInterrupt or SystemExit. The loop is not unkillable and cancellation handling is not established."
+          }
+        ],
+        "removed_permission_check": [
+          {
+            "verdict": "valid",
+            "evidence": "a.py old lines 2-3 guard and PermissionError removed; new line 2 returns secret even for False."
+          }
+        ],
+        "correct_arithmetic_fix": [],
+        "large_diff_unresolved_cause": []
+      },
+      "metrics": {
+        "semantic_review": {
+          "valid_findings": 4,
+          "invalid_findings": 1,
+          "unreviewed_findings": 0,
+          "valid_positive_cases": 3,
+          "unassessed_cases": 1
+        },
+        "cases": 5,
+        "true_positives": 3,
+        "false_positives": 0,
+        "missed_positives": 1,
+        "true_negatives": 1,
+        "incomplete": 1,
+        "unassessed_negatives": 0,
+        "precision": 1.0,
+        "recall": 0.75,
+        "input_tokens": 4848,
+        "output_tokens": 2860,
+        "elapsed_seconds": 22.771,
+        "notes": [
+          "issue presence only; finding correctness requires human adjudication",
+          "incomplete positives without findings count as missed; not silently excluded",
+          "labels are provisional; fixture predictions do not demonstrate model effectiveness"
+        ]
+      },
+      "cost_upper_cny": 0.066784,
+      "source_review": "Pinned before/after fixture and local source inspected; negative arithmetic fixes implement addition. Large diff source still defines subtracting add; neither arm completed that response."
+    },
+    "candidate": {
+      "predictions": {
+        "hidden_error": {
+          "review_id": "373e50b351be490ebce903084387c068",
+          "head_sha": "c7679b4a505023750f0b803799b53f30369a578a",
+          "base_sha": "1b68b10dbb3f8d2d244d2b00cd1661342ecdbcdf",
+          "status": "findings",
+          "reason": "completed",
+          "summary": "The supplied diff replaces the correct int(value) conversion with a broad exception handler that returns None, directly violating the required contract that invalid strings raise ValueError. The regression is fully within the supplied hunk.",
+          "findings": [
+            {
+              "severity": "high",
+              "path": "a.py",
+              "side": "new",
+              "line": 5,
+              "title": "Broad exception handler suppresses required ValueError and returns None",
+              "detail": "The new code wraps int(value) in try/except Exception and returns None on failure. This changes the contract: invalid strings no longer raise ValueError as required, and unrelated exceptions are also silently converted to None. The original deleted line `return int(value)` correctly propagated ValueError."
+            }
+          ],
+          "coverage": [
+            {
+              "path": "a.py",
+              "old_path": "",
+              "change": "M",
+              "status": "full",
+              "reason": "sent",
+              "diff_bytes": 222,
+              "sent_bytes": 222
+            }
+          ],
+          "coverage_complete": true,
+          "input_tokens": 664,
+          "output_tokens": 513,
+          "cache_read": 0,
+          "cache_creation": 0,
+          "usage_known": true,
+          "request_attempted": true,
+          "budget_charge": 1177,
+          "elapsed_seconds": 3.959,
+          "provider": "deepseek-anthropic",
+          "model": "deepseek-flash",
+          "artifacts": {
+            "diff": "reviews\\job-a4c3385dd09d\\373e50b351be490ebce903084387c068\\full.diff",
+            "input": "reviews\\job-a4c3385dd09d\\373e50b351be490ebce903084387c068\\request.json",
+            "system": "reviews\\job-a4c3385dd09d\\373e50b351be490ebce903084387c068\\system.txt",
+            "response": "reviews\\job-a4c3385dd09d\\373e50b351be490ebce903084387c068\\response.txt"
+          },
+          "hashes": {
+            "diff": "a9da9297ead96a5f298667a48207902151e461a950b304fe603404aa4098747e",
+            "input": "983258ab5a478dd4f0bf42cd3319a250ab5f7e10e50d86082dfe9e7a77c6674f",
+            "system": "5ae45174f9a0f4c29a5be40daa434cded03d4f8c9c867ade3d11c1017e20b9e0",
+            "response": "5f46f3a0dd9dadd49db886bac8ed88c84f02566334f3155e25c8522c5b1b9629"
+          }
+        },
+        "unbounded_retry": {
+          "review_id": "1b354e8ef9b04983817ab73ba497c783",
+          "head_sha": "eb46bf0eafe2bfbd3a4abf665560f373c588d0ee",
+          "base_sha": "8cc11cee3d5e32e93427c6048b0985c7c6f239e6",
+          "status": "findings",
+          "reason": "completed",
+          "summary": "The patch replaces a direct fetch with an infinite retry loop that catches every exception and never re-raises or bounds attempts. This directly contradicts the required behavior of propagating persistent dependency failure without spinning indefinitely; a persistent failure now hangs forever, and transient ones spin without backoff. Root cause of the retry policy is fully within the supplied diff.",
+          "findings": [
+            {
+              "severity": "high",
+              "path": "a.py",
+              "side": "new",
+              "line": 2,
+              "title": "Unbounded retry loop never terminates on persistent dependency failure",
+              "detail": "`while True:` combined with `except Exception: continue` retries forever with no attempt cap, deadline, or backoff. When the dependency fails persistently, `load` never returns and never raises, so the caller hangs/spins indefinitely instead of receiving the propagated failure required by the contract."
+            },
+            {
+              "severity": "high",
+              "path": "a.py",
+              "side": "new",
+              "line": 5,
+              "title": "All exceptions are swallowed, removing failure propagation",
+              "detail": "The deleted `return fetch()` propagated exceptions to the caller. The replacement `except Exception:` followed by `continue` catches every exception type (including programming errors and cancellation-style exceptions) and discards it, so the persistent dependency failure is hidden rather than propagated as required."
+            }
+          ],
+          "coverage": [
+            {
+              "path": "a.py",
+              "old_path": "",
+              "change": "M",
+              "status": "full",
+              "reason": "sent",
+              "diff_bytes": 239,
+              "sent_bytes": 239
+            }
+          ],
+          "coverage_complete": true,
+          "input_tokens": 416,
+          "output_tokens": 517,
+          "cache_read": 256,
+          "cache_creation": 0,
+          "usage_known": true,
+          "request_attempted": true,
+          "budget_charge": 1189,
+          "elapsed_seconds": 4.113,
+          "provider": "deepseek-anthropic",
+          "model": "deepseek-flash",
+          "artifacts": {
+            "diff": "reviews\\job-4257440ac664\\1b354e8ef9b04983817ab73ba497c783\\full.diff",
+            "input": "reviews\\job-4257440ac664\\1b354e8ef9b04983817ab73ba497c783\\request.json",
+            "system": "reviews\\job-4257440ac664\\1b354e8ef9b04983817ab73ba497c783\\system.txt",
+            "response": "reviews\\job-4257440ac664\\1b354e8ef9b04983817ab73ba497c783\\response.txt"
+          },
+          "hashes": {
+            "diff": "536fc4490424671e8fdffd71e8c49c3b945022927ac17c3fe9a2736a695a9dfe",
+            "input": "9d17ed602d56787dd30157105fec9091206c597b80d9801ffaa778548757a3e0",
+            "system": "5ae45174f9a0f4c29a5be40daa434cded03d4f8c9c867ade3d11c1017e20b9e0",
+            "response": "8c4531a513336dbfa2ac8873344a335f0c2ede69b5ca087240a4f69bf71973d9"
+          }
+        },
+        "removed_permission_check": {
+          "review_id": "aac173f5de924537a552ab14ccf70672",
+          "head_sha": "d988e1bd82f7745e278d06727c31e49852b5ce02",
+          "base_sha": "7851a20adf50acacd3c4c568b0e4fba51e9c86f3",
+          "status": "findings",
+          "reason": "completed",
+          "summary": "The supplied diff removes the authorization guard from read_secret, so the function now returns the secret regardless of the authorized flag. This directly violates the required behavior that read_secret(False) raise PermissionError. No other code is in scope.",
+          "findings": [
+            {
+              "severity": "high",
+              "path": "a.py",
+              "side": "old",
+              "line": 2,
+              "title": "Authorization check removed from read_secret",
+              "detail": "The patch deletes the guard `if not authorized: raise PermissionError()` (deleted lines 2-3) leaving only `return secret`. With the check gone, a call such as read_secret(False) returns the secret instead of raising PermissionError, breaking the stated required behavior and removing the sole access-control check present in this function."
+            }
+          ],
+          "coverage": [
+            {
+              "path": "a.py",
+              "old_path": "",
+              "change": "M",
+              "status": "full",
+              "reason": "sent",
+              "diff_bytes": 199,
+              "sent_bytes": 199
+            }
+          ],
+          "coverage_complete": true,
+          "input_tokens": 406,
+          "output_tokens": 202,
+          "cache_read": 256,
+          "cache_creation": 0,
+          "usage_known": true,
+          "request_attempted": true,
+          "budget_charge": 864,
+          "elapsed_seconds": 2.256,
+          "provider": "deepseek-anthropic",
+          "model": "deepseek-flash",
+          "artifacts": {
+            "diff": "reviews\\job-484d4afae757\\aac173f5de924537a552ab14ccf70672\\full.diff",
+            "input": "reviews\\job-484d4afae757\\aac173f5de924537a552ab14ccf70672\\request.json",
+            "system": "reviews\\job-484d4afae757\\aac173f5de924537a552ab14ccf70672\\system.txt",
+            "response": "reviews\\job-484d4afae757\\aac173f5de924537a552ab14ccf70672\\response.txt"
+          },
+          "hashes": {
+            "diff": "b8197ca8043fa62c0070349c9199f649feec393aef6ce912db6afa18eb10ce01",
+            "input": "4ef43bc58be062c4c4fb608c76aedb49f11b5402e478a08e0b5fc90d9bb5e6e5",
+            "system": "5ae45174f9a0f4c29a5be40daa434cded03d4f8c9c867ade3d11c1017e20b9e0",
+            "response": "c21e9c0bffcf8c7256a5a17fca89a96d70e00eebea71382c4a8152e3f49ce5a8"
+          }
+        },
+        "correct_arithmetic_fix": {
+          "review_id": "0548de0ea2b64c7e9ab837ff79d7e11f",
+          "head_sha": "9022ac1fe8cec9ea9e758ef746540f1ce8682455",
+          "base_sha": "e699e72463102543cc1a0a9fd053aabfc7842dee",
+          "status": "no_findings",
+          "reason": "completed",
+          "summary": "The supplied diff is a one-line change in a.py replacing subtraction with addition in add(a, b). This directly restores ordinary numeric addition, so add(3, 2) evaluates to 5. No regressions, removed safety checks, retries, or other issues are visible within the supplied hunk, and no code outside it was inspected.",
+          "findings": [],
+          "coverage": [
+            {
+              "path": "a.py",
+              "old_path": "",
+              "change": "M",
+              "status": "full",
+              "reason": "sent",
+              "diff_bytes": 145,
+              "sent_bytes": 145
+            }
+          ],
+          "coverage_complete": true,
+          "input_tokens": 388,
+          "output_tokens": 168,
+          "cache_read": 256,
+          "cache_creation": 0,
+          "usage_known": true,
+          "request_attempted": true,
+          "budget_charge": 812,
+          "elapsed_seconds": 1.996,
+          "provider": "deepseek-anthropic",
+          "model": "deepseek-flash",
+          "artifacts": {
+            "diff": "reviews\\job-082ef739a55b\\0548de0ea2b64c7e9ab837ff79d7e11f\\full.diff",
+            "input": "reviews\\job-082ef739a55b\\0548de0ea2b64c7e9ab837ff79d7e11f\\request.json",
+            "system": "reviews\\job-082ef739a55b\\0548de0ea2b64c7e9ab837ff79d7e11f\\system.txt",
+            "response": "reviews\\job-082ef739a55b\\0548de0ea2b64c7e9ab837ff79d7e11f\\response.txt"
+          },
+          "hashes": {
+            "diff": "67bc73118869e445dc37e70fc018dfa8891425c2cda8475c7e00e78ef38b8806",
+            "input": "2761e28030dccde6b54e005be558c918861bec6727e2684af98893093170f9a2",
+            "system": "5ae45174f9a0f4c29a5be40daa434cded03d4f8c9c867ade3d11c1017e20b9e0",
+            "response": "f3fd1fc03610270ca3405a518f66a1a6bdff6d7206d9015823811a6a214696f1"
+          }
+        },
+        "large_diff_unresolved_cause": {
+          "review_id": "d58700309b8e4f1fabba757b03bdc181",
+          "head_sha": "a7cfa312ead5ac9d29b2627249f167d106ccfaf2",
+          "base_sha": "b0c72efe9c339f91d9890f6859a0b66b60757569",
+          "status": "incomplete",
+          "reason": "incomplete_response",
+          "summary": "",
+          "findings": [],
+          "coverage": [
+            {
+              "path": "a.py",
+              "old_path": "",
+              "change": "M",
+              "status": "partial",
+              "reason": "input_budget",
+              "diff_bytes": 50130,
+              "sent_bytes": 10116
+            }
+          ],
+          "coverage_complete": false,
+          "input_tokens": 3381,
+          "output_tokens": 1024,
+          "cache_read": 256,
+          "cache_creation": 0,
+          "usage_known": true,
+          "request_attempted": true,
+          "budget_charge": 4661,
+          "elapsed_seconds": 8.013,
+          "provider": "deepseek-anthropic",
+          "model": "deepseek-flash",
+          "artifacts": {
+            "diff": "reviews\\job-2910d2a7f913\\d58700309b8e4f1fabba757b03bdc181\\full.diff",
+            "input": "reviews\\job-2910d2a7f913\\d58700309b8e4f1fabba757b03bdc181\\request.json",
+            "system": "reviews\\job-2910d2a7f913\\d58700309b8e4f1fabba757b03bdc181\\system.txt",
+            "response": "reviews\\job-2910d2a7f913\\d58700309b8e4f1fabba757b03bdc181\\response.txt"
+          },
+          "hashes": {
+            "diff": "2563aa284c7d77f099620396c5a835957cbb2af4324b292d470040008fd8f4b7",
+            "input": "39d9a5d1844d71b15a28859da4aa164dd168805bcc44409e45e56548cc3652b7",
+            "system": "5ae45174f9a0f4c29a5be40daa434cded03d4f8c9c867ade3d11c1017e20b9e0",
+            "response": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      },
+      "adjudications": {
+        "hidden_error": [
+          {
+            "verdict": "valid",
+            "evidence": "a.py new lines 2-5 catch Exception and return None; int(abc) raises ValueError in before; contract requires propagation."
+          }
+        ],
+        "unbounded_retry": [
+          {
+            "verdict": "valid",
+            "evidence": "a.py new lines 2-6 retry every Exception indefinitely; persistent RuntimeError never propagates."
+          },
+          {
+            "verdict": "invalid",
+            "evidence": "Overclaim: Exception does not catch BaseException, asyncio.CancelledError, KeyboardInterrupt or SystemExit. The loop is not unkillable and cancellation handling is not established."
+          }
+        ],
+        "removed_permission_check": [
+          {
+            "verdict": "valid",
+            "evidence": "a.py old lines 2-3 guard and PermissionError removed; new line 2 returns secret even for False."
+          }
+        ],
+        "correct_arithmetic_fix": [],
+        "large_diff_unresolved_cause": []
+      },
+      "metrics": {
+        "semantic_review": {
+          "valid_findings": 3,
+          "invalid_findings": 1,
+          "unreviewed_findings": 0,
+          "valid_positive_cases": 3,
+          "unassessed_cases": 1
+        },
+        "cases": 5,
+        "true_positives": 3,
+        "false_positives": 0,
+        "missed_positives": 1,
+        "true_negatives": 1,
+        "incomplete": 1,
+        "unassessed_negatives": 0,
+        "precision": 1.0,
+        "recall": 0.75,
+        "input_tokens": 5255,
+        "output_tokens": 2424,
+        "elapsed_seconds": 20.337000000000003,
+        "notes": [
+          "issue presence only; finding correctness requires human adjudication",
+          "incomplete positives without findings count as missed; not silently excluded",
+          "labels are provisional; fixture predictions do not demonstrate model effectiveness"
+        ]
+      },
+      "cost_upper_cny": 0.069624,
+      "source_review": "Pinned before/after fixture and local source inspected; negative arithmetic fixes implement addition. Large diff source still defines subtracting add; neither arm completed that response."
+    }
+  },
+  "new_cost_upper_cny": 0.136408,
+  "cumulative_cost_upper_cny": 0.197888,
+  "conclusion": "No demonstrated quality improvement: both arms have three valid positive cases, one complete negative, and one incomplete large-diff response. Each arm has an additional retry finding rejected for unsupported exception/cancellation/unkillable language. Historical absent-add finding remains invalid. Single run per arm; no production inference.",
+  "input_difference": "Same v2 source and contracts, model and caps; baseline imported from isolated git archive of a85444c. Candidate adds service coverage ledger and scope instructions, reducing patch bytes at the same cap. Local synthetic commit SHAs differ; full.diff hashes match per case.",
+  "candidate_source_hashes": {
+    "mewcode\\service\\review.py": "ad858bbc6cb1f352a598ce76594a4726d7a55da9e215a0a7880b61370f71c500",
+    "mewcode\\service\\review_prompt.py": "f86d8413b0950f30a790b6222d1beb171c07b3ef6811b66e3fa94b49306c6935"
+  }
+}

@@ -120,4 +120,10 @@ uv run --locked python scripts/evaluate_reviews.py --predictions candidate.json
 预测 JSON 以 case ID 为键，值使用对应 `ReviewResult` 结构。
 评估器报告问题存在性的 precision/recall、漏检、不完整项、token 与耗时；不完整正例未发现问题仍算遗漏，
 不完整负例不能冒充正确的无问题结论。finding 正确性仍需人工逐条裁定，小样本不能推断生产准确率。
-本阶段没有调用真实模型，因此真实效果对比与生产校准尚未运行；跨平台 CI 与真实 Docker 也需各自验证。
+2026-10-30 同契约真实基线/候选五例对比已运行，未证明效果提升；详见 [新增验收](../docs/next-stage-2026-10-30.md)。生产校准未运行。
+
+## 局部范围与语义复核更新
+
+请求 versions.coverage 提供服务生成的逐文件范围和省略原因，和最终补丁一起受 UTF-8 字节预算约束；full 仅指完整 diff。未发送代码不证明函数不存在，模型须保留未知。覆盖事实不能由模型改写。
+
+原 fixture 不变；v2 fixture 明确契约与复核边界。评估器可用 `--cases tests/fixtures/independent_review_cases_v2.json --adjudications decisions.json`，后者以 case ID 对应逐 finding 的 `{verdict: valid|invalid|unreviewed, evidence: 源码依据}` 列表。存在性指标和 semantic_review 分开；无复核不计有效命中，局部无意见不计正确负例。

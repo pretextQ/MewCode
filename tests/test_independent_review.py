@@ -529,3 +529,35 @@ def test_evaluation_does_not_hide_unreviewed_cases():
     assert metrics["precision"] is None and metrics["recall"] == 0
     with pytest.raises(ValueError):
         evaluate(CASES_DATA, {})
+
+@pytest.mark.asyncio
+async def test_request_carries_exact_service_scope(env):
+    env.config.review.max_input_bytes = 1800
+    (env.repo / 'a.py').write_text('# filler\n' * 5000 + 'def add(a, b):\n    return a - b\n', encoding='utf-8')
+    run_git(env.repo, 'commit', '-am', 'large patch')
+    result = await review(env)
+    request_path = env.reviewer.root.parent / result.artifacts['input']
+    raw = request_path.read_bytes()
+    assert len(raw) <= 1800
+    request = json.loads(raw)
+    assert request['versions']['coverage'] == result.to_dict()['coverage']
+    assert request['versions']['coverage'][0]['status'] == 'partial'
+    patch = request['data']['patches'][0]['patch']
+    assert len(patch.encode('utf-8')) == result.coverage[0].sent_bytes
+    assert 'def add' not in patch
+    assert 'NEVER proves' in (env.reviewer.root.parent / result.artifacts['system']).read_text()
+
+
+def test_false_absence_is_not_semantic_hit():
+    case = next(c for c in CASES_DATA if c['id'] == 'large_diff_unresolved_cause')
+    prediction = {case['id']: {'status': 'findings', 'coverage_complete': False,
+                              'findings': [{'detail': 'add does not exist'}]}}
+    metrics = evaluate([case], prediction, {case['id']: [
+        {'verdict': 'invalid', 'evidence': 'Pinned after source has def add(a, b): return a - b after filler.'}]})
+    assert metrics['true_positives'] == 1  # presence metric only
+    assert metrics['semantic_review']['valid_positive_cases'] == 0
+    assert metrics['semantic_review']['invalid_findings'] == 1
+    assert metrics['semantic_review']['unassessed_cases'] == 1
+    assert evaluate([case], prediction)['semantic_review']['unreviewed_findings'] == 1
+    with pytest.raises(ValueError, match='evidence'):
+        evaluate([case], prediction, {case['id']: [{'verdict': 'valid'}]})

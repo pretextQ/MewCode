@@ -8,7 +8,7 @@ import time
 import uuid
 import weakref
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -118,13 +118,18 @@ class ReviewService:
             "patches": [],
         }
         metadata = {"base_sha": result.base_sha, "head_sha": result.head_sha}
-        remaining = settings.max_input_bytes - len(render_input(metadata, sources).encode("utf-8"))
+        def render() -> str:
+            facts = {**metadata, "coverage": [asdict(file) for file in result.coverage],
+                     "scope": "diff hunks only; full means full diff, never full repository"}
+            return render_input(facts, sources)
+
+        remaining = settings.max_input_bytes - len(render().encode("utf-8"))
         sources["patches"] = await asyncio.to_thread(
             select_patches, context.work_dir, result.base_sha, result.head_sha,
             result.coverage, directory, max(0, remaining),
         )
         # JSON quoting and filenames also count against the exact input byte cap.
-        request = render_input(metadata, sources)
+        request = render()
         while sources["patches"] and len(request.encode("utf-8")) > settings.max_input_bytes:
             patch = sources["patches"][-1]
             file = next(file for file in result.coverage if file.path == patch["path"])
@@ -136,7 +141,7 @@ class ReviewService:
             if not included_lines([patch]):
                 sources["patches"].pop()
                 file.status, file.sent_bytes = "none", 0
-            request = render_input(metadata, sources)
+            request = render()
         if not sources["patches"] or len(request.encode("utf-8")) > settings.max_input_bytes:
             result.reason = "no_reviewable_input"
             return

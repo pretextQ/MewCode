@@ -17,12 +17,15 @@ docs/*
 !docs/next-session-prompt.md
 !docs/acceptance-2026-10-30.md
 !docs/acceptance-2026-10-30-model.json
+!docs/next-stage-2026-10-30.md
+!docs/next-stage-2026-10-30-model.json
 !docs/evolution/
 docs/evolution/*
 !docs/evolution/README.md
 !docs/evolution/05-pr-review-improvements.md
 !docs/evolution/06-tianshu-supervision-notes.md
 !docs/evolution/07-tianshu-test-notes.md
+!docs/evolution/08-next-stage-plan.md
 .coverage
 
 .mypy_cache/

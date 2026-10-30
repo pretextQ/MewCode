@@ -12,7 +12,7 @@ from pathlib import Path
 CASES = Path(__file__).resolve().parents[1] / "tests/fixtures/independent_review_cases.json"
 
 
-def evaluate(cases: list[dict], predictions: dict[str, dict]) -> dict:
+def evaluate(cases: list[dict], predictions: dict[str, dict], adjudications: dict | None = None) -> dict:
     if set(predictions) != {case["id"] for case in cases}:
         raise ValueError("predictions must contain exactly the dataset case IDs")
     tp = fp = fn = tn = incomplete = unassessed_negative = 0
@@ -35,7 +35,31 @@ def evaluate(cases: list[dict], predictions: dict[str, dict]) -> dict:
         input_tokens += int(value.get("input_tokens", 0))
         output_tokens += int(value.get("output_tokens", 0))
         elapsed += float(value.get("elapsed_seconds", 0))
+    semantic = {"valid_findings": 0, "invalid_findings": 0, "unreviewed_findings": 0,
+                "valid_positive_cases": 0, "unassessed_cases": 0}
+    for case in cases:
+        value = predictions[case["id"]]
+        decisions = (adjudications or {}).get(case["id"], [])
+        findings = value.get("findings", [])
+        if len(decisions) > len(findings):
+            raise ValueError("adjudications exceed findings")
+        valid = False
+        for index, _finding in enumerate(findings):
+            decision = decisions[index] if index < len(decisions) else {}
+            verdict = decision.get("verdict", "unreviewed")
+            if verdict not in ("valid", "invalid", "unreviewed"):
+                raise ValueError("invalid adjudication verdict")
+            if verdict != "unreviewed" and not decision.get("evidence"):
+                raise ValueError("source evidence required for adjudication")
+            semantic[{"valid": "valid_findings", "invalid": "invalid_findings",
+                      "unreviewed": "unreviewed_findings"}[verdict]] += 1
+            valid |= verdict == "valid"
+        semantic["valid_positive_cases"] += valid and case["expected_issue"]
+        semantic["unassessed_cases"] += (not value.get("coverage_complete", False)
+                                            or len(decisions) < len(findings)
+                                            or value["status"] == "incomplete")
     return {
+        "semantic_review": semantic,
         "cases": len(cases), "true_positives": tp, "false_positives": fp,
         "missed_positives": fn, "true_negatives": tn, "incomplete": incomplete,
         "unassessed_negatives": unassessed_negative,
@@ -51,9 +75,12 @@ def evaluate(cases: list[dict], predictions: dict[str, dict]) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--predictions", type=Path, required=True)
+    parser.add_argument("--adjudications", type=Path)
+    parser.add_argument("--cases", type=Path, default=CASES)
     args = parser.parse_args()
-    print(json.dumps(evaluate(json.loads(CASES.read_text(encoding="utf-8")),
-                              json.loads(args.predictions.read_text(encoding="utf-8"))), indent=2))
+    decisions = json.loads(args.adjudications.read_text(encoding="utf-8")) if args.adjudications else None
+    print(json.dumps(evaluate(json.loads(args.cases.read_text(encoding="utf-8")),
+                              json.loads(args.predictions.read_text(encoding="utf-8")), decisions), indent=2))
 
 
 if __name__ == "__main__":

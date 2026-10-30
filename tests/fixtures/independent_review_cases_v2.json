@@ -1,0 +1,65 @@
+[
+  {
+    "id": "hidden_error",
+    "expected_issue": true,
+    "before": "def parse_value(value):\n    return int(value)\n",
+    "after": "def parse_value(value):\n    try:\n        return int(value)\n    except Exception:\n        return None\n",
+    "anchor": {
+      "side": "new",
+      "line": 4
+    },
+    "label": "Suppressing all parse errors hides the failure instead of fixing its cause.",
+    "case_version": 2,
+    "contract": "parse_value must return int(value); invalid strings must raise ValueError. Returning None violates this contract.",
+    "adjudication_boundary": "Review trigger, consequence, code evidence and old/new location against pinned full source; unknown or omitted evidence is unassessed."
+  },
+  {
+    "id": "unbounded_retry",
+    "expected_issue": true,
+    "before": "def load(fetch):\n    return fetch()\n",
+    "after": "def load(fetch):\n    while True:\n        try:\n            return fetch()\n        except Exception:\n            continue\n",
+    "anchor": {
+      "side": "new",
+      "line": 2
+    },
+    "label": "Retries have no attempt limit, delay or cancellation boundary.",
+    "case_version": 2,
+    "contract": "load(fetch) must return successful results and propagate persistent dependency failure without hanging or spinning indefinitely.",
+    "adjudication_boundary": "Review trigger, consequence, code evidence and old/new location against pinned full source; unknown or omitted evidence is unassessed."
+  },
+  {
+    "id": "removed_permission_check",
+    "expected_issue": true,
+    "before": "def read_secret(authorized):\n    if not authorized:\n        raise PermissionError()\n    return secret\n",
+    "after": "def read_secret(authorized):\n    return secret\n",
+    "anchor": {
+      "side": "old",
+      "line": 2
+    },
+    "label": "Removing authorization exposes the secret to unauthorized callers.",
+    "case_version": 2,
+    "contract": "read_secret(False) must raise PermissionError; secret is defined elsewhere. Preserve authorization.",
+    "adjudication_boundary": "Review trigger, consequence, code evidence and old/new location against pinned full source; unknown or omitted evidence is unassessed."
+  },
+  {
+    "id": "correct_arithmetic_fix",
+    "expected_issue": false,
+    "before": "def add(a, b):\n    return a - b\n",
+    "after": "def add(a, b):\n    return a + b\n",
+    "label": "The operator change fixes the supplied arithmetic failure.",
+    "case_version": 2,
+    "contract": "add(3, 2) must return 5. Preserve ordinary numeric addition.",
+    "adjudication_boundary": "Review trigger, consequence, code evidence and old/new location against pinned full source; unknown or omitted evidence is unassessed."
+  },
+  {
+    "id": "large_diff_unresolved_cause",
+    "expected_issue": true,
+    "before": "def add(a, b):\n    return a - b\n",
+    "after": "def add(a, b):\n    return a - b\n",
+    "padding_lines": 5000,
+    "label": "Added filler leaves the original arithmetic defect unresolved; a partial input must stay incomplete.",
+    "case_version": 2,
+    "contract": "add(3, 2) must return 5. Preserve ordinary numeric addition.",
+    "adjudication_boundary": "Review trigger, consequence, code evidence and old/new location against pinned full source; unknown or omitted evidence is unassessed. add still exists after 5000 filler lines and still subtracts. A claim that add is absent is invalid even when expected_issue is true; partial input may require abstention."
+  }
+]
