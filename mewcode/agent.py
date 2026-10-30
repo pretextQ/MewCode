@@ -37,6 +37,8 @@ from mewcode.permissions import (
     PermissionMode,
 )
 from mewcode.prompts import build_environment_context, build_plan_mode_reminder, build_system_prompt
+from mewcode.supervision import AdvisoryBus
+from mewcode.supervision.runtime import supervised_stream, supervision_run
 from mewcode.tools import ToolRegistry
 from mewcode.tools.base import (
     MAX_OUTPUT_CHARS,
@@ -270,7 +272,9 @@ class Agent:
         instructions_content: str = "",
         memory_manager: MemoryManager | None = None,
         hook_engine: HookEngine | OwnedHookEngine | None = None,
+        enable_supervision: bool = False,
     ) -> None:
+        self.supervision = AdvisoryBus(enable_supervision)
         self.client = client
         self.registry = registry
         self.protocol = protocol
@@ -416,6 +420,22 @@ class Agent:
         ]
 
     async def run(self, conversation: ConversationManager) -> AsyncIterator[AgentEvent]:
+        async with supervision_run(self.supervision):
+            async for event in self._run(conversation):
+                yield event
+
+    async def run_to_completion(
+        self, task: str, conversation: ConversationManager | None = None,
+        event_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> str:
+        try:
+            async with supervision_run(self.supervision):
+                return await self._run_to_completion(task, conversation, event_callback)
+        finally:
+            if self.supervision.enabled and event_callback:
+                event_callback({"type": "supervision", "report": self.supervision.report()})
+
+    async def _run(self, conversation: ConversationManager) -> AsyncIterator[AgentEvent]:
         self._current_conversation = conversation
         env_context = build_environment_context(
             self.work_dir, self.active_skills, self._skill_catalog, self._agent_catalog
@@ -945,6 +965,8 @@ class Agent:
         except Exception as e:
             result = ToolResult(output=f"Tool execution error: {e}", is_error=True)
 
+        if not result.is_error:
+            self.supervision.observe("tool_success", tc.tool_name)
         await self._snapshot_for_recovery(tc, result)
 
         return _ToolExecResult(
@@ -1124,6 +1146,8 @@ class Agent:
                 output=f"Tool execution error: {e}", is_error=True
             )
 
+        if not result.is_error:
+            self.supervision.observe("tool_success", tc.tool_name)
         await self._snapshot_for_recovery(tc, result)
 
         elapsed = time.monotonic() - start
@@ -1227,7 +1251,7 @@ class Agent:
         for attempt in range(2):
             try:
                 def request(conv: ConversationManager = api_conv) -> AsyncIterator[StreamEvent]:
-                    return self.client.stream(conv, system=system, tools=tools)
+                    return supervised_stream(self, conv, system, tools)
 
                 stream = self._stream_with_retry(request)
                 async for event in collector.consume(stream):
@@ -1256,7 +1280,7 @@ class Agent:
                     append_replacement_records(self.session_dir, records)
                 collector.response = LLMResponse()
 
-    async def run_to_completion(
+    async def _run_to_completion(
         self, task: str, conversation: ConversationManager | None = None,
         event_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> str:
@@ -1495,6 +1519,9 @@ class Agent:
             result = ToolResult(
                 output=f"Tool execution error: {e}", is_error=True
             )
+
+        if not result.is_error:
+            self.supervision.observe("tool_success", tc.tool_name)
 
         if self.hook_engine:
             file_path = self._infer_file_path(tc.arguments)

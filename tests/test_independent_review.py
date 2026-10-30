@@ -561,3 +561,13 @@ def test_false_absence_is_not_semantic_hit():
     assert evaluate([case], prediction)['semantic_review']['unreviewed_findings'] == 1
     with pytest.raises(ValueError, match='evidence'):
         evaluate([case], prediction, {case['id']: [{'verdict': 'valid'}]})
+
+
+def test_explicit_unreviewed_verdict_remains_unassessed():
+    case = CASES_DATA[0]
+    prediction = {case['id']: {'status': 'findings', 'coverage_complete': True,
+                              'findings': [{'detail': 'not yet reviewed'}]}}
+    metrics = evaluate([case], prediction, {case['id']: [{'verdict': 'unreviewed'}]})
+    assert metrics['semantic_review']['unreviewed_findings'] == 1
+    assert metrics['semantic_review']['unassessed_cases'] == 1
+    assert metrics['semantic_review']['valid_positive_cases'] == 0

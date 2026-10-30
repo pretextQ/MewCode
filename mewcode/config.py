@@ -267,6 +267,7 @@ class ServiceConfig:
     #: 模式下随最小配置写进容器、在容器内连接（见 service/sandbox.py）。
     mcp_servers: list[MCPServerConfig] = field(default_factory=list)
     review: ReviewConfig = field(default_factory=ReviewConfig)
+    enable_supervision: bool = False
 
 
 @dataclass
@@ -280,7 +281,10 @@ class AppConfig:
     worktree: WorktreeConfig = field(default_factory=WorktreeConfig)
     teammate_mode: str = ""
     enable_coordinator_mode: bool = False
+    enable_supervision: bool = False
     service: ServiceConfig = field(default_factory=ServiceConfig)
+    _supervision_configured: bool = field(default=False, repr=False, compare=False)
+    _service_supervision_configured: bool = field(default=False, repr=False, compare=False)
 
 
 def _load_single_file(path: Path) -> AppConfig:
@@ -342,6 +346,7 @@ def _load_single_file(path: Path) -> AppConfig:
         skills=None if svc["skills"] is None else list(svc["skills"]),
         token_budget=svc["token_budget"],
         review=ReviewConfig(**svc["review"]),
+        enable_supervision=svc["enable_supervision"],
         notify=NotifyConfig(
             type=svc["notify"]["type"],
             webhook_url=svc["notify"]["webhook_url"],
@@ -411,7 +416,10 @@ def _load_single_file(path: Path) -> AppConfig:
         worktree=worktree_cfg,
         teammate_mode=validated["teammate_mode"],
         enable_coordinator_mode=validated["enable_coordinator_mode"],
+        enable_supervision=validated["enable_supervision"],
         service=service_cfg,
+        _supervision_configured="enable_supervision" in raw,
+        _service_supervision_configured="enable_supervision" in (raw.get("service") or {}),
     )
 
 
@@ -441,8 +449,12 @@ def _merge_config(base: AppConfig, override: AppConfig) -> AppConfig:
         base.enable_coordinator_mode = True
     # 与 permission_mode 同样的"非默认才覆盖"语义：解析器无法区分
     # "配置里没写 service 段" 与 "写了但都是默认值"，一律视为未覆盖。
+    if override._supervision_configured:
+        base.enable_supervision = override.enable_supervision
     if override.service != ServiceConfig():
         base.service = override.service
+    elif override._service_supervision_configured:
+        base.service.enable_supervision = override.service.enable_supervision
     return base
 
 

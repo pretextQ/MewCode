@@ -589,12 +589,14 @@ class MewCodeApp(App):
         teammate_mode: str = "",
         enable_coordinator_mode: bool = False,
         driver_class: type | None = None,
+        enable_supervision: bool = False,
     ) -> None:
         super().__init__(driver_class=driver_class)
         self.providers = providers
         self._initial_permission_mode = permission_mode
         self._mcp_server_configs = mcp_servers or []
         self.hook_engine = hook_engine
+        self._enable_supervision = enable_supervision
         self._enable_fork = enable_fork
         self._enable_verification_agent = enable_verification_agent
         self._worktree_config = worktree_config
@@ -747,6 +749,7 @@ class MewCodeApp(App):
             instructions_content=self._instructions_content,
             memory_manager=self.memory_manager,
             hook_engine=self.hook_engine,
+            enable_supervision=self._enable_supervision,
         )
         self.agent.file_history = self.file_history
         self.agent.file_cache = self.file_cache
@@ -1312,6 +1315,9 @@ class MewCodeApp(App):
             await user_row.mount(user_bubble)
             self.call_after_refresh(chat.scroll_end, animate=False)
 
+            supervision = getattr(self.agent, "supervision", None)
+            if supervision is not None and supervision.enabled:
+                supervision.steer()
             self.conversation.add_user_message(text)
             if self.session:
                 self.session.append(Message(role="user", content=text))

@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import subprocess
@@ -464,6 +465,7 @@ class HeadlessAgentRunner:
             context_window=self.provider.get_context_window(),
             instructions_content=load_instructions(work_dir),
             hook_engine=self.hook_engine,
+            enable_supervision=self.config.enable_supervision,
         )
 
     async def _build_agent_with_tools(self, work_dir: str, on_event):
@@ -528,11 +530,14 @@ class HeadlessAgentRunner:
             result = await self.sandbox.run_agent(
                 job.id, work_dir, prompt, self.provider,
                 repo_name=job.repo, timeout=timeout, mcp_servers=mcp_servers,
+                **({"enable_supervision": True} if self.config.enable_supervision else {}),
             )
         except Exception as e:  # 沙箱自身故障：记事件并冒泡（执行链会 escalate）
             on_event({"type": "sandbox_error", "detail": f"{type(e).__name__}: {e}"})
             raise
 
+        if self.config.enable_supervision and "supervision" in result.extra:
+            on_event({"type": "supervision", "report": result.extra["supervision"]})
         on_event({
             "type": "usage",
             "usage": {"inputTokens": result.input_tokens, "outputTokens": result.output_tokens},
@@ -1129,6 +1134,12 @@ class ExecutionChain:
             elif etype == "usage":
                 usage = event.get("usage") or {}
                 detail = f"in={usage.get('inputTokens', 0)} out={usage.get('outputTokens', 0)}"
+            elif etype == "supervision":
+                report = event.get("report") or {}
+                # Persist a bounded valid JSON summary, never a truncated ledger.
+                detail = json.dumps({key: report.get(key) for key in (
+                    "enabled", "run_id", "turn", "attempts", "closed", "counts",
+                )}, ensure_ascii=False)
             elif etype in ("mcp_ready", "mcp_error", "mcp_used", "teardown_cancellation", "execution_mode"):
                 # 内部工具链的关键节点与收尾异常：进审计（前者是 PR 证据，
                 # 后者解释"这次运行有没有被收尾的取消打扰"）

@@ -289,6 +289,7 @@ class AgentTool(Tool[AgentToolParams]):
             context_window=self._parent_agent.context_window,
             instructions_content=definition.system_prompt,
             hook_engine=self._parent_agent.hook_engine,
+            enable_supervision=getattr(getattr(self._parent_agent, "supervision", None), "enabled", False),
         )
         sub_agent.parent_id = self._parent_agent.agent_id
         sub_agent.trace_id = self._parent_agent.trace_id or self._parent_agent.agent_id
@@ -481,6 +482,7 @@ class AgentTool(Tool[AgentToolParams]):
             context_window=self._parent_agent.context_window,
             instructions_content=instructions,
             hook_engine=self._parent_agent.hook_engine,
+            enable_supervision=getattr(getattr(self._parent_agent, "supervision", None), "enabled", False),
         )
         sub_agent.parent_id = self._parent_agent.agent_id
         sub_agent.trace_id = self._parent_agent.trace_id or self._parent_agent.agent_id
@@ -687,6 +689,7 @@ class AgentTool(Tool[AgentToolParams]):
             context_window=self._parent_agent.context_window,
             instructions_content=definition.system_prompt,
             hook_engine=self._parent_agent.hook_engine,
+            enable_supervision=getattr(getattr(self._parent_agent, "supervision", None), "enabled", False),
         )
         sub_agent.parent_id = self._parent_agent.agent_id
         sub_agent.trace_id = self._parent_agent.trace_id or self._parent_agent.agent_id

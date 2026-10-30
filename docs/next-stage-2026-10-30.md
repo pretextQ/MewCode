@@ -36,4 +36,29 @@
 
 ## B：最小监督内核
 
-A 交付后继续实施；尚未完成。
+已实现，默认关闭，纯 Python，无默认 detector、提醒或自动外部动作。[监督指南](../guides/supervision.md)与 `.mewcode/config.example.yaml` 给出开关和精确语义。
+
+每个 Agent 持有隔离总线；公共循环调用对应 run，模型决策请求首响应计 turn，provider 重试有独立 request ID。支持跨通道 key 去重、优先级/分类、TTL、逐通道数量及渲染 UTF-8 字节预算、容量限制和有界事件环。system/reminder/status 默认预算分别为 2/2048、3/4096、8/2048，没有分类豁免；状态只供 report，不发模型。
+
+提醒在压缩/工具结果裁剪之后进入本次请求副本，不进入持久历史或 fork。选中/渲染不是送达，首响应确认后才记 delivered；首响应前失败/取消不确认、不给 TTL 加轮，首响应后失败保留已送达。无 expect 只计送达；tool_call 与实际 tool_success 分开，完整窗口内匹配为 adopted，到期未匹配才 ignored；失败、取消或结束未耗尽窗口仍 waiting。预算裁掉、未注入、状态项不 ignored。
+
+新 run/恢复/服务新 attempt 重置，用户 steer 将旧 pending/waiting supersede；在途已发送请求仍如实记送达，不恢复旧 expect。子代理、teammate、worktree 子代理继承 enabled，账本及历史提醒隔离。交互/headless、服务直跑/容器最小配置已接线；CLI JSON 提供完整 report，服务持久化有界 JSON 摘要。现有 hooks 队列和权限边界保留。
+
+A 评分器另补一条边界回归：显式 unreviewed 即使已填满裁定列表，也必须仍是未复核案例。没有新增模型调用。
+
+## B 工程验证与过程发现
+
+- 新增监督专项：33 passed；覆盖两条真实 Agent 循环、默认关闭、实际请求文本、通道预算、去重、TTL、无 expect、失败工具与调用尝试、首响应前重试、流失败、取消、上下文恢复、新 run、在途 steer、实际子代理创建、服务直跑、容器开关传递和 SQLite 审计。
+- 既有 Agent/服务/沙箱配置/子代理专项：229 passed；最终审查/沙箱/监督专项 131 passed（含审查 55 例）。TUI/监督修复定向：36 passed。
+- Docker 真机重跑：**16 passed，72.17 秒**。在既有完整 CLI/MCP 路径验证 enable_supervision、两轮真实请求及空总线；另有显式测试探针在真实容器内运行 Agent/Bash（exit 1），证明“尝试已采纳、工具成功未采纳”、状态通道不注入及请求副本不重复发送。模型与后端为替身；不作为模型效果证据。
+- Docker 首跑 1 failed / 15 passed（75.67 秒）：新增 CLI 摘要断言误放入后续 stale-container 测试；移回正确用例后重跑通过，原失败日志保留。
+- 全量首跑 2 failed / 1472 passed / 19 skipped（250.44 秒）：TUI 接线对旧 duck-typed Agent 替身直接访问 supervision；改为仅在总线存在且启用时调用后，36 例定向通过，最终全量重跑通过。
+- Ruff、Windows/Linux 目标全包 mypy（各 167 文件）、工程守卫、锁文件、四项回植通过。新增三份纯 Python 源文件，无依赖变更，无规模 ceiling 提升。
+
+最终全量 `uv run --locked pytest -q -ra --timeout=120`：**1475 passed / 19 skipped，232.62 秒**。跳过为 16 Docker opt-in、2 符号链接权限、1 parent checker 缺省；Docker 另跑通过，不将两轮相加冒充单次套件。子代理 86/86；`uv build --no-sources` 的 sdist/wheel 成功，wheel 确认包含三份监督源码。12 份当前文档本地链接、40 个新模型工件哈希及候选源码哈希核对通过。原始日志见本地忽略的 `docs/evidence/next-stage-2026-10-30/`；首跑失败不覆盖。首期没有四类 detector，监督基础接线验收不代表监督效果改善。
+
+## 提交与远端
+
+A：[`c653b77`](https://github.com/pretextQ/MewCode/commit/c653b7773ec980c4982213570f44757d03bcf067)，已推送 origin/master。[CI 40998116499](https://github.com/pretextQ/MewCode/actions/runs/40998116499) Windows/Linux × Python 3.11/3.13 与 security regression 五个作业 success。
+
+B：本地验收通过，按计划独立提交推送；提交 SHA 与远端 CI 随后核对记录，不强推。

@@ -251,6 +251,7 @@ def main() -> None:
         permission_mode=permission_mode,
         mcp_servers=config.mcp_servers,
         hook_engine=hook_engine,
+        enable_supervision=config.enable_supervision,
         enable_fork=config.enable_fork,
         enable_verification_agent=config.enable_verification_agent,
         worktree_config=config.worktree,
@@ -266,7 +267,7 @@ def _summary_payload(agent, result_text: str, counters: dict, mcp_tools_used: se
 
     单独成函数：这是与沙箱执行层之间的**契约**，值得能被直接测。
     """
-    return {
+    payload = {
         "result": result_text,
         "usage": {
             "inputTokens": agent.total_input_tokens,
@@ -278,6 +279,9 @@ def _summary_payload(agent, result_text: str, counters: dict, mcp_tools_used: se
         "mcpTools": sorted(mcp_tools_used),
         "sessionId": agent.session_id,
     }
+    if getattr(agent, "supervision", None) is not None and agent.supervision.enabled:
+        payload["supervision"] = agent.supervision.report()
+    return payload
 
 
 async def _run_prompt(config, permission_mode, hook_engine, prompt: str, output_format: str = "text") -> None:
@@ -345,6 +349,7 @@ async def _run_prompt(config, permission_mode, hook_engine, prompt: str, output_
         context_window=provider.get_context_window(),
         instructions_content=instructions,
         hook_engine=hook_engine,
+        enable_supervision=config.enable_supervision,
     )
 
     wt_cfg = config.worktree or WorktreeConfig()

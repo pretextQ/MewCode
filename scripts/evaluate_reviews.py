@@ -44,6 +44,7 @@ def evaluate(cases: list[dict], predictions: dict[str, dict], adjudications: dic
         if len(decisions) > len(findings):
             raise ValueError("adjudications exceed findings")
         valid = False
+        unreviewed = False
         for index, _finding in enumerate(findings):
             decision = decisions[index] if index < len(decisions) else {}
             verdict = decision.get("verdict", "unreviewed")
@@ -54,9 +55,10 @@ def evaluate(cases: list[dict], predictions: dict[str, dict], adjudications: dic
             semantic[{"valid": "valid_findings", "invalid": "invalid_findings",
                       "unreviewed": "unreviewed_findings"}[verdict]] += 1
             valid |= verdict == "valid"
+            unreviewed |= verdict == "unreviewed"
         semantic["valid_positive_cases"] += valid and case["expected_issue"]
         semantic["unassessed_cases"] += (not value.get("coverage_complete", False)
-                                            or len(decisions) < len(findings)
+                                            or unreviewed
                                             or value["status"] == "incomplete")
     return {
         "semantic_review": semantic,

@@ -351,6 +351,7 @@ def validate_service(raw_service: dict | None) -> dict:
         "skills": None,
         "token_budget": 0,
         "review": validate_review(None),
+        "enable_supervision": False,
         "mcp_servers": [],
         "notify": {"type": "none", "webhook_url": "", "timeout_seconds": 10},
         # 沙箱默认值同样走校验器：两条返回路径（有/无 service 段）必须给出同一份默认值
@@ -466,6 +467,9 @@ def validate_service(raw_service: dict | None) -> dict:
         "skills": skills,
         "token_budget": token_budget,
         "review": validate_review(raw_service.get("review")),
+        "enable_supervision": validate_bool_field(
+            raw_service.get("enable_supervision", False), "service.enable_supervision"
+        ),
         "mcp_servers": validate_mcp_servers(raw_service.get("mcp_servers")),
         "notify": notify,
         "vcs": vcs,
@@ -499,5 +503,6 @@ def validate_config_structure(raw: object) -> dict:
         "enable_coordinator_mode": validate_bool_field(
             raw.get("enable_coordinator_mode", False), "enable_coordinator_mode"
         ),
+        "enable_supervision": validate_bool_field(raw.get("enable_supervision", False), "enable_supervision"),
         "service": validate_service(raw.get("service")),
     }

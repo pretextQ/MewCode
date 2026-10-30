@@ -26,6 +26,9 @@ providers:
 
 permission_mode: default
 
+# 纯 Python 最小监督内核；默认无 detector，不注入提醒。显式 false 可关闭。
+enable_supervision: false
+
 mcp_servers:
   # stdio 模式示例（transport 缺省为 stdio）：
   - name: context7
@@ -56,6 +59,7 @@ mcp_servers:
 #   dedup_window_seconds: 1800 # 同指纹告警去重窗口
 #   data_dir: .mewcode/service # jobs.db 等运行时状态
 #   token_budget: 0            # 单 job token 预算，0 = 不限
+#   enable_supervision: false  # 直跑和容器 Agent 共用开关；独立于 CLI 顶层开关
 #   review:                    # 固定提交上的独立审查，仅提供意见，默认关闭
 #     enabled: false
 #     max_input_bytes: 12000   # 实际 user JSON 的 UTF-8 字节预算

@@ -285,6 +285,7 @@ async def test_agent_runs_in_container_with_mcp_tools(
             repo_name="live-agent",
             timeout=900,
             mcp_servers=mcp_servers,
+            enable_supervision=True,
             # Linux 上 host.docker.internal 需要显式映射；Docker Desktop 本就支持
             extra_args=["--add-host", "host.docker.internal:host-gateway"],
         )
@@ -292,6 +293,10 @@ async def test_agent_runs_in_container_with_mcp_tools(
         llm.stop()
         loki.stop()
 
+    report = result.extra.get("supervision", {})
+    assert report.get("enabled") is True, result.stdout
+    assert report["turn"] == 2 and report["entries"] == {}, report
+    assert report["attempts"] == 2 and report["closed"], report
     assert result.exit_code == 0, f"agent run failed:\n{result.stdout[-3000:]}"
     assert "ROOT CAUSE" in result.result_text
     # 结构化摘要回报了内部工具的使用（服务层据此写审计与 PR body）
@@ -459,3 +464,19 @@ async def test_cancelled_command_removes_live_container(sandbox: DockerSandbox, 
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
         await sandbox.remove_container(name)
+
+@pytest.mark.asyncio
+async def test_supervision_delivery_and_readback_inside_container(sandbox: DockerSandbox, worktree: Path):
+    """Real container/Agent/tool failure; only model events are scripted."""
+    from mewcode.config import ProviderConfig
+
+    sandbox.write_container_config(
+        worktree / 'supervision.yaml', ProviderConfig('fake', 'anthropic', 'http://invalid', 'fake'),
+        enable_supervision=True,
+    )
+    result = await sandbox.run_command(
+        'live-supervision', str(worktree), 'python /opt/mewcode/tests/helpers/supervision_probe.py',
+        timeout=900, mount_src=True,
+    )
+    assert result.exit_code == 0, result.stdout
+    assert '"probe": "ok"' in result.stdout, result.stdout
