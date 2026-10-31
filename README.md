@@ -260,4 +260,6 @@ Windows 是一等公民运行平台，已知边界（GBK 编码读取、行尾�
 hook stdin JSON 契约见 [guides/hook-contract.md](guides/hook-contract.md)。
 
 本轮审查修复、提交映射与验证边界见 [维护交接](guides/maintenance.md)。
+
+默认关闭的监督内核及执行循环预算预警见[监督指南](guides/supervision.md)；当前进度与最新验收从[文档入口](docs/README.md)查看。
 默认关闭的独立修复审查、覆盖记录与离线评估入口见 [独立审查指南](guides/independent-review.md)。

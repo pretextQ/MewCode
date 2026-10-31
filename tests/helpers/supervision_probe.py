@@ -48,6 +48,11 @@ async def main():
     assert bus.entries['success'].state == 'ignored'
     assert bus.entries['status'].delivered_turn is None
     assert bus.turn == 2
+    # A new run rearms the built-in detector inside the actual container Agent.
+    agent.max_iterations = 1
+    await agent.run_to_completion('Budget detector probe')
+    assert bus.entries['builtin:iteration-budget'].state == 'delivered'
+    assert bus.turn == 1 and bus.attempt == 1
     print(json.dumps({'probe': 'ok', 'report': bus.report()}))
 
 

@@ -19,6 +19,7 @@ docs/*
 !docs/acceptance-2026-10-30-model.json
 !docs/next-stage-2026-10-30.md
 !docs/next-stage-2026-10-30-model.json
+!docs/stage-2026-10-31.md
 !docs/evolution/
 docs/evolution/*
 !docs/evolution/README.md

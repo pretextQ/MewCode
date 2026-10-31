@@ -1,6 +1,6 @@
-# 最小监督内核（第三阶段首期）
+# 监督内核与执行循环预算预警
 
-默认关闭。纯 Python，内置 detector 数量为零；启用空总线不会增加模型请求、提示或外部动作。现有 hooks 的用户扩展队列、权限和回调语义保留。没有自动终止、返工、GitHub 动作或生产效果承诺。
+默认关闭。纯 Python，2026-10-31 新增一个执行循环预算 detector；开启监督后，接近循环上限时会注入提醒，不增加模型请求。现有 hooks 的用户扩展队列、权限和回调语义保留。没有自动终止、返工、GitHub 动作或生产效果承诺。
 
 ## 配置与接线
 
@@ -63,4 +63,16 @@ report = agent.supervision.report()
 
 headless 回调结束时产生 `type=supervision`；CLI JSON 仅启用时增加 supervision 字段。容器回读同一字段；服务 job 写入 `agent_supervision` 有界有效 JSON 摘要（run/turn/attempts/closed/counts），不把整个账本截成无效 JSON。普通文本 CLI 不新增输出。容器进程被硬杀时不保证获得最后摘要，不能把摘要缺席计为 ignored。
 
-首期没有 self-verify、dead-end、预算预警、intent anchor detector；测试显式发布的合成提醒只存在测试代码。验收与效果边界见[本期报告](../docs/next-stage-2026-10-30.md)。
+## 执行循环预算 detector（2026-10-31）
+
+使用现有 `enable_supervision` 开关；服务仍使用独立的 `service.enable_supervision`。两者默认 false。此前开启监督仅启用基础设施，现在也启用本节的内置预警。
+
+Agent 的 `max_iterations` 是执行循环硬上限，不等同于总线的真实响应 turn 数。每次允许进入循环后，用 `remaining = limit - iteration + 1`（包含当前循环）判断是否进入末尾 `ceil(limit / 10)` 次循环，最少一次。默认上限 50 时，从第 46 次循环开始；上限 1 时可在第一次请求携带预警。短任务提前完成则不触发。这个 10% 是保守实现选择，尚未经效果校准。
+
+预警 key 为 `builtin:iteration-budget`，reminder 通道，priority 90，category `iteration_budget`，TTL 为发布时剩余循环数（总线仍按响应 turn 老化）。每 run 最多发布一次；steer 会 supersede 旧提醒，不重新武装该 key；新 run/服务新 attempt 清空去重后重新武装。它遵守全部容量、通道与字节预算，不享受保留槽位或优先级豁免，可能延迟、过期或被拒收。文案只说已进入末尾区间，不把发布时剩余量伪称为延迟送达时的实时余量。
+
+文案建议优先进行适用验证、交付已完成部分，并如实记录失败与未验证工作；不会要求只读任务运行无关测试，也不扩大工具权限。不带 expect，只统计实际送达，不能声称模型已验证或采纳。`iteration_budget_warning` 事件记录发布时 limit/iteration/remaining/threshold；`delivered` 事件仍需请求首个响应确认。服务紧凑审计摘要保留状态计数，完整 detector 事件从 Agent report / CLI JSON 查看。
+
+请求内部重试、上下文溢出恢复不额外产生 detector 发布，不增加外层循环额度；预警不追加“收尾请求”，原硬上限和失败/取消语义保持。它不是 token 预算预警，不能替代服务 token 熔断。交互、headless、服务直跑及容器 Agent 共用同一实现；子代理继承开关，各自按自己的循环上限判断。
+
+self-verify、dead-end、token 预算预警和 intent anchor 仍未实现。基础内核历史验收见[2026-10-30 报告](../docs/next-stage-2026-10-30.md)，本次验收见[2026-10-31 报告](../docs/stage-2026-10-31.md)。

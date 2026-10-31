@@ -38,6 +38,7 @@ from mewcode.permissions import (
 )
 from mewcode.prompts import build_environment_context, build_plan_mode_reminder, build_system_prompt
 from mewcode.supervision import AdvisoryBus
+from mewcode.supervision.detectors import warn_iteration_budget
 from mewcode.supervision.runtime import supervised_stream, supervision_run
 from mewcode.tools import ToolRegistry
 from mewcode.tools.base import (
@@ -465,6 +466,7 @@ class Agent:
                 )
                 break
 
+            warn_iteration_budget(self.supervision, self.max_iterations, iteration)
             if self.hook_engine:
                 ctx = self._build_hook_context("turn_start")
                 await self.hook_engine.run_hooks("turn_start", ctx)
@@ -1326,6 +1328,7 @@ class Agent:
         last_text = ""
 
         for iteration in range(1, self.max_iterations + 1):
+            warn_iteration_budget(self.supervision, self.max_iterations, iteration)
             if self.hook_engine:
                 ctx = self._build_hook_context("turn_start")
                 await self.hook_engine.run_hooks("turn_start", ctx)
