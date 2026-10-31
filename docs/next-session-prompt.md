@@ -2,6 +2,8 @@
 
 2026-10-31 更新（优先于下列历史交接）：新增执行循环预算预警 detector，随监督开关默认关闭。进入循环上限末尾 10% 时每 run 最多提醒一次，不增加请求、不改变硬上限；总线送达不等于验证通过。见[最新验收](stage-2026-10-31.md)与[监督指南](../guides/supervision.md)。本次未调用付费模型。
 
+功能提交 `e897bb3` 已推送，全量 1495 passed / 19 skipped，独立 Docker 16 passed，远端 CI 五个作业全部 success。最终纯文档收尾提交以 Git 日志为准。
+
 下一步建议先实现 dead-end 服务反馈：定义 pytest 失败指纹与动态字段归一化，保留未知格式、TDD、环境错误与失败逐步变化的区别，不因相同指纹自动终止。self-verify、token 预算预警、intent anchor 与 GitHub review 返工仍未实现。下列“无 detector”和“未实现四类 detector”描述的是 2026-10-30 的状态；其他开工约定继续适用。
 
 更新：2026-10-30。先读[当前状态](README.md)、[本期验收](next-stage-2026-10-30.md)和[历史验收](acceptance-2026-10-30.md)。
