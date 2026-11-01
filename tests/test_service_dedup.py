@@ -31,7 +31,10 @@ async def test_concurrent_intake_enqueues_and_notifies_once(tmp_path):
         assert sum(e.kind == "created" for e in events) == 1
         assert sum(e.kind == "deduped" for e in events) == 19
         runtime.pool.submit.assert_awaited_once_with(jobs[0].id)
-        runtime.notifier.notify_job_event.assert_awaited_once()
+        notifications = await store.journal.notifications(jobs[0].id)
+        assert len(notifications) == 1
+        assert notifications[0]["status"] == "pending"
+        runtime.notifier.notify_job_event.assert_not_awaited()
     finally:
         await store.close()
 

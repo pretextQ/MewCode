@@ -20,7 +20,9 @@ from typing import Any
 from mewcode.config import ServiceConfig
 
 from .jobs import Job, JobStore
-from .policy import PolicyError, RepoPolicyLoader
+from .notify import RepoPolicyNotifier, build_notifier
+from .outbox import NotificationOutbox
+from .policy import PolicyError, RepoPolicyLoader, effective_policy
 from .triggers.base import JobDraft
 from .worker import JobHandler, WorkerPool
 
@@ -64,6 +66,11 @@ class ServiceRuntime:
         self.store = store or JobStore(data_dir / "jobs.db")
         self.notifier = notifier
         self.policy_loader = policy_loader or RepoPolicyLoader(config.repos)
+        if self.notifier is None:
+            self.notifier = RepoPolicyNotifier(
+                build_notifier(config.notify, self.store), self.policy_loader, self.store,
+            )
+        self.outbox = NotificationOutbox(self.store, self.notifier)
         self.pool = WorkerPool(
             store=self.store,
             handler=handler,
@@ -81,6 +88,8 @@ class ServiceRuntime:
 
     async def start(self, recover: bool = True) -> None:
         await self.store.connect()
+        await self.store.journal.recover_executions()
+        self.outbox.start()
         await self.pool.start()
         self.accepting = True
         if self.worktree_cleanup_cutoff_hours is not None:
@@ -131,6 +140,7 @@ class ServiceRuntime:
             self._maintenance_task = None
         async with self._intake_lock:
             await self.pool.stop()
+            await self.outbox.stop()
             await self.store.close()
 
     # -- 接入 -------------------------------------------------------------
@@ -184,6 +194,9 @@ class ServiceRuntime:
                 )
                 log.info("rejected alert for %s: %s", draft.repo, reason)
                 continue
+            # Resolve only a non-secret route identity, outside the DB transaction.
+            route = None if isinstance(self.notifier, RepoPolicyNotifier) else self.outbox.route_for(draft.repo)
+            snapshot = effective_policy(self.config, draft.repo, policy, route=route)
             job, created = await self.store.accept_job(
                 fingerprint=draft.fingerprint,
                 repo=draft.repo,
@@ -191,6 +204,7 @@ class ServiceRuntime:
                 severity=draft.severity,
                 title=draft.title,
                 payload=draft.payload,
+                policy_snapshot=snapshot,
             )
             if not created:
                 result.deduped.append(job)
@@ -198,11 +212,5 @@ class ServiceRuntime:
                 continue
             await self.pool.submit(job.id)
             result.accepted.append(job)
-            if self.notifier is not None:
-                try:
-                    await self.notifier.notify_job_event(
-                        job, "received", f"severity={job.severity} title={job.title or '(no title)'}"
-                    )
-                except Exception as e:  # 通知失败不影响受理
-                    log.warning("notify failed for %s: %s", job.id, e)
+            self.outbox.wake()
         return result

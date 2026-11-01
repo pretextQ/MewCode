@@ -11,8 +11,9 @@
   ``service.token_budget``；
 - 通知渠道（``notify.RepoPolicyNotifier``）：``notify`` 段覆盖服务级通知配置。
 
-文件按 job 现读现解析（十几行的 YAML，开销与一次 agent 运行相比可忽略）——
-改文件即生效、服务无需重启，也没有缓存失效问题。
+文件在各生效点现读现解析，服务无需重启。新 job 保存脱敏快照；恢复、
+返工和发布入口检查当前限制，分支/仓库路径变化升级人工，预算取原值与
+当前值中更严格的限制。通知保留原渠道指纹，换渠道须显式重试确认。
 
 解析失败（YAML 语法 / 未知键 / 字段类型错）抛 :class:`PolicyError`，调用方
 显式处理：intake 拒收并在响应里给原因、执行链 escalate——宁可不修也不带病
@@ -21,13 +22,15 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from mewcode.config import NotifyConfig, RepoConfig
+from mewcode.config import NotifyConfig, RepoConfig, ServiceConfig, resolve_env_vars
 from mewcode.service.triggers.alertmanager import VALID_SEVERITIES
 from mewcode.validator import VALID_NOTIFY_TYPES
 
@@ -37,6 +40,34 @@ POLICY_FILENAME = "policy.yaml"
 _ALLOWED_KEYS = ("triggers", "target_branch", "token_budget", "notify")
 _TRIGGER_KEYS = ("severities",)
 _NOTIFY_KEYS = ("type", "webhook_url", "timeout_seconds")
+
+
+def notify_route(config: NotifyConfig) -> str:
+    """Non-secret identity; changed credentials/destination require explicit retry."""
+    value = f"{config.type}\0{resolve_env_vars(config.webhook_url)}"
+    return hashlib.sha256(value.encode()).hexdigest()
+
+
+def effective_policy(
+    config: ServiceConfig, repo_name: str, policy: RepoPolicy, *, route: str | None = None,
+) -> dict:
+    repo = config.repos.get(repo_name)
+    base = policy.target_branch or (repo.base_branch if repo else "")
+    snapshot = {
+        "repo": repo_name, "repo_path": str(Path(repo.path).resolve()) if repo and repo.path else "",
+        "source": policy.source, "severities": list(policy.severities),
+        "worktree_base": base or "HEAD", "pr_base": base or config.vcs.base_branch,
+        "token_budget": policy.token_budget or config.token_budget,
+        "notify_route": notify_route(policy.notify or config.notify) if route is None else route,
+    }
+    snapshot["hash"] = hashlib.sha256(json.dumps(snapshot, sort_keys=True).encode()).hexdigest()
+    return snapshot
+
+
+def stricter_budget(original: int, current: int) -> int:
+    """Zero means unlimited, so a finite limit always wins."""
+    limits = [v for v in (original, current) if v > 0]
+    return min(limits) if limits else 0
 
 
 class PolicyError(Exception):

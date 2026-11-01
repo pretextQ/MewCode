@@ -41,7 +41,7 @@ def capture_transport(captured: list[dict], status: int = 200) -> httpx.MockTran
             "body": json.loads(request.content),
             "content_type": request.headers.get("content-type", ""),
         })
-        return httpx.Response(status, text="ok")
+        return httpx.Response(status, json={"errcode": 0})
 
     return httpx.MockTransport(handler)
 
@@ -257,6 +257,8 @@ class TestIntakeNotification:
             runtime.accepting = True
             runtime.pool = SimpleNamespace(running=True, submit=AsyncMock())
             await runtime.intake([JobDraft(fingerprint="fp", repo="demo", title="5xx 突增")])
+            assert captured == []  # intake only commits the durable intent
+            await runtime.outbox.flush()
 
         assert len(captured) == 1
         assert "5xx 突增" in captured[0]["body"]["markdown"]["content"]

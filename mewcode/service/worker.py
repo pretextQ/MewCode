@@ -139,7 +139,8 @@ class WorkerPool:
         jobs = await self.store.list_resumable()
         requeued = 0
         for job in jobs:
-            if job.status != "received":
+            await self.store.journal.recover_execution(job.id)
+            if job.status not in {"received", "changes_requested"}:
                 try:
                     await self.store.reset_for_recovery(
                         job.id, reason="service restart: re-queued from last state"
@@ -183,13 +184,21 @@ class WorkerPool:
             return
 
         self._in_flight.add(job_id)
-        await self.store.add_event(job_id, "job_started", f"worker={index} status={job.status}")
+        execution_id = await self.store.journal.start_execution(job)
+        try:
+            await self.store.add_event(job_id, "job_started", f"worker={index} status={job.status}")
+        except BaseException:
+            await self.store.journal.finish_execution(execution_id, "infrastructure_error")
+            raise
+        outcome = "completed"
         try:
             await asyncio.wait_for(self.handler(job), timeout=self.job_timeout)
             await self.store.add_event(job_id, "job_finished", "handler completed")
         except TimeoutError:
+            outcome = "timeout"
             await self._escalate_safely(job_id, f"job timeout after {self.job_timeout:.0f}s")
         except asyncio.CancelledError:
+            outcome = "interrupted"
             if not self._running:
                 # 优雅退出的兜底：drain 超时后消费者被取消。保留原状态、只落一条中断事件——
                 # 服务重启时 requeue_unfinished 会把它从最后状态捡起来继续跑；若这里
@@ -207,10 +216,12 @@ class WorkerPool:
             )
             await self._resume_after_handler_cancellation(job_id, index)
         except Exception as e:  # handler 的任何异常都不能让 job 卡在中间态
+            outcome = "error"
             log.exception("worker %d: handler failed for %s", index, job_id)
             await self._escalate_safely(job_id, f"{type(e).__name__}: {e}")
         finally:
             self._in_flight.discard(job_id)
+            await self.store.journal.finish_execution(execution_id, outcome)
 
     async def _record_interruption(self, job_id: str) -> None:
         """记录中断现场而不改状态（供重启恢复接续）。"""

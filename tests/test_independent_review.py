@@ -16,6 +16,7 @@ from mewcode.service.execution import AgentRunOutcome, ExecutionChain, Execution
 from mewcode.service.execution import TestOutcome as Outcome
 from mewcode.service.jobs import JobStore
 from mewcode.service.metrics import build_job_report
+from mewcode.service.policy import RepoPolicy, effective_policy
 from mewcode.service.publisher import GitHubCIGate, PullRequestPublisher, build_pr_body
 from mewcode.service.review import ReviewService, review_history
 from mewcode.service.review_diff import digest, git
@@ -279,6 +280,15 @@ async def test_disabling_review_has_no_side_effects(env):
     result = await review(env)
     assert result.reason == "disabled" and not env.created and not env.reviewer.root.exists()
     assert not review_reports(await env.store.events(env.job.id))
+
+
+@pytest.mark.asyncio
+async def test_review_retains_original_job_budget_when_configuration_relaxes(env):
+    env.config.token_budget = 1
+    await env.store.journal.apply_policy(env.job, effective_policy(env.config, "demo", RepoPolicy()))
+    env.config.token_budget = 1_000_000
+    result = await review(env)
+    assert result.reason == "token_budget" and not env.created
 
 
 @pytest.mark.asyncio

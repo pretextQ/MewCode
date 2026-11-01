@@ -33,7 +33,8 @@ MewCode 已收录于 [XERJ Corpus Hub](https://hub.xerj.org/corpus/pretextq--mew
 **服务化（headless）**
 - Alertmanager webhook / 手动 JSON 触发，SQLite JobStore + 显式状态机 + 指纹去重，优雅退出与重启恢复
 - 每 job 独立 git worktree；修复-验证循环有界（默认最多 3 次，超限 escalate）
-- **多仓库策略**：`<repo>/.mewcode/policy.yaml` 声明触发严重度路由 / 目标分支 / 本仓 token 预算 / 通知渠道（仓库级 > 服务配置 > 默认；按 job 现读、改文件即生效；损坏的策略快速失败而非静默回退）
+- **多仓库策略**：`<repo>/.mewcode/policy.yaml` 声明触发严重度路由 / 目标分支 / 本仓 token 预算 / 通知渠道；保存脱敏生效快照，执行与发布前重验证，已有任务的分支变化升级人工
+- **可靠交接**：关键通知与状态同事务登记，后台独立发送和重试，重启补发不重跑 Agent；每次派工记录起因、状态与已落库 token，关联修复证据（见[服务可靠性](guides/service-reliability.md)）
 - PR body 由服务层结构化拼装，review 者不看 agent 日志也能做判断
 - **运营端点**：`/metrics`（Prometheus 文本：状态/仓库计数、alert→PR 直方图、token 成本）、`/jobs/{id}/report`（单 job JSON 复盘）、`/costs`（按仓库聚合 token，只报数量不换算金额）
 
@@ -142,7 +143,7 @@ JSON 为 `{"decision": "merged", "reason": "人工确认已合并"}`。可选结
 
 ### 3. 多仓库策略（可选）
 
-每个仓库可以在自己的 checkout 里放一份 `<repo>/.mewcode/policy.yaml`，声明与全服务默认不同的行为（仓库级 > 服务配置 > 默认；按 job 现读，改文件即生效、无需重启；损坏的策略一律快速失败——intake 拒收给原因、执行链 escalate，绝不静默回退）：
+每个仓库可以在自己的 checkout 里放一份 `<repo>/.mewcode/policy.yaml`，声明与全服务默认不同的行为（仓库级 > 服务配置 > 默认）。新任务保存生效快照；已有任务在执行、Agent 调用和发布入口重验证：仓库路径或分支选择变化、严重度不再允许时升级人工，预算取创建时和当前值中更严格的限制。策略损坏时 intake 拒收、执行链升级；通知独立保留待办，不静默换渠道。细则见[服务可靠性](guides/service-reliability.md)。
 
 ```yaml
 # <repo>/.mewcode/policy.yaml
@@ -165,7 +166,7 @@ Prometheus 抓取需配置相同 Bearer 凭证；demo/回放脚本通过 `--toke
 | 端点 | 内容 |
 |---|---|
 | `GET /metrics` | Prometheus 文本格式：jobs 总量（按状态/仓库）、`mewcode_alert_to_pr_seconds` 直方图（MTTR 核心）、merged/escalate 计数、按仓库的 token 成本 |
-| `GET /jobs/{id}/report` | 单 job JSON 复盘：状态轨迹、逐 attempt token、工具统计、验证证据、MCP 调用、升级原因 |
+| `GET /jobs/{id}/report` | 单 job JSON 复盘：状态轨迹、执行记录、策略快照、通知回执、逐 attempt token、工具统计与验证证据 |
 | `GET /costs?repo=` | 按仓库聚合的 token 成本（诚实口径：只报 provider 原始数量，不换算金额） |
 
 **评估集回放**——改了提示词 / skill / 内核之后跑一轮，就能拿到成功率 / MTTR / 成本的前后对比：
@@ -233,6 +234,9 @@ mewcode/
     ├── publisher.py    #   PR 证据链拼装 + CI 门禁
     ├── vcs.py          #   GitHub REST（branch / push / PR / checks）
     ├── notify.py       #   钉钉 / 企微 / Slack webhook 通知
+    ├── outbox.py       #   通知后台发送、独立重试与恢复
+    ├── journal.py      #   通知回执、策略快照与执行记录
+    ├── job_schema.py   #   SQLite 表结构与增量迁移
     ├── metrics.py      #   /metrics + /jobs/{id}/report + /costs（M3）
     ├── policy.py       #   仓库级策略文件解析与四生效点（M3）
     └── ...

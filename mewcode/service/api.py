@@ -195,12 +195,33 @@ def create_app(
             await runtime.pool.submit(job.id)
         return web.json_response({"job": _job_summary(job)})
 
+    async def retry_notification(request: web.Request) -> web.Response:
+        if not token:
+            return web.json_response({"error": "configure webhook_token to retry notifications"}, status=503)
+        payload = await read_json(request)
+        accept_change = payload.get("accept_route_change", False)
+        if type(accept_change) is not bool or set(payload) - {"accept_route_change"}:
+            return web.json_response({"error": "invalid notification retry"}, status=400)
+        try:
+            seq = int(request.match_info["seq"])
+        except ValueError:
+            return web.json_response({"error": "seq must be an integer"}, status=400)
+        job_id = request.match_info["job_id"]
+        if await runtime.store.get(job_id) is None:
+            return web.json_response({"error": "job not found"}, status=404)
+        changed = await runtime.store.journal.retry_notification(job_id, seq, accept_change)
+        if not changed:
+            return web.json_response({"error": "notification not retryable"}, status=409)
+        runtime.outbox.wake()
+        return web.json_response({"queued": True})
+
     app = web.Application(middlewares=[auth_middleware], client_max_size=max_body_bytes)
     app.router.add_post("/webhook/alert", post_alert)
     app.router.add_post("/webhook/manual", post_manual)
     app.router.add_get("/healthz", healthz)
     app.router.add_get("/jobs", list_jobs)
     app.router.add_post("/jobs/{job_id}/decision", decision)
+    app.router.add_post("/jobs/{job_id}/notifications/{seq}/retry", retry_notification)
     app.router.add_get("/jobs/{job_id}/report", single_job_report)
     app.router.add_get("/metrics", metrics)
     app.router.add_get("/costs", costs)

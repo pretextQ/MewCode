@@ -16,11 +16,17 @@ import json
 import logging
 import sqlite3
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TypeVar
+
+from .job_schema import initialize
+from .journal import ServiceJournal, active_execution, enqueue_notification, save_policy
 
 log = logging.getLogger(__name__)
+T = TypeVar("T")
 
 # ---------------------------------------------------------------------------
 # 状态机
@@ -90,6 +96,7 @@ class JobEvent:
     ts: str
     kind: str
     detail: str
+    execution_id: str = ""
 
 
 @dataclass
@@ -135,39 +142,6 @@ class Job:
         return json.dumps(self.payload, ensure_ascii=False, sort_keys=True, indent=2)
 
 
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS jobs (
-    id          TEXT PRIMARY KEY,
-    fingerprint TEXT NOT NULL,
-    repo        TEXT NOT NULL,
-    severity    TEXT NOT NULL DEFAULT 'warning',
-    title       TEXT NOT NULL DEFAULT '',
-    payload     TEXT NOT NULL DEFAULT '{}',
-    status      TEXT NOT NULL,
-    attempts    INTEGER NOT NULL DEFAULT 0,
-    branch      TEXT NOT NULL DEFAULT '',
-    pr_url      TEXT NOT NULL DEFAULT '',
-    ci_status   TEXT NOT NULL DEFAULT '',
-    last_error  TEXT NOT NULL DEFAULT '',
-    result      TEXT NOT NULL DEFAULT '',
-    tokens_in   INTEGER NOT NULL DEFAULT 0,
-    tokens_out  INTEGER NOT NULL DEFAULT 0,
-    created_at  TEXT NOT NULL,
-    updated_at  TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_jobs_fingerprint ON jobs(repo, fingerprint, status);
-CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status, updated_at);
-CREATE TABLE IF NOT EXISTS job_events (
-    seq    INTEGER PRIMARY KEY AUTOINCREMENT,
-    job_id TEXT NOT NULL,
-    ts     TEXT NOT NULL,
-    kind   TEXT NOT NULL,
-    detail TEXT NOT NULL DEFAULT ''
-);
-CREATE INDEX IF NOT EXISTS idx_job_events_job ON job_events(job_id, seq);
-"""
-
-
 def _row_to_job(row: sqlite3.Row) -> Job:
     try:
         payload = json.loads(row["payload"])
@@ -209,6 +183,7 @@ class JobStore:
         self.max_fix_attempts = max_fix_attempts
         self._conn: sqlite3.Connection | None = None
         self._lock = asyncio.Lock()
+        self.journal = ServiceJournal(self)
 
     # -- 生命周期 ---------------------------------------------------------
 
@@ -222,14 +197,7 @@ class JobStore:
             conn.row_factory = sqlite3.Row
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA foreign_keys=ON")
-            conn.executescript(_SCHEMA)
-            # 旧库迁移（M3 W1 的 token 列晚于表结构出现）：CREATE TABLE IF NOT EXISTS
-            # 不会补已有表的列，只能显式 ALTER。列存在性以 PRAGMA 为准。
-            existing = {r[1] for r in conn.execute("PRAGMA table_info(jobs)")}
-            for column in ("tokens_in", "tokens_out"):
-                if column not in existing:
-                    conn.execute(f"ALTER TABLE jobs ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0")
-            conn.commit()
+            initialize(conn)
             return conn
 
         self._conn = await asyncio.to_thread(_open)
@@ -246,6 +214,34 @@ class JobStore:
             raise JobStoreError("JobStore.connect() must be awaited before use")
         return self._conn
 
+    async def transact(self, operation: Callable[[sqlite3.Connection], T]) -> T:
+        """Serialize a complete transaction, including cancellation and rollback.
+
+        A cancelled await must not release the connection while its thread is
+        still committing. BEGIN IMMEDIATE also serializes independent stores.
+        """
+        async with self._lock:
+            conn = self._require_conn()
+
+            def run() -> T:
+                with conn:
+                    conn.execute("BEGIN IMMEDIATE")
+                    return operation(conn)
+
+            task = asyncio.create_task(asyncio.to_thread(run))
+            try:
+                return await asyncio.shield(task)
+            except asyncio.CancelledError as cancellation:
+                while not task.done():
+                    try:
+                        await asyncio.shield(task)
+                    except asyncio.CancelledError:
+                        continue
+                try:
+                    task.result()
+                finally:
+                    raise cancellation
+
     # -- 写入 -------------------------------------------------------------
 
     async def create_job(
@@ -256,6 +252,7 @@ class JobStore:
         title: str = "",
         payload: dict | None = None,
         status: str = "received",
+        policy_snapshot: dict | None = None,
     ) -> Job:
         if status not in TRANSITIONS:
             raise JobStoreError(f"unknown status: {status}")
@@ -273,16 +270,14 @@ class JobStore:
         )
 
         def _insert(conn: sqlite3.Connection) -> None:
-            with conn:
-                self._insert_job(conn, job)
+            self._insert_job(conn, job, policy_snapshot)
 
-        async with self._lock:
-            await asyncio.to_thread(_insert, self._require_conn())
+        await self.transact(_insert)
         log.info("job created id=%s repo=%s status=%s", job.id, repo, status)
         return job
 
     @staticmethod
-    def _insert_job(conn: sqlite3.Connection, job: Job) -> None:
+    def _insert_job(conn: sqlite3.Connection, job: Job, policy_snapshot: dict | None = None) -> None:
         conn.execute(
             "INSERT INTO jobs (id, fingerprint, repo, severity, title, payload, status,"
             " attempts, branch, pr_url, ci_status, last_error, result, created_at, updated_at)"
@@ -294,14 +289,17 @@ class JobStore:
                 job.created_at, job.updated_at,
             ),
         )
-        conn.execute(
+        event = conn.execute(
             "INSERT INTO job_events (job_id, ts, kind, detail) VALUES (?, ?, ?, ?)",
             (job.id, job.created_at, "created", f"status={job.status} repo={job.repo}"),
         )
+        save_policy(conn, job.id, policy_snapshot)
+        enqueue_notification(conn, job, int(event.lastrowid or 0))
 
     async def accept_job(
         self, fingerprint: str, repo: str, window_seconds: int, *,
         severity: str = "warning", title: str = "", payload: dict | None = None,
+        policy_snapshot: dict | None = None,
     ) -> tuple[Job, bool]:
         """Atomically find/create an incident and append its intake audit event.
 
@@ -328,7 +326,7 @@ class JobStore:
                         severity=severity, title=title, payload=payload or {}, status="received",
                         created_at=now, updated_at=now,
                     )
-                    self._insert_job(conn, job)
+                    self._insert_job(conn, job, policy_snapshot)
                     return job, True
 
             # A cancelled await cannot release the connection lock while its
@@ -369,74 +367,71 @@ class JobStore:
         if to_state not in TRANSITIONS:
             raise JobStoreError(f"unknown state: {to_state}")
 
-        async with self._lock:
-            conn = self._require_conn()
-
-            def _do() -> Job:
-                row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
-                if row is None:
-                    raise JobNotFound(job_id)
-                current = _row_to_job(row)
-                if expected_state is not None and current.status != expected_state:
-                    raise InvalidTransition(f"expected {expected_state}, got {current.status}")
-                allowed = TRANSITIONS.get(current.status, frozenset())
-                if to_state not in allowed:
-                    raise InvalidTransition(
-                        f"{current.status} -> {to_state} is not allowed for {job_id}"
-                    )
-
-                attempts = current.attempts
-                if to_state == "fixing":
-                    if current.status in RETRY_STATES:
-                        if attempts >= self.max_fix_attempts:
-                            raise InvalidTransition(
-                                f"retry ceiling reached for {job_id}: attempts={attempts} "
-                                f">= max_fix_attempts={self.max_fix_attempts}; escalate instead"
-                            )
-                        attempts += 1
-                    else:
-                        attempts = max(attempts, 1)
-
-                now = utc_now()
-                updated = Job(
-                    id=current.id,
-                    fingerprint=current.fingerprint,
-                    repo=current.repo,
-                    severity=current.severity,
-                    payload=current.payload,
-                    status=to_state,
-                    attempts=attempts,
-                    title=current.title,
-                    branch=current.branch if branch is None else branch,
-                    pr_url=current.pr_url if pr_url is None else pr_url,
-                    ci_status=current.ci_status if ci_status is None else ci_status,
-                    last_error=current.last_error if last_error is None else last_error,
-                    result=current.result if result is None else result,
-                    tokens_in=current.tokens_in,
-                    tokens_out=current.tokens_out,
-                    created_at=current.created_at,
-                    updated_at=now,
+        def _do(conn: sqlite3.Connection) -> Job:
+            row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+            if row is None:
+                raise JobNotFound(job_id)
+            current = _row_to_job(row)
+            if expected_state is not None and current.status != expected_state:
+                raise InvalidTransition(f"expected {expected_state}, got {current.status}")
+            allowed = TRANSITIONS.get(current.status, frozenset())
+            if to_state not in allowed:
+                raise InvalidTransition(
+                    f"{current.status} -> {to_state} is not allowed for {job_id}"
                 )
-                conn.execute(
-                    "UPDATE jobs SET status=?, attempts=?, branch=?, pr_url=?, ci_status=?,"
-                    " last_error=?, result=?, updated_at=? WHERE id=?",
-                    (
-                        updated.status, updated.attempts, updated.branch, updated.pr_url,
-                        updated.ci_status, updated.last_error, updated.result,
-                        updated.updated_at, updated.id,
-                    ),
-                )
-                detail = f"{current.status} -> {to_state}"
-                if reason:
-                    detail += f": {reason}"
-                conn.execute(
-                    "INSERT INTO job_events (job_id, ts, kind, detail) VALUES (?, ?, ?, ?)",
-                    (job_id, now, "transition", detail),
-                )
-                conn.commit()
-                return updated
 
-            job = await asyncio.to_thread(_do)
+            attempts = current.attempts
+            if to_state == "fixing":
+                if current.status in RETRY_STATES:
+                    if attempts >= self.max_fix_attempts:
+                        raise InvalidTransition(
+                            f"retry ceiling reached for {job_id}: attempts={attempts} "
+                            f">= max_fix_attempts={self.max_fix_attempts}; escalate instead"
+                        )
+                    attempts += 1
+                else:
+                    attempts = max(attempts, 1)
+
+            now = utc_now()
+            updated = Job(
+                id=current.id,
+                fingerprint=current.fingerprint,
+                repo=current.repo,
+                severity=current.severity,
+                payload=current.payload,
+                status=to_state,
+                attempts=attempts,
+                title=current.title,
+                branch=current.branch if branch is None else branch,
+                pr_url=current.pr_url if pr_url is None else pr_url,
+                ci_status=current.ci_status if ci_status is None else ci_status,
+                last_error=current.last_error if last_error is None else last_error,
+                result=current.result if result is None else result,
+                tokens_in=current.tokens_in,
+                tokens_out=current.tokens_out,
+                created_at=current.created_at,
+                updated_at=now,
+            )
+            conn.execute(
+                "UPDATE jobs SET status=?, attempts=?, branch=?, pr_url=?, ci_status=?,"
+                " last_error=?, result=?, updated_at=? WHERE id=?",
+                (
+                    updated.status, updated.attempts, updated.branch, updated.pr_url,
+                    updated.ci_status, updated.last_error, updated.result,
+                    updated.updated_at, updated.id,
+                ),
+            )
+            detail = f"{current.status} -> {to_state}"
+            if reason:
+                detail += f": {reason}"
+            event = conn.execute(
+                "INSERT INTO job_events (job_id, ts, kind, detail, execution_id) VALUES (?, ?, ?, ?, ?)",
+                (job_id, now, "transition", detail, active_execution(conn, job_id)),
+            )
+            enqueue_notification(conn, updated, int(event.lastrowid or 0), reason)
+            return updated
+
+        job = await self.transact(_do)
 
         log.info("job %s: %s", job_id, reason or f"{job.status}")
         return job
@@ -455,37 +450,29 @@ class JobStore:
         if not fields:
             return await self.get_or_raise(job_id)
 
-        async with self._lock:
-            conn = self._require_conn()
+        def _do(conn: sqlite3.Connection) -> Job:
+            row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+            if row is None:
+                raise JobNotFound(job_id)
+            sets = ", ".join(f"{k}=?" for k in fields)
+            conn.execute(
+                f"UPDATE jobs SET {sets}, updated_at=? WHERE id=?",
+                (*fields.values(), utc_now(), job_id),
+            )
+            row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+            return _row_to_job(row)
 
-            def _do() -> Job:
-                row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
-                if row is None:
-                    raise JobNotFound(job_id)
-                sets = ", ".join(f"{k}=?" for k in fields)
-                conn.execute(
-                    f"UPDATE jobs SET {sets}, updated_at=? WHERE id=?",
-                    (*fields.values(), utc_now(), job_id),
-                )
-                conn.commit()
-                row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
-                return _row_to_job(row)
-
-            return await asyncio.to_thread(_do)
+        return await self.transact(_do)
 
     async def add_event(self, job_id: str, kind: str, detail: str = "") -> None:
         """追加一条审计事件（不改变状态）。"""
-        async with self._lock:
-            conn = self._require_conn()
+        def _do(conn: sqlite3.Connection) -> None:
+            conn.execute(
+                "INSERT INTO job_events (job_id, ts, kind, detail, execution_id) VALUES (?, ?, ?, ?, ?)",
+                (job_id, utc_now(), kind, detail, active_execution(conn, job_id)),
+            )
 
-            def _do() -> None:
-                conn.execute(
-                    "INSERT INTO job_events (job_id, ts, kind, detail) VALUES (?, ?, ?, ?)",
-                    (job_id, utc_now(), kind, detail),
-                )
-                conn.commit()
-
-            await asyncio.to_thread(_do)
+        await self.transact(_do)
 
     async def add_usage(self, job_id: str, input_tokens: int, output_tokens: int) -> None:
         """累计一次 agent 运行的 token 用量（多次 attempt 在 SQL 侧累加）。
@@ -495,20 +482,16 @@ class JobStore:
         """
         if input_tokens <= 0 and output_tokens <= 0:
             return
-        async with self._lock:
-            conn = self._require_conn()
+        def _do(conn: sqlite3.Connection) -> None:
+            cur = conn.execute(
+                "UPDATE jobs SET tokens_in = tokens_in + ?, tokens_out = tokens_out + ?"
+                " WHERE id = ?",
+                (input_tokens, output_tokens, job_id),
+            )
+            if cur.rowcount == 0:
+                raise JobNotFound(job_id)
 
-            def _do() -> None:
-                cur = conn.execute(
-                    "UPDATE jobs SET tokens_in = tokens_in + ?, tokens_out = tokens_out + ?"
-                    " WHERE id = ?",
-                    (input_tokens, output_tokens, job_id),
-                )
-                if cur.rowcount == 0:
-                    raise JobNotFound(job_id)
-                conn.commit()
-
-            await asyncio.to_thread(_do)
+        await self.transact(_do)
 
     async def reset_for_recovery(self, job_id: str, reason: str = "") -> Job:
         """把中断在途的 job 回退到 ``received``（服务重启恢复专用）。
@@ -517,48 +500,41 @@ class JobStore:
         因此单独开一条通道：只允许从非终态回退，且落一条审计事件记录
         原状态，保证"每个状态变化都有据可查"。
         """
-        async with self._lock:
-            conn = self._require_conn()
-
-            def _do() -> Job:
-                row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
-                if row is None:
-                    raise JobNotFound(job_id)
-                current = _row_to_job(row)
-                if current.is_terminal:
-                    raise InvalidTransition(
-                        f"cannot recover {job_id}: status {current.status} is terminal"
-                    )
-                if current.status == "received":
-                    return current
-                now = utc_now()
-                conn.execute(
-                    "UPDATE jobs SET status='received', updated_at=? WHERE id=?", (now, job_id)
+        def _do(conn: sqlite3.Connection) -> Job:
+            row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+            if row is None:
+                raise JobNotFound(job_id)
+            current = _row_to_job(row)
+            if current.is_terminal:
+                raise InvalidTransition(
+                    f"cannot recover {job_id}: status {current.status} is terminal"
                 )
-                conn.execute(
-                    "INSERT INTO job_events (job_id, ts, kind, detail) VALUES (?, ?, ?, ?)",
-                    (
-                        job_id, now, "recovery_reset",
-                        f"{current.status} -> received" + (f": {reason}" if reason else ""),
-                    ),
-                )
-                conn.commit()
-                row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
-                return _row_to_job(row)
+            if current.status == "received":
+                return current
+            now = utc_now()
+            conn.execute(
+                "UPDATE jobs SET status='received', updated_at=? WHERE id=?", (now, job_id)
+            )
+            conn.execute(
+                "INSERT INTO job_events (job_id, ts, kind, detail) VALUES (?, ?, ?, ?)",
+                (
+                    job_id, now, "recovery_reset",
+                    f"{current.status} -> received" + (f": {reason}" if reason else ""),
+                ),
+            )
+            row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+            return _row_to_job(row)
 
-            return await asyncio.to_thread(_do)
+        return await self.transact(_do)
 
-    # -- 读取 -------------------------------------------------------------
+# -- 读取 -------------------------------------------------------------
 
     async def get(self, job_id: str) -> Job | None:
-        async with self._lock:
-            conn = self._require_conn()
+        def _do(conn: sqlite3.Connection) -> Job | None:
+            row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+            return _row_to_job(row) if row else None
 
-            def _do() -> Job | None:
-                row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
-                return _row_to_job(row) if row else None
-
-            return await asyncio.to_thread(_do)
+        return await self.transact(_do)
 
     async def get_or_raise(self, job_id: str) -> Job:
         job = await self.get(job_id)
@@ -567,19 +543,17 @@ class JobStore:
         return job
 
     async def events(self, job_id: str) -> list[JobEvent]:
-        async with self._lock:
-            conn = self._require_conn()
+        def _do(conn: sqlite3.Connection) -> list[JobEvent]:
+            rows = conn.execute(
+                "SELECT * FROM job_events WHERE job_id = ? ORDER BY seq", (job_id,)
+            ).fetchall()
+            return [
+                JobEvent(seq=r["seq"], job_id=r["job_id"], ts=r["ts"], kind=r["kind"], detail=r["detail"],
+                         execution_id=r["execution_id"])
+                for r in rows
+            ]
 
-            def _do() -> list[JobEvent]:
-                rows = conn.execute(
-                    "SELECT * FROM job_events WHERE job_id = ? ORDER BY seq", (job_id,)
-                ).fetchall()
-                return [
-                    JobEvent(seq=r["seq"], job_id=r["job_id"], ts=r["ts"], kind=r["kind"], detail=r["detail"])
-                    for r in rows
-                ]
-
-            return await asyncio.to_thread(_do)
+        return await self.transact(_do)
 
     async def transition_history(self) -> list[TransitionRecord]:
         """全部 job 的状态转移轨迹（指标时长与复盘报告时间线的共同数据源）。
@@ -587,86 +561,74 @@ class JobStore:
         detail 格式由本模块的 ``transition()`` / ``reset_for_recovery()`` 产生
         （``from -> to(: reason)``），解析留在同一处生产者模块里。
         """
-        async with self._lock:
-            conn = self._require_conn()
-
-            def _do() -> list[TransitionRecord]:
-                rows = conn.execute(
-                    "SELECT job_id, ts, kind, detail FROM job_events"
-                    " WHERE kind IN ('transition', 'recovery_reset') ORDER BY seq"
-                ).fetchall()
-                records: list[TransitionRecord] = []
-                for r in rows:
-                    detail = r["detail"]
-                    arrow = detail.find(" -> ")
-                    if arrow < 0:
-                        continue
-                    from_state = detail[:arrow].strip()
-                    rest = detail[arrow + 4:]
-                    if ": " in rest:
-                        to_state, reason = rest.split(": ", 1)
-                    else:
-                        to_state, reason = rest, ""
-                    records.append(
-                        TransitionRecord(
-                            job_id=r["job_id"],
-                            ts=r["ts"],
-                            kind=r["kind"],
-                            from_state=from_state,
-                            to_state=to_state.strip(),
-                            reason=reason,
-                        )
+        def _do(conn: sqlite3.Connection) -> list[TransitionRecord]:
+            rows = conn.execute(
+                "SELECT job_id, ts, kind, detail FROM job_events"
+                " WHERE kind IN ('transition', 'recovery_reset') ORDER BY seq"
+            ).fetchall()
+            records: list[TransitionRecord] = []
+            for r in rows:
+                detail = r["detail"]
+                arrow = detail.find(" -> ")
+                if arrow < 0:
+                    continue
+                from_state = detail[:arrow].strip()
+                rest = detail[arrow + 4:]
+                if ": " in rest:
+                    to_state, reason = rest.split(": ", 1)
+                else:
+                    to_state, reason = rest, ""
+                records.append(
+                    TransitionRecord(
+                        job_id=r["job_id"],
+                        ts=r["ts"],
+                        kind=r["kind"],
+                        from_state=from_state,
+                        to_state=to_state.strip(),
+                        reason=reason,
                     )
-                return records
+                )
+            return records
 
-            return await asyncio.to_thread(_do)
+        return await self.transact(_do)
 
     async def list_jobs(self, status: str | None = None, limit: int = 50) -> list[Job]:
-        async with self._lock:
-            conn = self._require_conn()
+        def _do(conn: sqlite3.Connection) -> list[Job]:
+            if status is None:
+                rows = conn.execute(
+                    "SELECT * FROM jobs ORDER BY created_at DESC, id DESC LIMIT ?", (limit,)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM jobs WHERE status = ? ORDER BY created_at DESC, id DESC LIMIT ?",
+                    (status, limit),
+                ).fetchall()
+            return [_row_to_job(r) for r in rows]
 
-            def _do() -> list[Job]:
-                if status is None:
-                    rows = conn.execute(
-                        "SELECT * FROM jobs ORDER BY created_at DESC, id DESC LIMIT ?", (limit,)
-                    ).fetchall()
-                else:
-                    rows = conn.execute(
-                        "SELECT * FROM jobs WHERE status = ? ORDER BY created_at DESC, id DESC LIMIT ?",
-                        (status, limit),
-                    ).fetchall()
-                return [_row_to_job(r) for r in rows]
-
-            return await asyncio.to_thread(_do)
+        return await self.transact(_do)
 
     async def count_by_status(self) -> dict[str, int]:
         """各状态的 job 数量（healthz 的观测口径）。"""
-        async with self._lock:
-            conn = self._require_conn()
+        def _do(conn: sqlite3.Connection) -> dict[str, int]:
+            rows = conn.execute(
+                "SELECT status, COUNT(*) AS n FROM jobs GROUP BY status"
+            ).fetchall()
+            return {r["status"]: r["n"] for r in rows}
 
-            def _do() -> dict[str, int]:
-                rows = conn.execute(
-                    "SELECT status, COUNT(*) AS n FROM jobs GROUP BY status"
-                ).fetchall()
-                return {r["status"]: r["n"] for r in rows}
-
-            return await asyncio.to_thread(_do)
+        return await self.transact(_do)
 
     async def list_unfinished(self) -> list[Job]:
         """所有非终态 job（调试/观测口径：含等人工的等待态）。"""
-        async with self._lock:
-            conn = self._require_conn()
+        def _do(conn: sqlite3.Connection) -> list[Job]:
+            placeholders = ", ".join("?" for _ in TERMINAL_STATES)
+            rows = conn.execute(
+                f"SELECT * FROM jobs WHERE status NOT IN ({placeholders})"
+                " ORDER BY created_at ASC",
+                tuple(sorted(TERMINAL_STATES)),
+            ).fetchall()
+            return [_row_to_job(r) for r in rows]
 
-            def _do() -> list[Job]:
-                placeholders = ", ".join("?" for _ in TERMINAL_STATES)
-                rows = conn.execute(
-                    f"SELECT * FROM jobs WHERE status NOT IN ({placeholders})"
-                    " ORDER BY created_at ASC",
-                    tuple(sorted(TERMINAL_STATES)),
-                ).fetchall()
-                return [_row_to_job(r) for r in rows]
-
-            return await asyncio.to_thread(_do)
+        return await self.transact(_do)
 
     async def list_resumable(self) -> list[Job]:
         """可被重启恢复接续的 job：非终态，且不是在等人工。"""
@@ -681,10 +643,7 @@ class JobStore:
         用于"同一告警重复触发只更新已有 job"（架构文档第四节）。
         窗口按 ``updated_at`` 计算——已完结 job 不再拦截新告警。
         """
-        async with self._lock:
-            return await asyncio.to_thread(
-                self._find_open, self._require_conn(), repo, fingerprint, window_seconds
-            )
+        return await self.transact(lambda conn: self._find_open(conn, repo, fingerprint, window_seconds))
 
     @staticmethod
     def _find_open(conn: sqlite3.Connection, repo: str, fingerprint: str, window_seconds: int) -> Job | None:

@@ -18,7 +18,7 @@ from mewcode.conversation import ConversationManager
 from mewcode.tools.base import StreamEnd, TextDelta, ToolCallComplete, ToolCallDelta, ToolCallStart
 
 from .jobs import Job, JobStore
-from .policy import RepoPolicyLoader
+from .policy import RepoPolicyLoader, stricter_budget
 from .review_diff import digest, included_lines, select_patches, snapshot
 from .review_models import ReviewResponse, ReviewResult
 from .review_prompt import SYSTEM, render_input
@@ -163,6 +163,8 @@ class ReviewService:
             return
         current = await self.store.get_or_raise(job.id)
         job_budget = self.policy_loader.load(job.repo).token_budget or self.config.token_budget
+        original = await self.store.journal.policy(job.id)
+        job_budget = stricter_budget(int(original.get("token_budget", 0)), job_budget)
         if reserved > settings.token_budget - spent or (
             job_budget and reserved > job_budget - current.tokens_in - current.tokens_out
         ):

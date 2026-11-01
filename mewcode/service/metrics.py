@@ -93,6 +93,7 @@ class MetricsSnapshot:
     escalate_total: int = 0
     #: repo -> (tokens_in, tokens_out)
     tokens_by_repo: dict[str, tuple[int, int]] = field(default_factory=dict)
+    notifications: dict = field(default_factory=dict)
 
 
 async def collect_metrics(store: JobStore) -> MetricsSnapshot:
@@ -131,6 +132,7 @@ async def collect_metrics(store: JobStore) -> MetricsSnapshot:
         in_out[0] += job.tokens_in
         in_out[1] += job.tokens_out
     snapshot.tokens_by_repo = {repo: (in_out[0], in_out[1]) for repo, in_out in tokens.items()}
+    snapshot.notifications = await store.journal.notification_stats()
     return snapshot
 
 
@@ -179,6 +181,15 @@ def render_prometheus(snapshot: MetricsSnapshot, *, model: str = "") -> str:
             f'mewcode_token_cost_total{{model="{_esc(model_label)}",repo="{_esc(repo)}"}}'
             f" {tokens_in + tokens_out}"
         )
+    lines += ["# HELP mewcode_notifications Notifications by delivery status.",
+              "# TYPE mewcode_notifications gauge"]
+    for status, count in sorted(snapshot.notifications.get("counts", {}).items()):
+        lines.append(f'mewcode_notifications{{status="{_esc(status)}"}} {count}')
+    oldest = _parse_ts(snapshot.notifications.get("oldest_pending_at") or "")
+    age = max(0.0, datetime.now(UTC).timestamp() - oldest) if oldest is not None else 0.0
+    lines += ["# HELP mewcode_notification_oldest_pending_seconds Age of oldest unsettled notification.",
+              "# TYPE mewcode_notification_oldest_pending_seconds gauge",
+              f"mewcode_notification_oldest_pending_seconds {age:.3f}"]
     return "\n".join(lines) + "\n"
 
 
@@ -190,6 +201,8 @@ def render_prometheus(snapshot: MetricsSnapshot, *, model: str = "") -> str:
 def _parse_agent_finished(event: JobEvent) -> dict:
     return {
         "ts": event.ts,
+        "execution_id": event.execution_id,
+        "event_seq": event.seq,
         "attempt": _int_after("attempt", event.detail),
         "tool_calls": _int_after("tool_calls", event.detail),
         "tokens_in": _int_after("tokens_in", event.detail),
@@ -300,7 +313,11 @@ async def job_report(store: JobStore, job_id: str) -> dict:
     """按 job 生成复盘报告；job 不存在抛 :class:`JobNotFound`。"""
     job = await store.get_or_raise(job_id)
     events = await store.events(job_id)
-    return build_job_report(job, events)
+    report = build_job_report(job, events)
+    report["policy"] = await store.journal.policy(job_id)
+    report["executions"] = await store.journal.executions(job_id)
+    report["notifications"] = await store.journal.notifications(job_id)
+    return report
 
 
 # ---------------------------------------------------------------------------

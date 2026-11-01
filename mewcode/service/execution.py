@@ -35,7 +35,7 @@ from mewcode.processes import create_shell_process, kill_process_tree, release_p
 
 from . import sop
 from .jobs import InvalidTransition, Job, JobStore
-from .policy import PolicyError, RepoPolicy, RepoPolicyLoader
+from .policy import PolicyError, RepoPolicy, RepoPolicyLoader, effective_policy, stricter_budget
 from .review_models import ReviewResult
 from .sandbox import SandboxUnavailable
 
@@ -402,12 +402,14 @@ class HeadlessAgentRunner:
         hook_engine: Any = None,
         sandbox: Any = None,
         policy_loader: RepoPolicyLoader | None = None,
+        store: JobStore | None = None,
     ) -> None:
         self.config = config
         self.provider = provider
         self.hook_engine = hook_engine
         self.sandbox = sandbox
         self.policy_loader = policy_loader
+        self.store = store
         self._sandbox_decision: bool | None = None
         #: 直跑模式下承载 MCP 生命周期的一次性子任务（强引用防 GC；
         #: 见 _run_direct 的隔离说明）
@@ -490,20 +492,19 @@ class HeadlessAgentRunner:
     ) -> AgentRunOutcome:
         # 预算在动手前解析：策略文件坏掉在这里就暴露（PolicyError → 执行链
         # escalate），而不是等 agent 跑了一半才发现配置读不了。
-        budget = self._resolve_token_budget(job)
+        current = self.policy_loader.load(job.repo) if self.policy_loader is not None else RepoPolicy()
+        budget = current.token_budget or self.config.token_budget
+        if not current.accepts(job.severity):
+            raise PolicyError("current severity policy no longer permits this job")
+        original = (await self.store.journal.apply_policy(job, effective_policy(self.config, job.repo, current))
+                    if self.store is not None else {})
+        budget = stricter_budget(int(original.get("token_budget", 0)), budget)
         if budget and job.tokens_in + job.tokens_out >= budget:
             raise TokenBudgetExceeded(f"token budget {budget} already exhausted by previous attempts")
         if await self._use_sandbox():
             return await self._run_in_sandbox(job, work_dir, prompt, on_event, budget)
         on_event({"type": "execution_mode", "detail": "host execution explicitly enabled; no OS sandbox"})
         return await self._run_direct(job, work_dir, prompt, on_event, budget)
-
-    def _resolve_token_budget(self, job: Job) -> int:
-        """token 预算解析：仓库策略 > 服务配置（0 = 不限）。"""
-        if self.policy_loader is None:
-            return self.config.token_budget
-        policy = self.policy_loader.load(job.repo)  # PolicyError 原样上抛
-        return policy.token_budget or self.config.token_budget
 
     async def _run_in_sandbox(
         self,
@@ -683,6 +684,8 @@ class ExecutionChain:
         self.config = config
         self.store = store
         self.runner = runner
+        if isinstance(runner, HeadlessAgentRunner):
+            runner.store = store
         self.test_runner = test_runner or TestRunner()
         self.publisher = publisher
         self.ci_gate = ci_gate
@@ -734,17 +737,6 @@ class ExecutionChain:
     async def _escalate(self, job_id: str, reason: str) -> None:
         await self._event(job_id, "escalated", reason)
         await self._transition(job_id, "escalate", reason=reason, last_error=reason)
-        await self._notify(job_id, "escalated", reason)
-
-    async def _notify(self, job_id: str, phase: str, detail: str) -> None:
-        if self.notifier is None:
-            return
-        try:
-            job = await self.store.get(job_id)
-            if job is not None:
-                await self.notifier.notify_job_event(job, phase, detail)
-        except Exception as e:  # 通知失败绝不能影响修复主流程
-            log.warning("notify failed for %s: %s", job_id, e)
 
     # -- 主流程 -----------------------------------------------------------
 
@@ -767,10 +759,15 @@ class ExecutionChain:
         # 仓库策略（M3 W2）：解析失败 = 宁可不修也不带病运行，直接 escalate
         try:
             policy = self.policy_loader.load(job.repo)
+            if not policy.accepts(job.severity):
+                raise PolicyError("current severity policy no longer permits this job")
+            original_policy = await self.store.journal.apply_policy(
+                job, effective_policy(self.config, job.repo, policy),
+            )
         except PolicyError as e:
             await self._escalate(job.id, f"repo policy unreadable: {e}")
             return
-        target_branch = policy.target_branch
+        target_branch = original_policy["pr_base"]
         if policy.overrides_anything:
             await self._event(job.id, "policy_applied", policy_event_detail(policy))
 
@@ -792,7 +789,7 @@ class ExecutionChain:
         try:
             manager = self._worktree_manager(repo_root)
             worktree = await manager.create(
-                job.id, base_branch=target_branch or repo.base_branch or "HEAD", reuse_existing=True
+                job.id, base_branch=original_policy["worktree_base"], reuse_existing=True
             )
         except Exception as e:
             await self._escalate(job.id, f"worktree creation failed: {type(e).__name__}: {e}")
@@ -864,7 +861,6 @@ class ExecutionChain:
             )
             if attempt == 1:
                 await self._event(job.id, "agent_prompt", prompt)
-            await self._notify(job.id, "fixing", f"agent run attempt {attempt}")
 
             attempt_usage = [0, 0]
             record_event = self._make_on_event(job)
@@ -1046,6 +1042,14 @@ class ExecutionChain:
             return None
 
         try:
+            current = self.policy_loader.load(job.repo)
+            if not current.accepts(job.severity):
+                raise PolicyError("current severity policy no longer permits publishing")
+            original = await self.store.journal.apply_policy(job, effective_policy(self.config, job.repo, current))
+            latest = await self.store.get_or_raise(job.id)
+            budget = stricter_budget(int(original["token_budget"]), current.token_budget or self.config.token_budget)
+            if budget and latest.tokens_in + latest.tokens_out > budget:
+                raise TokenBudgetExceeded("token budget tightened before publishing")
             published = await self.publisher.publish(job, context)
         except asyncio.CancelledError:
             raise
@@ -1064,7 +1068,6 @@ class ExecutionChain:
             branch=published.branch,
         ) is None:
             return None
-        await self._notify(job.id, "pr_opened", published.pr_url)
         return published
 
     async def _ci_gate(
@@ -1096,7 +1099,6 @@ class ExecutionChain:
                 ci_status=status.state,
             ) is None:
                 return None
-            await self._notify(job.id, "human_review", status.details)
             return None
 
         if status.is_failure:

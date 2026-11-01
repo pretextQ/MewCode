@@ -180,9 +180,11 @@ class CaptureNotifier(WebhookNotifier):
         )
         self.sent: list[tuple[str, str]] = []
 
-    async def notify_job_event(self, job, phase, detail=""):
-        self.sent.append((phase, detail))
-        await super().notify_job_event(job, phase, detail)
+    async def deliver_job_event(self, job, phase, detail=""):
+        result = await super().deliver_job_event(job, phase, detail)
+        if result.status == "sent":
+            self.sent.append((phase, detail))
+        return result
 
 
 def build_service_config(tmp_path: Path, env: dict, **overrides) -> ServiceConfig:
@@ -263,6 +265,7 @@ class E2EStack:
 
     async def settle(self, timeout: float = 60) -> None:
         await asyncio.wait_for(self.runtime.pool._queue.join(), timeout=timeout)
+        await self.runtime.outbox.flush()
 
     def alert(self, **overrides) -> dict:
         alert = {

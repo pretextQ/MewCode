@@ -155,6 +155,10 @@ class TestSchemaMigration:
             "INSERT INTO jobs (id, fingerprint, repo, status, created_at, updated_at)"
             " VALUES ('job-old', 'fp', 'demo', 'merged', '2026-01-01T00:00:00Z', '2026-01-01T00:01:00Z')"
         )
+        conn.execute("CREATE TABLE job_events (seq INTEGER PRIMARY KEY AUTOINCREMENT, "
+                     "job_id TEXT NOT NULL, ts TEXT NOT NULL, kind TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '')")
+        conn.execute("INSERT INTO job_events (job_id,ts,kind,detail) VALUES "
+                     "('job-old','2026-01-01T00:00:00Z','created','legacy event')")
         conn.commit()
         conn.close()
 
@@ -164,6 +168,10 @@ class TestSchemaMigration:
             old = await store.get_or_raise("job-old")
             assert old.status == "merged"
             assert (old.tokens_in, old.tokens_out) == (0, 0)
+            events = await store.events(old.id)
+            assert len(events) == 1 and events[0].execution_id == ""
+            assert events[0].detail == "legacy event"
+            assert await store.journal.notifications(old.id) == []  # no historical notifications invented
             new = await store.create_job(fingerprint="fp-2", repo="demo")
             await store.add_usage(new.id, 7, 3)
             final = await store.get_or_raise(new.id)
