@@ -3,11 +3,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import random
 import re
 import time as _time
 from collections.abc import Coroutine
-from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -15,11 +13,10 @@ from rich.text import Text as RichText
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.message import Message as TMessage
-from textual.theme import Theme
 from textual.timer import Timer
-from textual.widgets import Markdown, OptionList, Static, TextArea
+from textual.widgets import Markdown, OptionList, Static
 from textual.widgets.option_list import Option
+from textual.worker import Worker
 
 from mewcode.agent import (
     Agent,
@@ -44,7 +41,6 @@ from mewcode.cache import FileCache
 from mewcode.client import (
     AuthenticationError,
     LLMClient,
-    LLMError,
     create_client,
     resolve_context_window,
 )
@@ -88,6 +84,23 @@ from mewcode.tools.agent_tool import AgentTool
 from mewcode.tools.ask_user import AskUserEvent, AskUserTool
 from mewcode.tools.impl.tool_search import ToolSearchTool
 from mewcode.tools.load_skill import LoadSkill
+from mewcode.tui.chrome import MEWCODE_THEME, brand_title, workspace_title
+from mewcode.tui.details import DetailsPanel, ExecutionHistory
+from mewcode.tui.git import branch_name
+from mewcode.tui.input import ChatInput as ChatInput
+from mewcode.tui.messages import ChatScroll, assistant_row, user_row
+from mewcode.tui.tools import (
+    SubAgentBlock as SubAgentBlock,
+)
+from mewcode.tui.tools import (
+    ToolCallBlock as ToolCallBlock,
+)
+from mewcode.tui.tools import (
+    ToolGroupSummary as ToolGroupSummary,
+)
+from mewcode.tui.tools import (
+    _is_subagent_tool,
+)
 from mewcode.worktree.cleanup import start_stale_cleanup_task
 from mewcode.worktree.manager import WorktreeManager
 
@@ -98,7 +111,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-MAX_TRUNCATED_LINES = 20
 MAX_AT_REF_BYTES = 10240
 
 _AT_REF_RE = re.compile(r"@([\w./_\-]+(?:\.[\w]+)*)")
@@ -143,167 +155,6 @@ def expand_at_refs(text: str, work_dir: str) -> str:
     return _AT_REF_RE.sub(_replace, text)
 
 
-class ChatInput(TextArea):
-    BINDINGS = [
-        Binding("enter", "submit", "Submit", priority=True),
-        Binding("shift+enter", "newline", "Newline", priority=True),
-        Binding("ctrl+j", "newline", "Newline", priority=True),
-        Binding("tab", "complete", "Complete", priority=True),
-        Binding("escape", "dismiss_popup", "Dismiss", priority=True),
-        Binding("up", "nav_up", "Navigate up", priority=True),
-        Binding("down", "nav_down", "Navigate down", priority=True),
-    ]
-
-    class Submitted(TMessage):
-        def __init__(self, text: str) -> None:
-            super().__init__()
-            self.text = text
-
-    class TabComplete(TMessage):
-        def __init__(self, text: str) -> None:
-            super().__init__()
-            self.text = text
-
-    def __init__(self, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self.cursor_blink = False
-        self._history: list[str] = []
-        self._history_index: int = -1
-        self._history_draft: str = ""
-        self._history_file: Path | None = None
-
-    def load_history(self, work_dir: str) -> None:
-        self._history_file = Path(work_dir) / ".mewcode" / "history"
-        if self._history_file.exists():
-            try:
-                lines = self._history_file.read_text(encoding="utf-8").splitlines()
-                self._history = [ln for ln in lines if ln.strip()]
-            except Exception:
-                pass
-
-    def _persist_entry(self, text: str) -> None:
-        if self._history_file is None:
-            return
-        try:
-            self._history_file.parent.mkdir(parents=True, exist_ok=True)
-            with open(self._history_file, "a", encoding="utf-8") as f:
-                f.write(text + "\n")
-        except Exception:
-            pass
-
-    def _popup(self) -> CompletionPopup | None:
-        try:
-            return self.app.query_one(CompletionPopup)
-        except Exception:
-            return None
-
-    def action_submit(self) -> None:
-        popup = self._popup()
-        if popup is not None and popup.is_visible:
-            selected = popup.get_selected()
-            popup.hide()
-            if selected:
-                self._history.append(selected)
-                self._persist_entry(selected)
-                self._history_index = -1
-                self._history_draft = ""
-                self.post_message(self.Submitted(selected))
-                self.clear()
-                return
-        text = self.text.strip()
-        if text:
-            self._history.append(text)
-            self._persist_entry(text)
-            self._history_index = -1
-            self._history_draft = ""
-            self.post_message(self.Submitted(text))
-            self.clear()
-
-    def action_newline(self) -> None:
-        self.insert("\n")
-
-    def action_complete(self) -> None:
-        popup = self._popup()
-        if popup is not None and popup.is_visible:
-            selected = popup.get_selected()
-            if selected:
-                popup.hide()
-                self.clear()
-                self.insert(selected + " ")
-            return
-        text = self.text.strip()
-        if text.startswith("/"):
-            self.post_message(self.TabComplete(text))
-        else:
-            self.insert("\t")
-
-    def action_dismiss_popup(self) -> None:
-        popup = self._popup()
-        if popup is not None:
-            popup.hide()
-
-    def action_nav_up(self) -> None:
-        popup = self._popup()
-        if popup is not None and popup.is_visible:
-            popup.move_up()
-            return
-        if not self._history:
-            return
-        if self._history_index == -1:
-            self._history_draft = self.text
-            self._history_index = len(self._history) - 1
-        elif self._history_index > 0:
-            self._history_index -= 1
-        else:
-            return
-        self.clear()
-        self.insert(self._history[self._history_index])
-
-    def action_nav_down(self) -> None:
-        popup = self._popup()
-        if popup is not None and popup.is_visible:
-            popup.move_down()
-            return
-        if self._history_index == -1:
-            return
-        if self._history_index < len(self._history) - 1:
-            self._history_index += 1
-            self.clear()
-            self.insert(self._history[self._history_index])
-        else:
-            self._history_index = -1
-            self.clear()
-            self.insert(self._history_draft)
-
-    class AtFileRequest(TMessage):
-        def __init__(self, prefix: str) -> None:
-            super().__init__()
-            self.prefix = prefix
-
-    class SlashMenuUpdate(TMessage):
-        def __init__(self, prefix: str | None) -> None:
-            super().__init__()
-            self.prefix = prefix
-
-    def on_text_area_changed(self, event: TextArea.Changed) -> None:
-        text = self.text
-        if text.startswith("/"):
-            prefix = text[1:]
-            if " " not in prefix and "\n" not in prefix:
-                self.post_message(self.SlashMenuUpdate(prefix))
-            else:
-                self.post_message(self.SlashMenuUpdate(None))
-        else:
-            self.post_message(self.SlashMenuUpdate(None))
-
-        at_idx = text.rfind("@")
-        if at_idx < 0:
-            return
-        after = text[at_idx + 1:]
-        if " " in after or "\n" in after:
-            return
-        if after:
-            self.post_message(self.AtFileRequest(after))
 
 
 COLLAPSIBLE_TOOLS = {"ReadFile", "Glob", "Grep", "ToolSearch"}
@@ -312,110 +163,6 @@ COLLAPSIBLE_TOOLS = {"ReadFile", "Glob", "Grep", "ToolSearch"}
 _STATEFUL_COMMANDS = {"clear", "session", "compact"}
 
 
-def _is_subagent_tool(tool_name: str) -> bool:
-    return tool_name == "Agent"
-
-
-def _tool_title(tool_name: str, arguments: dict[str, Any]) -> str:
-    if tool_name == "ReadFile":
-        path = os.path.basename(arguments.get("file_path", ""))
-        return f"Read {path}" if path else "Read"
-    if tool_name == "WriteFile":
-        path = os.path.basename(arguments.get("file_path", ""))
-        content = arguments.get("content", "")
-        lines = content.count("\n") + 1 if content else 0
-        return f"Write {path} ({lines} lines)" if path else "Write"
-    if tool_name == "EditFile":
-        path = os.path.basename(arguments.get("file_path", ""))
-        return f"Edit {path}" if path else "Edit"
-    if tool_name == "Bash":
-        cmd = arguments.get("command", "")
-        short = cmd[:50] + "…" if len(cmd) > 50 else cmd
-        return f"Bash: {short}" if short else "Bash"
-    if tool_name == "Glob":
-        return f"Glob: {arguments.get('pattern', '')}"
-    if tool_name == "Grep":
-        return f"Grep: {arguments.get('pattern', '')}"
-    return tool_name
-
-
-def _format_detail(tool_name: str, arguments: dict[str, Any], output: str) -> str:
-    parts: list[str] = []
-
-    if tool_name == "Bash":
-        parts.append(f"  IN   {arguments.get('command', '')}")
-        parts.append("")
-        for line in output.splitlines():
-            parts.append(f"  OUT  {line}")
-    elif tool_name in ("ReadFile", "WriteFile", "EditFile"):
-        parts.append(f"  {arguments.get('file_path', '')}")
-        parts.append("")
-        for line in output.splitlines()[:MAX_TRUNCATED_LINES]:
-            parts.append(f"  {line}")
-        total = output.count("\n") + 1
-        if total > MAX_TRUNCATED_LINES:
-            parts.append(f"  … ({total - MAX_TRUNCATED_LINES} more lines)")
-    else:
-        for line in output.splitlines()[:MAX_TRUNCATED_LINES]:
-            parts.append(f"  {line}")
-        total = output.count("\n") + 1
-        if total > MAX_TRUNCATED_LINES:
-            parts.append(f"  … ({total - MAX_TRUNCATED_LINES} more lines)")
-
-    return "\n".join(parts)
-
-
-class ToolCallBlock(Static, can_focus=True):
-
-    def __init__(self, tool_name: str, arguments: dict[str, Any], **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self.tool_name = tool_name
-        self._arguments = arguments
-        self._title = _tool_title(tool_name, arguments)
-        self._full_output = ""
-        self._is_error = False
-        self._elapsed = 0.0
-        self._collapsed = True
-        self._loading = True
-        self._render_loading()
-
-    def _render_loading(self) -> None:
-        self.update(f"  ● {self._title} …")
-        self.add_class("tool-block-loading")
-
-    def set_result(self, output: str, is_error: bool, elapsed: float) -> None:
-        self._full_output = output
-        self._is_error = is_error
-        self._elapsed = elapsed
-        self._loading = False
-        self._collapsed = True
-        self.remove_class("tool-block-loading")
-        if is_error:
-            self.add_class("tool-block-error")
-        self._render_collapsed()
-
-    def _render_collapsed(self) -> None:
-        if self._is_error:
-            self.update(f"  ✗ {self._title} ({self._elapsed:.1f}s)")
-        else:
-            self.update(f"  ✓ {self._title} ({self._elapsed:.1f}s)")
-
-    def _render_expanded(self) -> None:
-        if self._is_error:
-            header = f"  ✗ {self._title} ({self._elapsed:.1f}s)"
-        else:
-            header = f"  ✓ {self._title} ({self._elapsed:.1f}s)"
-        detail = _format_detail(self.tool_name, self._arguments, self._full_output)
-        self.update(f"{header}\n{detail}")
-
-    def on_click(self) -> None:
-        if self._loading:
-            return
-        self._collapsed = not self._collapsed
-        if self._collapsed:
-            self._render_collapsed()
-        else:
-            self._render_expanded()
 
 
 _MODE_CYCLE = [
@@ -435,144 +182,18 @@ _MODE_COLORS = {
 SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
 
-def _to_past_tense(verb: str) -> str:
-    """把现在进行时动词转换为过去式。"""
-    if verb.endswith("ing"):
-        stem = verb[:-3]
-        if stem.endswith("e"):
-            return stem + "d"
-        if stem and stem[-1] in "atutitet":
-            return stem + "ed"
-        return stem + "ed"
-    return verb + "ed"
-
-
-THINKING_VERBS = [
-    "Accomplishing", "Architecting", "Baking", "Beboppin'", "Befuddling",
-    "Bloviating", "Boogieing", "Boondoggling", "Bootstrapping", "Brewing",
-    "Calculating", "Canoodling", "Caramelizing", "Cascading", "Cerebrating",
-    "Choreographing", "Churning", "Coalescing", "Cogitating", "Combobulating",
-    "Composing", "Computing", "Concocting", "Considering", "Contemplating",
-    "Cooking", "Crafting", "Creating", "Crunching", "Crystallizing",
-    "Cultivating", "Deciphering", "Deliberating", "Dilly-dallying",
-    "Discombobulating", "Doodling", "Elucidating", "Enchanting", "Envisioning",
-    "Fermenting", "Finagling", "Flambéing", "Flibbertigibbeting", "Flummoxing",
-    "Forging", "Frolicking", "Gallivanting", "Garnishing", "Generating",
-    "Germinating", "Grooving", "Harmonizing", "Hatching", "Honking",
-    "Hullaballooing", "Ideating", "Imagining", "Improvising", "Incubating",
-    "Inferring", "Infusing", "Kneading", "Lollygagging", "Manifesting",
-    "Marinating", "Meandering", "Metamorphosing", "Mewing", "Moonwalking",
-    "Moseying", "Mulling", "Musing", "Noodling", "Orbiting",
-    "Orchestrating", "Percolating", "Philosophising", "Pondering",
-    "Pontificating", "Pouncing", "Purring", "Puzzling", "Razzle-dazzling",
-    "Ruminating", "Scampering", "Simmering", "Sketching", "Spelunking",
-    "Spinning", "Sprouting", "Synthesizing", "Thinking", "Tinkering",
-    "Transfiguring", "Transmuting", "Undulating", "Unfurling", "Unravelling",
-    "Vibing", "Wandering", "Whisking", "Working", "Wrangling", "Zigzagging",
-]  # 共 105 个动词，与 Go 版 internal/tui/verbs.go 完全一致
-
-
-class ToolGroupSummary(Static, can_focus=True):
-
-
-    def __init__(self, count: int, total_elapsed: float, **kwargs: Any) -> None:
-        label = f"● Done ({count} tool uses · {total_elapsed:.1f}s)  (ctrl+o to expand)"
-        super().__init__(label, **kwargs)
-        self._count = count
-        self._total = total_elapsed
-        self._expanded = False
-
-    def _refresh_display(self) -> None:
-        if self._expanded:
-            self.update(f"▼ Done ({self._count} tool uses · {self._total:.1f}s)")
-        else:
-            self.update(
-                f"● Done ({self._count} tool uses · {self._total:.1f}s)"
-                "  (ctrl+o to expand)"
-            )
-
-    def toggle(self) -> None:
-        self._expanded = not self._expanded
-        self._refresh_display()
-
-
-    def on_click(self) -> None:
-        self.toggle()
-
-
-class SubAgentBlock(Static, can_focus=True):
-
-    def __init__(self, agent_type: str, description: str, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self._agent_type = agent_type or "agent"
-        self._description = description[:60] if description else ""
-        self._done = False
-        self._is_error = False
-        self._elapsed = 0.0
-        self._collapsed = True
-        self._result_preview = ""
-        self._tool_count = 0
-        self._render_running()
-
-    def _render_running(self) -> None:
-        desc = f"({self._description})" if self._description else ""
-        self.update(f"● {self._agent_type}{desc}\n     Running…")
-
-    def set_result(self, output: str, is_error: bool, elapsed: float) -> None:
-        self._done = True
-        self._is_error = is_error
-        self._elapsed = elapsed
-        self._result_preview = output[:300] if output else ""
-        self._parse_stats(output)
-        self._render_done()
-
-    def _parse_stats(self, output: str) -> None:
-        import re
-        m = re.search(r"(\d+)\s+tool", output[:200])
-        if m:
-            self._tool_count = int(m.group(1))
-
-    def _render_done(self) -> None:
-        desc = f"({self._description})" if self._description else ""
-        tool_info = f"{self._tool_count} tool uses · " if self._tool_count else ""
-        if self._collapsed:
-            self.update(
-                f"● {self._agent_type}{desc}\n"
-                f"    ⎿  Done ({tool_info}{self._elapsed:.1f}s)  (ctrl+o to expand)"
-            )
-        else:
-            self.update(
-                f"● {self._agent_type}{desc}\n"
-                f"    ⎿  Done ({tool_info}{self._elapsed:.1f}s)\n"
-                f"  {self._result_preview}"
-            )
-
-    def on_click(self) -> None:
-        if not self._done:
-            return
-        self._collapsed = not self._collapsed
-        self._render_done()
-
-
-_MEWCODE_THEME = Theme(
-    name="mewcode",
-    primary="#875FFF",
-    background="#1a1a1a",
-    surface="#1a1a1a",
-    panel="#1a1a1a",
-    dark=True,
-)
 
 
 class MewCodeApp(App):
     CSS_PATH = "styles.tcss"
     TITLE = "MewCode"
     INLINE_PADDING = 0
-    theme = "mewcode"
     BINDINGS = [
         Binding("ctrl+c", "handle_ctrl_c", "Quit", priority=True),
         Binding("escape", "cancel", "Cancel", priority=True),
         Binding("shift+tab", "cycle_mode", "Cycle mode", priority=True),
+        Binding("f2", "details", "开发详情", priority=True),
+        Binding("ctrl+end", "latest", "返回最新", priority=True),
         Binding("ctrl+o", "toggle_tool_blocks", "Toggle tools", priority=True),
     ]
 
@@ -592,6 +213,8 @@ class MewCodeApp(App):
         enable_supervision: bool = False,
     ) -> None:
         super().__init__(driver_class=driver_class)
+        self.register_theme(MEWCODE_THEME)
+        self.theme = "mewcode"
         self.providers = providers
         self._initial_permission_mode = permission_mode
         self._mcp_server_configs = mcp_servers or []
@@ -611,8 +234,8 @@ class MewCodeApp(App):
         self._mcp_init_task: asyncio.Task[None] | None = None
         self._selected_provider: ProviderConfig | None = None
         self._streaming = False
+        self._cancel_requested = False
         self._thinking_start: float = 0.0
-        self._thinking_verb: str = ""
         self._spinner_idx: int = 0
         self._spinner_timer: Timer | None = None
         self._spinner_label: Static | None = None
@@ -638,59 +261,60 @@ class MewCodeApp(App):
         self._stale_cleanup_task: asyncio.Task[None] | None = None
         # fire-and-forget 后台任务的强引用（事件循环只持弱引用）。
         self._bg_tasks: set[asyncio.Task] = set()
-        self._current_streaming_label: Static | None = None
-        self._current_ai_row: Vertical | None = None
-        self._current_accumulated_text: str = ""
         self._mcp_instructions: str = ""
         self._mcp_instructions_ok: bool = False
         self._mcp_connecting: bool = False
         self._teammate_tree: TeammateTree | None = None
         self._teammate_timer: Timer | None = None
+        self._execution_history = ExecutionHistory()
+        self._details_open = False
+        self._branch_worker: Worker[None] | None = None
+        self._branch = "未知"
+        self._header_work_dir = ""
 
     @staticmethod
     def _make_banner(model: str = "", work_dir: str = "") -> RichText:
-        t = RichText()
-        t.append(" /\\_/\\    ", style="bold color(99)")
-        try:
-            release = "v" + version("mewcode")
-        except PackageNotFoundError:
-            release = "development"
-        t.append(f"MewCode {release}\n", style="color(242)")
-        t.append("( o.o )   ", style="bold color(99)")
-        t.append(f"{model}\n" if model else "\n", style="color(242)")
-        t.append(" > ^ <    ", style="bold color(99)")
-        t.append(work_dir, style="color(242)")
-        return t
+        return brand_title()
 
     def compose(self) -> ComposeResult:
-        yield Static(self._make_banner(), id="title-bar")
-
+        with Vertical(id="app-header"):
+            yield Static(self._make_banner(), id="title-bar")
+            with Horizontal(id="workspace-bar"):
+                yield Static("选择模型后显示工作区", id="workspace-label", markup=False)
+                yield Static("—", id="model-label", markup=False)
         if len(self.providers) > 1:
             with Vertical(id="provider-select"):
-                yield Static("Select a Provider", id="select-label")
+                yield Static("选择模型入口", id="select-label")
                 yield OptionList(
-                    *[
-                        Option(f"{p.name}  [{p.model}]", id=p.name)
-                        for p in self.providers
-                    ],
+                    *[Option(RichText(f"{p.name}  ·  {p.model}"), id=p.name) for p in self.providers],
                     id="provider-list",
                 )
-        yield VerticalScroll(id="chat-area")
+        with Horizontal(id="conversation-layout"):
+            yield ChatScroll(id="chat-area")
+            yield DetailsPanel()
         with Vertical(id="input-area"):
-            yield ChatInput(id="chat-input")
+            yield Static("[@click=app.latest]↓ 返回最新 · Ctrl+End[/]", id="latest-link")
+            yield Static("待输入", id="run-status", markup=False)
+            with Vertical(id="composer"):
+                yield Static("下一条消息", id="composer-label", markup=False)
+                yield ChatInput(id="chat-input", placeholder="› 描述下一步要完成的工作…")
+                yield Static(
+                    "Enter 发送 · Shift+Enter 换行    Esc 停止 · F2 详情    / 命令 · @ 文件",
+                    id="key-hints", markup=False,
+                )
+                yield CompletionPopup()
             with Horizontal(id="status-bar"):
-                yield Static("  default", id="mode-label")
-                yield Static("", id="teammates-label")
-                yield Static("", id="model-label")
-            yield CompletionPopup()
+                yield Static("● 默认权限", id="mode-label", markup=False)
+                yield Static("", id="teammates-label", markup=False)
+                yield Static("未配置 MCP", id="mcp-label", markup=False)
+                yield Static("上下文 —", id="context-label", markup=False)
 
     def on_mount(self) -> None:
-        self.register_theme(_MEWCODE_THEME)
-        self.theme = "mewcode"
+        self.set_interval(1, self._refresh_details)
         if len(self.providers) == 1:
             self._select_provider(self.providers[0])
         else:
-            self.query_one("#chat-area").display = False
+            self.query_one("#conversation-layout").display = False
             self.query_one("#input-area").display = False
 
     def _select_provider(self, provider: ProviderConfig) -> None:
@@ -920,14 +544,16 @@ class MewCodeApp(App):
             self._make_banner(provider.model, work_dir)
         )
         self._update_mode_label()
+        self._branch_worker = self.run_worker(self._refresh_branch, group="header-git", exclusive=True)
 
         select = self.query("#provider-select")
         if select:
             select.first().display = False
+        self.query_one("#conversation-layout").display = True
         self.query_one("#chat-area").display = True
         self.query_one("#input-area").display = True
         chat_input = self.query_one("#chat-input", ChatInput)
-        chat_input.placeholder = "Send a message..."
+        chat_input.placeholder = "› 描述下一步要完成的工作…"
         chat_input.load_history(work_dir)
         chat_input.focus()
 
@@ -1229,6 +855,19 @@ class MewCodeApp(App):
             popup.hide()
             self.query_one("#chat-input", ChatInput).focus()
             return
+        if self._details_open:
+            self._details_open = False
+            self._layout_details()
+            self.query_one(ChatInput).focus()
+            return
+        if self._agent_task and not self._agent_task.done():
+            self._request_cancel()
+
+    def _request_cancel(self) -> None:
+        if self._cancel_requested:
+            return
+        self._cancel_requested = True
+        self._set_run_status("取消中")
         if self._agent_task and not self._agent_task.done():
             self._agent_task.cancel()
 
@@ -1277,16 +916,45 @@ class MewCodeApp(App):
             return ""
 
     async def _send_message(self, text: str, is_notification: bool = False) -> None:
-        assert self.agent is not None
-        intent = text if not is_notification else ""
-
-        # 先同步置位再 await：三个入口（提交/命令/通知）若在 MCP await
-        # 期间再次启动，会并行运行两个 agent 循环并互相覆盖 _agent_task
         if self._streaming:
             self._show_system_message("(已有回复进行中，忽略重复请求)")
             return
         self._streaming = True
+        self._cancel_requested = False
+        self._execution_history.begin(text)
+        self._agent_task = asyncio.current_task()
+        self._thinking_start = _time.monotonic()
+        self._set_run_status("连接工具" if self._mcp_connecting else "等待模型响应")
+        self._start_spinner()
+        try:
+            await self._run_message(text, is_notification)
+        except asyncio.CancelledError:
+            self._set_run_status("已停止")
+        except Exception as exc:
+            self._show_error(str(exc))
+            self._set_run_status("出错")
+        finally:
+            self._execution_history.interrupted(
+                "已停止 / 结果未知" if self._run_phase == "已停止" else "出错 / 结果未知"
+                if self._run_phase == "出错" else "结果未知 / 未记录完成"
+            )
+            self._finish_streaming()
+            await self._refresh_details()
+            self._branch_worker = self.run_worker(self._refresh_branch, group="header-git", exclusive=True)
+            for selector in ("#perm-inline", "#askuser-inline"):
+                for widget in self.query(selector):
+                    widget.remove()
+            self._pending_perm_request = None
+            self._pending_askuser_event = None
+            input_widget = self.query_one("#chat-input", ChatInput)
+            input_widget.disabled = False
+            if not self.query("#plan-inline"):
+                input_widget.focus()
+            await self._process_task_notifications()
 
+    async def _run_message(self, text: str, is_notification: bool) -> None:
+        assert self.agent is not None
+        intent = text if not is_notification else ""
         if self._mcp_init_task and not self._mcp_init_task.done():
             self._show_system_message("Waiting for MCP servers to connect...")
             try:
@@ -1295,26 +963,12 @@ class MewCodeApp(App):
                 self._show_error(f"MCP 初始化失败: {e}")
 
         chat = self.query_one("#chat-area", VerticalScroll)
-        input_widget = self.query_one("#chat-input", ChatInput)
-
         if text and "@" in text:
             text = expand_at_refs(text, self.agent.work_dir)
 
-        # Start memory recall prefetch before UI work.
-        prefetch_task = asyncio.create_task(
-            self._prefetch_relevant_memories(text)
-        ) if text else None
-
         if text:
-            user_row = Vertical(classes="user-row")
-            await chat.mount(user_row)
-            from rich.text import Text as RichText
-            user_rich = RichText()
-            user_rich.append("❯ ", style="bold color(80)")
-            user_rich.append(text, style="bold color(255)")
-            user_bubble = Static(user_rich, classes="message user-message")
-            await user_row.mount(user_bubble)
-            self.call_after_refresh(chat.scroll_end, animate=False)
+            await chat.mount(user_row(text))
+            self._follow_chat()
 
             supervision = getattr(self.agent, "supervision", None)
             if supervision is not None and supervision.enabled:
@@ -1327,10 +981,10 @@ class MewCodeApp(App):
             self.conversation.add_system_reminder(self._mcp_instructions)
             self._mcp_instructions_ok = True
 
-        # Collect prefetched recall with 3s timeout, inject as system-reminder.
-        if prefetch_task is not None:
+        # Await recall in this task so cancellation cannot leave an orphan side-query.
+        if text:
             try:
-                reminder = await asyncio.wait_for(prefetch_task, timeout=3.0)
+                reminder = await asyncio.wait_for(self._prefetch_relevant_memories(text), timeout=3.0)
                 if reminder:
                     self.conversation.add_system_reminder(reminder)
             except (TimeoutError, Exception):
@@ -1338,27 +992,16 @@ class MewCodeApp(App):
 
         history_cursor = len(self.conversation.history)
 
-        # 准备 AI 回复区域
         ai_row = Vertical(classes="ai-row")
         await chat.mount(ai_row)
-        streaming_label: Static | None = Static("", classes="message ai-message")
-        assert streaming_label is not None
-        await ai_row.mount(streaming_label)
-
+        streaming_label: Markdown | None = None
         accumulated_text = ""
-        streaming_rich = None
         last_stream_refresh = 0.0
         tool_blocks: dict[str, ToolCallBlock | SubAgentBlock] = {}
-
-        # 在聊天区底部启动持续旋转的加载动画
-        self._thinking_start = _time.monotonic()
-        self._thinking_verb = random.choice(THINKING_VERBS)
+        run_failed = False
+        self._run_phase = "等待模型响应"
         self._spinner_idx = 0
-        self._spinner_label = Static(
-            f"  {SPINNER_FRAMES[0]} {self._thinking_verb}…",
-            id="spinner-live",
-        )
-        await chat.mount(self._spinner_label)
+        self._spinner_label = self.query_one("#run-status", Static)
 
         # Mount teammate tree (initially hidden) below the spinner
         self._teammate_tree = TeammateTree(id="teammate-tree")
@@ -1366,7 +1009,7 @@ class MewCodeApp(App):
         await chat.mount(self._teammate_tree)
         self._start_teammate_polling()
 
-        self.call_after_refresh(chat.scroll_end, animate=False)
+        self._follow_chat()
         self._start_spinner()
 
         await asyncio.sleep(0)
@@ -1377,47 +1020,31 @@ class MewCodeApp(App):
                       else self.agent.run(self.conversation))
             async for event in stream:
                 if isinstance(event, ThinkingText):
-                    self.call_after_refresh(chat.scroll_end, animate=False)
+                    self._follow_chat()
 
                 elif isinstance(event, StreamText):
+                    self._run_phase = "接收回复"
                     if streaming_label is None:
-                        # tool_use / TurnComplete 之后 label 会被置 None；
-                        # max_tokens 重试等路径下新一轮文本到达时需就地重建
-                        streaming_label = Static("", classes="message ai-message")
-                        await ai_row.mount(streaming_label)
-                    elif not accumulated_text:
-                        await streaming_label.remove()
-                        streaming_label = Static("", classes="message ai-message")
-                        await ai_row.mount(streaming_label)
+                        segment = assistant_row("")
+                        await ai_row.mount(segment)
+                        streaming_label = segment.query_one(Markdown)
                     accumulated_text += event.text
-                    if streaming_rich is None:
-                        from rich.text import Text as RichText
-                        streaming_rich = RichText("● ", style="bold color(99)")
-                    streaming_rich.append(event.text, style="default")
                     now = _time.monotonic()
                     if now - last_stream_refresh >= 0.05:
-                        streaming_label.update(streaming_rich)
+                        await streaming_label.update(accumulated_text)
                         last_stream_refresh = now
-                        self.call_after_refresh(chat.scroll_end, animate=False)
 
                 elif isinstance(event, RetryEvent):
                     self._show_system_message(f"↻ Retrying: {event.reason}")
 
                 elif isinstance(event, ToolUseEvent):
-                    streaming_rich = None
-                    if accumulated_text:
-                        if streaming_label is not None:
-                            await streaming_label.remove()
-                        from rich.text import Text as RichText
-                        prefix = Static(RichText("●  ", style="bold color(99)"), classes="message")
-                        await ai_row.mount(prefix)
-                        md = Markdown(accumulated_text, classes="message ai-message")
-                        await ai_row.mount(md)
-                        streaming_label = None
-                        accumulated_text = ""
-                    elif streaming_label is not None:
-                        await streaming_label.remove()
-                        streaming_label = None
+                    self._execution_history.started(event.tool_id, event.tool_name, event.arguments)
+                    await self._refresh_details()
+                    self._run_phase = f"执行工具 · {event.tool_name}"
+                    if streaming_label is not None:
+                        await streaming_label.update(accumulated_text)
+                    streaming_label = None
+                    accumulated_text = ""
 
                     if _is_subagent_tool(event.tool_name):
                         agent_type = event.arguments.get("subagent_type", "")
@@ -1433,7 +1060,7 @@ class MewCodeApp(App):
                         )
                     await ai_row.mount(block)
                     tool_blocks[event.tool_id] = block
-                    self.call_after_refresh(chat.scroll_end, animate=False)
+                    self._follow_chat()
 
                     # AskUserQuestion 在 await 用户输入期间不产出事件，
                     # 必须在 tool_use 阶段就预创建事件并挂弹窗，
@@ -1450,10 +1077,13 @@ class MewCodeApp(App):
                     await self._handle_permission_request(event)
 
                 elif isinstance(event, ToolResultEvent):
+                    self._execution_history.finished(event.tool_id, event.output, event.is_error, event.elapsed)
+                    await self._refresh_details()
+                    self._run_phase = "等待模型响应"
                     completed_block = tool_blocks.get(event.tool_id)
                     if completed_block:
                         completed_block.set_result(event.output, event.is_error, event.elapsed)
-                    self.call_after_refresh(chat.scroll_end, animate=False)
+                    self._follow_chat()
 
                     ask_tool = self.registry.get("AskUserQuestion")
                     if (
@@ -1466,7 +1096,6 @@ class MewCodeApp(App):
                             await self._handle_askuser(pending_question)
 
                 elif isinstance(event, TurnComplete):
-                    streaming_rich = None
                     if self.session:
                         for msg in self.conversation.history[history_cursor:]:
                             self.session.append(msg)
@@ -1483,18 +1112,20 @@ class MewCodeApp(App):
                         summary = ToolGroupSummary(
                             len(collapsible), total_elapsed,
                             classes="tool-block tool-group-summary",
+                            failure_count=sum(b._is_error for _, b in collapsible),
                         )
                         for _, blk in collapsible:
                             blk.display = False
                         await ai_row.mount(summary)
 
+                    if streaming_label is not None:
+                        await streaming_label.update(accumulated_text)
+                    streaming_label = None
+                    accumulated_text = ""
                     tool_blocks.clear()
                     ai_row = Vertical(classes="ai-row")
                     await chat.mount(ai_row)
-                    streaming_label = Static("", classes="message ai-message")
-                    await ai_row.mount(streaming_label)
-                    accumulated_text = ""
-                    self.call_after_refresh(chat.scroll_end, animate=False)
+                    self._follow_chat()
 
                 elif isinstance(event, UsageEvent):
                     pass  # token 展示已移除
@@ -1516,15 +1147,10 @@ class MewCodeApp(App):
                     history_cursor = len(self.conversation.history)
 
                 elif isinstance(event, ErrorEvent):
+                    run_failed = True
                     self._show_error(event.message)
 
                 elif isinstance(event, LoopComplete):
-                    total_time = _time.monotonic() - self._thinking_start
-                    done_label = Static(
-                        f"✻ {_to_past_tense(self._thinking_verb)} for {total_time:.1f}s",
-                        classes="message thinking-done",
-                    )
-                    await ai_row.mount(done_label)
                     if self.session:
                         for msg in self.conversation.history[history_cursor:]:
                             self.session.append(msg)
@@ -1537,38 +1163,25 @@ class MewCodeApp(App):
                     if self.agent.plan_mode:
                         self._spawn_background(self._show_plan_approval())
 
-            # 收尾：渲染剩余的累积文本
-            if accumulated_text and streaming_label is not None:
-                await streaming_label.remove()
-                md = Markdown(accumulated_text, classes="message ai-message")
-                await ai_row.mount(md)
-            elif streaming_label is not None:
-                await streaming_label.remove()
-
-            self.call_after_refresh(chat.scroll_end, animate=False)
+            if streaming_label is not None:
+                await streaming_label.update(accumulated_text)
+            self._set_run_status("出错" if run_failed else "本次运行结束")
 
         except asyncio.CancelledError:
-            if accumulated_text:
-                if streaming_label is not None:
-                    await streaming_label.remove()
-                md = Markdown(
-                    accumulated_text + "\n\n*[cancelled]*",
-                    classes="message ai-message",
-                )
-                await ai_row.mount(md)
-            self._show_system_message("Operation cancelled")
-        except LLMError as e:
-            self._show_error(str(e))
+            if streaming_label is not None:
+                await streaming_label.update(accumulated_text)
+            for block in tool_blocks.values():
+                block.set_cancelled()
+            self._set_run_status("已停止")
+            self._show_system_message("运行已停止；已有修改保留。")
         except Exception as e:
-            # 意外异常不再让裸 create_task 无声死掉
+            if streaming_label is not None:
+                await streaming_label.update(accumulated_text)
             logger.exception("Unexpected error in _send_message")
-            self._show_error(f"Unexpected error: {e}")
-        finally:
-            self._finish_streaming()
-            input_widget.focus()
-
-            await self._process_task_notifications()
-
+            for block in tool_blocks.values():
+                block.set_cancelled("出错")
+            self._show_error(str(e))
+            self._set_run_status("出错")
     async def _process_task_notifications(self) -> None:
         completed = self.task_manager.poll_completed()
         if not completed or self.agent is None:
@@ -1618,9 +1231,12 @@ class MewCodeApp(App):
         from mewcode.plan_dialog import InlinePlanWidget
 
         chat = self.query_one("#chat-area", VerticalScroll)
+        self._set_run_status("等待计划审批")
         widget = InlinePlanWidget()
+        self._details_open = False
+        self._layout_details()
         await chat.mount(widget)
-        self.call_after_refresh(chat.scroll_end, animate=False)
+        widget.scroll_visible(animate=False, top=True)
         try:
             self.query_one("#chat-input").disabled = True
         except Exception:
@@ -1675,10 +1291,13 @@ class MewCodeApp(App):
         from mewcode.askuser_dialog import InlineAskUserWidget
 
         chat = self.query_one("#chat-area", VerticalScroll)
+        self._set_run_status("等待用户回答")
         widget = InlineAskUserWidget(event.questions)
         self._pending_askuser_event = event
+        self._details_open = False
+        self._layout_details()
         await chat.mount(widget)
-        self.call_after_refresh(chat.scroll_end, animate=False)
+        widget.scroll_visible(animate=False, top=True)
         try:
             self.query_one("#chat-input").disabled = True
         except Exception:
@@ -1693,6 +1312,7 @@ class MewCodeApp(App):
         if req is not None and not req.future.done():
             req.future.set_result(event.answers if event.answers else {})
             self._pending_askuser_event = None
+        self._set_run_status("等待模型响应" if self._streaming else "待输入")
         try:
             self.query_one("#askuser-inline", InlineAskUserWidget).remove()
         except Exception:
@@ -1725,23 +1345,88 @@ class MewCodeApp(App):
             self._teammate_tree.remove()
             self._teammate_tree = None
         if self._spinner_label is not None:
-            self._spinner_label.remove()
             self._spinner_label = None
 
+    def _set_run_status(self, phase: str) -> None:
+        self._run_phase = phase
+        self.query_one("#run-status", Static).update(phase)
+
     def _tick_spinner(self) -> None:
-        """推进持久 spinner 标签上的动画帧。"""
         self._spinner_idx += 1
-        frame = SPINNER_FRAMES[self._spinner_idx % len(SPINNER_FRAMES)]
         elapsed = _time.monotonic() - self._thinking_start
-        if self._spinner_label is not None:
-            self._spinner_label.update(
-                f"  {frame} {self._thinking_verb}…  ({elapsed:.0f}s)"
-            )
-            if self._spinner_idx % 5 == 0:
-                try:
-                    self.query_one("#chat-area", VerticalScroll).scroll_end(animate=False)
-                except Exception:
-                    pass
+        self.query_one("#run-status", Static).update(
+            f"{self._run_phase} · {elapsed:.0f}s · Esc 停止"
+        )
+
+    def _follow_chat(self) -> None:
+        chat = self.query_one("#chat-area", ChatScroll)
+        self.query_one("#latest-link").display = not chat.is_vertical_scroll_end
+
+    def action_latest(self) -> None:
+        self.query_one("#chat-area", ChatScroll).anchor()
+
+    def on_resize(self) -> None:
+        self.screen.set_class(self.size.height < 28, "compact")
+        if self.query("#details-panel"):
+            self._layout_details()
+            self._refresh_header()
+
+    def _layout_details(self) -> None:
+        wide = self.size.width >= 120 and self.size.height >= 24
+        panel = self.query_one(DetailsPanel)
+        panel.display = self._details_open
+        self.screen.set_class(self._details_open and not wide, "details-full")
+        self.query_one("#chat-area").display = not self._details_open or wide
+
+    async def action_details(self) -> None:
+        if self.query("#perm-inline, #askuser-inline, #plan-inline"):
+            return
+        self._details_open = not self._details_open
+        self._layout_details()
+        if self._details_open:
+            await self._refresh_details()
+            self._branch_worker = self.run_worker(self._refresh_branch, group="header-git", exclusive=True)
+        else:
+            self.query_one(ChatInput).focus()
+
+    async def _refresh_details(self) -> None:
+        if not self.query(DetailsPanel):
+            return
+        if self.agent and self.agent.work_dir != self._header_work_dir:
+            self._header_work_dir = self.agent.work_dir
+            self._branch = "未知"
+            self._refresh_header()
+            self._branch_worker = self.run_worker(self._refresh_branch, group="header-git", exclusive=True)
+        mcp = ("MCP 连接中" if self._mcp_connecting else self._mcp_server_info
+               or ("MCP 未连接 / 状态未知" if self._mcp_server_configs else "未配置 MCP"))
+        if self._selected_provider:
+            mcp += f"\n配置模型：{self._selected_provider.model}\nGit 分支：{self._branch}"
+        await self.query_one(DetailsPanel).refresh_facts(
+            self._execution_history, self.task_manager, self.agent, mcp,
+        )
+
+    async def _refresh_branch(self) -> None:
+        if self.agent:
+            work_dir = self.agent.work_dir
+            branch = await branch_name(work_dir)
+            if self.agent.work_dir == work_dir:
+                self._branch = branch
+                self._header_work_dir = work_dir
+                self._refresh_header()
+
+    def _refresh_header(self) -> None:
+        if not self._selected_provider or not self.agent or not self.query("#title-bar"):
+            return
+        work_dir = self.agent.work_dir
+        self.query_one("#title-bar", Static).update(brand_title())
+        workspace = self.query_one("#workspace-label", Static)
+        width = workspace.size.width or max(1, self.size.width - len(self._selected_provider.model) - 8)
+        text = workspace_title(work_dir, self._branch, width)
+        workspace.update(text)
+        workspace.tooltip = RichText(f"{work_dir}\n分支：{self._branch}")
+        model = self.query_one("#model-label", Static)
+        model.update(RichText(self._selected_provider.model))
+        model.tooltip = RichText(self._selected_provider.model)
 
     def _start_teammate_polling(self) -> None:
         """Start polling teammate progress every 0.5s."""
@@ -1797,10 +1482,13 @@ class MewCodeApp(App):
         from mewcode.permission_dialog import InlinePermissionWidget
 
         chat = self.query_one("#chat-area", VerticalScroll)
+        self._set_run_status("等待权限")
         widget = InlinePermissionWidget(request.tool_name, request.description)
         self._pending_perm_request = request
+        self._details_open = False
+        self._layout_details()
         await chat.mount(widget)
-        self.call_after_refresh(chat.scroll_end, animate=False)
+        widget.scroll_visible(animate=False, top=True)
         # 权限提示弹窗期间禁用输入框
         try:
             self.query_one("#chat-input").disabled = True
@@ -1814,8 +1502,10 @@ class MewCodeApp(App):
 
         req = getattr(self, "_pending_perm_request", None)
         if req is not None:
-            req.future.set_result(event.response)
+            if not req.future.done():
+                req.future.set_result(event.response)
             self._pending_perm_request = None
+        self._set_run_status("等待模型响应" if self._streaming else "待输入")
         # 从聊天区移除权限弹窗组件
         try:
             widget = self.query_one("#perm-inline", InlinePermissionWidget)
@@ -1837,24 +1527,22 @@ class MewCodeApp(App):
         chat = self.query_one("#chat-area", VerticalScroll)
         await chat.remove_children()
 
+        tools: dict[str, ToolCallBlock] = {}
         for msg in messages:
-            if msg.tool_results or not msg.content:
-                continue
-            if msg.role == "user":
-                row = Vertical(classes="user-row")
-                await chat.mount(row)
-                user_rich = RichText()
-                user_rich.append("❯ ", style="bold color(80)")
-                user_rich.append(msg.content, style="bold color(255)")
-                bubble = Static(user_rich, classes="message user-message")
-                await row.mount(bubble)
-            elif msg.role == "assistant":
-                row = Vertical(classes="ai-row")
-                await chat.mount(row)
-                md = Markdown(msg.content, classes="message ai-message")
-                await row.mount(md)
-
-        self.call_after_refresh(chat.scroll_end, animate=False)
+            if msg.content:
+                if msg.role == "user" and not msg.tool_results:
+                    await chat.mount(user_row(msg.content))
+                elif msg.role == "assistant":
+                    await chat.mount(assistant_row(msg.content))
+            for call in msg.tool_uses:
+                block = ToolCallBlock(call.tool_name, call.arguments, classes="tool-block")
+                block.set_history()
+                tools[call.tool_use_id] = block
+                await chat.mount(block)
+            for result in msg.tool_results:
+                if restored_block := tools.get(result.tool_use_id):
+                    restored_block.set_history(result.content, result.is_error)
+        chat.anchor()
 
     # -----------------------------------------------------------------
     # Session 摘要（异步后台生成）
@@ -1885,19 +1573,28 @@ class MewCodeApp(App):
         manager = MCPManager()
         manager.load_configs(self._mcp_server_configs)
         tools_before = len(self.registry.list_tools())
-        errors = await manager.register_all_tools(self.registry)
         self.mcp_manager = manager
-        self._mcp_connecting = False
-        self._update_mode_label()
+        try:
+            errors = await manager.register_all_tools(self.registry)
+        except asyncio.CancelledError:
+            self._mcp_server_info = "MCP 连接已停止 / 状态未知"
+            raise
+        except Exception:
+            self._mcp_server_info = "MCP 连接失败 / 状态未知"
+            raise
+        finally:
+            self._mcp_connecting = False
+            self._update_mode_label()
         for err in errors:
             self._show_system_message(f"MCP warning: {err}")
         tools_after = len(self.registry.list_tools())
         mcp_tools = tools_after - tools_before
         server_count = len(manager._clients)
-        if server_count > 0:
-            self._mcp_server_info = (
-                f"Connected to {server_count} MCP server(s), {mcp_tools} tools registered"
-            )
+        self._mcp_server_info = (
+            f"MCP {'部分失败' if errors and server_count else '连接失败' if errors else '已连接'} · "
+            f"{server_count} 个服务 / {mcp_tools} 个工具"
+        )
+        self._update_mode_label()
         if server_count > 0 and mcp_tools > 0:
             parts = []
             for cfg in self._mcp_server_configs:
@@ -1942,16 +1639,7 @@ class MewCodeApp(App):
 
     async def action_handle_ctrl_c(self) -> None:
         if self._streaming:
-            if self._agent_task and not self._agent_task.done():
-                self._agent_task.cancel()
-            self._show_system_message("(response interrupted)")
-            self._finish_streaming()
-            try:
-                inp = self.query_one("#chat-input", ChatInput)
-                inp.disabled = False
-                inp.focus()
-            except Exception:
-                pass
+            self._request_cancel()
             return
 
         if getattr(self, "_exit_requested", False):
@@ -2013,20 +1701,27 @@ class MewCodeApp(App):
             pass
         self.exit()
 
+    async def on_unmount(self) -> None:
+        # Textual cancels workers on shutdown; wait for bounded Git pipe cleanup too.
+        workers = list(self.workers)
+        for worker in workers:
+            worker.cancel()
+        await asyncio.gather(*(worker.wait() for worker in workers), return_exceptions=True)
+
     def _show_error(self, text: str) -> None:
         chat = self.query_one("#chat-area", VerticalScroll)
-        error_widget = Static(f"✖ {text}", classes="message error-message")
+        error_widget = Static(f"✖ {text}", markup=False, classes="message error-message")
         chat.mount(error_widget)
-        self.call_after_refresh(chat.scroll_end, animate=False)
+        self._follow_chat()
 
     def _show_system_message(self, text: str) -> None:
         chat = self.query_one("#chat-area", VerticalScroll)
-        msg = Static(f"  {text}", classes="message system-message")
+        msg = Static(f"  {text}", markup=False, classes="message system-message")
         chat.mount(msg)
-        self.call_after_refresh(chat.scroll_end, animate=False)
+        self._follow_chat()
 
     _MODE_DISPLAY = {
-        PermissionMode.DEFAULT: "default",
+        PermissionMode.DEFAULT: "默认权限",
         PermissionMode.ACCEPT_EDITS: "accept-edits",
         PermissionMode.PLAN: "plan",
         PermissionMode.BYPASS: "YOLO",
@@ -2039,16 +1734,11 @@ class MewCodeApp(App):
             color = _MODE_COLORS.get(perm, "dim")
             label = self.query_one("#mode-label", Static)
             if perm == PermissionMode.DEFAULT:
-                label.update(f"[{color}]{display}[/{color}]")
+                label.update(RichText(f"● {display}", style=MEWCODE_THEME.success or "#197653"))
             else:
                 label.update(f"[{color}]{display}[/{color}]  (shift+tab to cycle)")
-        try:
-            model_label = self.query_one("#model-label", Static)
-            model_text = self._selected_provider.model if self._selected_provider else ""
-            if self._mcp_connecting:
-                model_label.update(f"[yellow]MCP connecting…[/yellow]  {model_text}")
-            else:
-                model_label.update(model_text)
-        except Exception:
-            pass
-
+        if self._selected_provider:
+            self.query_one("#model-label", Static).update(RichText(self._selected_provider.model))
+        mcp = ("MCP 连接中…" if self._mcp_connecting else self._mcp_server_info
+               or ("MCP 未连接 / 状态未知" if self._mcp_server_configs else "未配置 MCP"))
+        self.query_one("#mcp-label", Static).update(RichText(mcp))

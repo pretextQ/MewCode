@@ -24,6 +24,7 @@ docs/*
 !docs/stage-2026-11-01-dead-end.md
 !docs/stage-2026-11-01-self-verify.md
 !docs/stage-2026-11-01-intent-anchor.md
+!docs/stage-2026-11-01-tui.md
 !docs/evolution/
 docs/evolution/*
 !docs/evolution/README.md

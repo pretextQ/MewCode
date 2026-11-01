@@ -64,7 +64,10 @@ class CompletionPopup(Static):
 
     def _refresh_content(self) -> None:
         lines = []
-        for i, display in enumerate(self._displays):
+        visible_rows = 3 if self.is_mounted and self.app.size.height < 24 else 4
+        start = max(0, self._cursor - visible_rows + 1)
+        for i in range(start, min(len(self._displays), start + visible_rows)):
+            display = self._displays[i]
             if i == self._cursor:
                 lines.append(f"[bold reverse] {display} [/]")
             else:

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from enum import StrEnum
 
+from rich.markup import escape
+from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
@@ -48,7 +50,7 @@ class InlinePlanWidget(Vertical, can_focus=True):
 
 
     def compose(self) -> ComposeResult:
-        yield Static(self._build_content(), id="plan-content")
+        yield Static(Text.from_markup(self._build_content()), id="plan-content")
 
     def on_mount(self) -> None:
         self.focus()
@@ -65,14 +67,14 @@ class InlinePlanWidget(Vertical, can_focus=True):
                 lines.append(f"   {i + 1}. [dim]{label}[/dim]")
 
         if self._cursor == 2:
-            display = self._input if self._input else "[dim]Type feedback here...[/dim]"
+            display = escape(self._input) if self._input else "[dim]Type feedback here...[/dim]"
             lines.append(f"      {display}█")
             lines.append("      [dim]shift+tab to approve with this feedback[/dim]")
 
         return "\n".join(lines)
 
     def _refresh(self) -> None:
-        self.query_one("#plan-content", Static).update(self._build_content())
+        self.query_one("#plan-content", Static).update(Text.from_markup(self._build_content()))
 
 
     def action_cursor_up(self) -> None:

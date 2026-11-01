@@ -36,6 +36,8 @@ async def handle_help(ctx: CommandContext) -> None:
         lines.append(f"  {aliases_str:<24} {cmd.description}")
     lines.append("")
     lines.append("输入 /help <命令名> 查看详细用法。")
+    lines.append("Enter 发送；Shift+Enter / Ctrl+J 换行；Tab 补全；上下键历史。")
+    lines.append("Shift+Tab 切换模式；Ctrl+O 展开工具；F2 详情；Ctrl+End 返回最新；Esc 关闭菜单/详情或停止。")
     ctx.ui.add_system_message("\n".join(lines))
 
 

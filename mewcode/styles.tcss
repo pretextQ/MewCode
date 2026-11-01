@@ -1,258 +1,109 @@
-Screen { }
-
+/* Conversation/workbench layout with semantic colors from the current theme. */
+Screen {
+    background: $background;
+    color: $text;
+    border: round $frame-border;
+}
+#app-header { dock: top; height: 6; }
 #title-bar {
-    dock: top;
-    width: 100%;
     height: 3;
-    padding: 0 1;
-}
-
-/* --- Provider Selection --- */
-
-#provider-select {
-    align: center middle;
-    width: 100%;
-    height: 1fr;
-}
-
-#select-label {
-    text-align: center;
-    width: 100%;
-    height: auto;
-    margin-top: 2;
-    text-style: bold;
-}
-
-#provider-list {
-    width: 60;
-    height: auto;
-    max-height: 16;
-    margin: 1 2;
-}
-
-/* --- Chat Area --- */
-
-#chat-area {
-    height: 1fr;
-    min-height: 18;
-    padding: 0 1;
-}
-
-.message {
     padding: 0 2;
-    margin: 0;
-    width: 100%;
-    height: auto;
+    content-align: left middle;
+    background: $panel;
+    border-bottom: solid $frame-border;
 }
-
-.user-row {
-    height: auto;
-    width: 100%;
-}
-
-.user-message {
-    color: $text;
-}
-
-.ai-row {
-    height: auto;
-    width: 100%;
-}
-
-.ai-message {
-    color: $text;
-}
-
-.error-message {
-    color: $error;
+#workspace-bar {
+    height: 3;
     padding: 0 2;
+    border-bottom: solid $frame-border;
+    align-vertical: middle;
 }
-
-.system-message {
-    color: $text-muted;
-    padding: 0 2;
-}
-
-/* --- Tool Call Block --- */
-
+#workspace-label { width: 1fr; height: 1; color: $text-muted; }
+#model-label { width: auto; max-width: 40%; height: 1; text-align: right; color: $text; }
+#provider-select { height: 1fr; align: center middle; }
+#select-label { height: auto; text-align: center; text-style: bold; }
+#provider-list { width: 90%; max-width: 70; height: auto; max-height: 16; margin: 1; }
+#conversation-layout { height: 1fr; min-height: 1; }
+#chat-area { width: 1fr; height: 1fr; min-height: 1; padding: 1 2; }
+.message { width: 100%; height: auto; padding: 0; }
+.user-row, .ai-row { width: 100%; height: auto; }
+.user-row { margin-bottom: 1; }
+.user-message { color: $text; background: $user-surface; border-left: solid $primary; padding: 1 2; }
+.ai-row { margin-bottom: 1; }
+.assistant-label { height: 1; color: $primary; margin-bottom: 1; }
+.ai-message { color: $text; padding: 0; margin: 0 0 1 0; }
+.error-message { color: $error; padding: 0 1; }
+.system-message { color: $text-muted; padding: 0 1; }
 .tool-block {
-    padding: 0 2;
-    width: auto;
-    height: auto;
-    color: $text;
+    width: 100%; height: auto; padding: 0 1; margin-bottom: 1;
+    color: $text; border-left: solid $frame-border;
 }
-
-.tool-block-loading {
-    color: $text-muted;
+.tool-block-loading { color: $text-muted; }
+.tool-block-error { color: $error; }
+.tool-block:focus { background: $surface; border-left: solid $primary; }
+.subagent-block, .thinking-done { height: auto; color: $text-muted; }
+#input-area { dock: bottom; height: auto; max-height: 70%; padding: 0 2; }
+#run-status { height: 1; color: $text-muted; margin-bottom: 1; }
+#latest-link { height: 1; display: none; color: $primary; }
+#composer {
+    height: auto; background: $composer-surface; border: round $primary; padding: 0 1;
 }
-
-.tool-block-error {
-    color: $error;
-}
-
-/* --- Thinking Display --- */
-
-.thinking-done {
-    color: $text-muted;
-    text-style: italic;
-}
-
-/* --- Sub-Agent Block --- */
-
-.subagent-block {
-    color: $text;
-    padding: 0 2;
-}
-
-/* --- Input Area --- */
-
-#spinner-live {
-    height: 1;
-    padding: 0 2;
-}
-
-#input-area {
-    dock: bottom;
-    height: auto;
-    max-height: 20;
-    padding: 0 1;
-    border-top: solid #303030;
-}
-
+#composer-label { height: 1; color: $text-muted; }
 #chat-input {
-    height: auto;
-    min-height: 1;
-    max-height: 10;
-    border: none;
+    height: auto; min-height: 3; max-height: 6;
+    border: none; padding: 0; color: $text; background: $composer-surface;
 }
-
-#status-bar {
-    height: auto;
-    min-height: 1;
-    width: 100%;
-    padding: 0 1;
-    border-top: solid #303030;
+#chat-input:focus { border: none; }
+#chat-input .text-area--cursor-line { background: $composer-surface; }
+#chat-input .text-area--placeholder { color: $text-muted; }
+#chat-input .text-area--selection { background: $user-surface; color: $text; }
+#key-hints { height: 1; color: $text-muted; }
+#status-bar { height: 1; width: 100%; border: none; margin-top: 1; }
+#mode-label, #teammates-label { width: auto; height: 1; padding-right: 2; color: $text-muted; }
+#mcp-label { width: 1fr; height: 1; color: $text-muted; }
+#context-label { width: auto; height: 1; text-align: right; color: $text-muted; }
+#teammate-tree { height: auto; padding: 0 1; }
+#details-panel {
+    display: none; width: 39%; height: 1fr; background: $panel;
+    border-left: solid $frame-border; padding: 1 1 0 1;
 }
-
-#mode-label {
-    width: auto;
-    height: 1;
-    color: $text-muted;
-    padding: 0 1;
+#details-title { height: 1; margin-bottom: 1; color: $text; }
+#task-facts { height: auto; max-height: 8; margin-bottom: 1; color: $text-muted; }
+#details-panel TabbedContent, #details-panel ContentSwitcher { height: 1fr; }
+#details-panel TabPane { height: 1fr; padding: 0; }
+#changes-scroll, #execution-scroll { height: 1fr; }
+#workspace-changes, #execution-facts, #execution-records { height: auto; }
+#execution-facts { margin-bottom: 1; color: $text-muted; }
+#git-actions { height: 3; }
+#git-actions Button { min-width: 8; width: 1fr; }
+#details-footer { dock: bottom; height: 1; color: $text-muted; }
+Screen.details-full #details-panel { width: 100%; }
+CompletionPopup { max-height: 4; background: $surface; color: $text; }
+#perm-inline, #askuser-inline, #plan-inline, #resume-inline {
+    height: auto; border-left: solid $warning; padding: 0 1;
 }
-
-#teammates-label {
-    width: auto;
-    height: 1;
-    padding: 0 1;
+#perm-content, #askuser-content, #plan-content, #resume-content { height: auto; }
+PlanApprovalDialog, AskUserDialog { align: center middle; }
+#plan-dialog, #askuser-dialog {
+    width: 64; max-width: 95%; height: auto; max-height: 90%;
+    padding: 1 2; background: $surface; border: solid $primary;
 }
-
-#model-label {
-    width: 1fr;
-    height: 1;
-    text-align: right;
-    color: $text-muted;
-}
-
-/* --- Teammate Tree --- */
-
-#teammate-tree {
-    height: auto;
-    padding: 0 2;
-}
-
-/* --- Plan Approval Dialog --- */
-
-PlanApprovalDialog {
-    align: center middle;
-}
-
-#plan-dialog {
-    width: 64;
-    height: auto;
-    padding: 1 2;
-    background: $surface;
-    border: solid $warning;
-}
-
-#plan-title {
-    text-style: bold;
-    text-align: center;
-    padding: 0 0 1 0;
-}
-
-#plan-dialog Button {
-    width: 100%;
-    margin: 0 0 1 0;
-}
-
-/* --- AskUser Dialog --- */
-
-AskUserDialog {
-    align: center middle;
-}
-
-#askuser-dialog {
-    width: 64;
-    height: auto;
-    max-height: 20;
-    padding: 1 2;
-    background: $surface;
-    border: solid $accent;
-}
-
-#askuser-title {
-    text-style: bold;
-    text-align: center;
-    padding: 0 0 1 0;
-}
-
-#askuser-options {
-    height: auto;
-    max-height: 12;
-}
-
-/* --- Inline Permission Widget --- */
-
-#perm-inline {
-    height: auto;
-    padding: 0 0;
-    margin: 0 0;
-}
-
-#perm-content {
-    padding: 0 0;
-}
-
-/* --- Inline Plan Widget --- */
-
-#plan-inline {
-    height: auto;
-    padding: 0 0;
-}
-
-#plan-content {
-    padding: 0 0;
-}
-
-/* --- Inline AskUser Widget --- */
-
-#askuser-inline {
-    height: auto;
-    padding: 0 0;
-}
-
-#askuser-content {
-    padding: 0 0;
-}
-
-/* --- Inline Resume Widget --- */
-
-#resume-inline {
-    height: auto;
-    padding: 0 0;
-}
-
-#resume-content {
-    padding: 0 0;
-}
+#plan-title, #askuser-title { text-style: bold; text-align: center; padding-bottom: 1; }
+#plan-dialog Button { width: 100%; margin-bottom: 1; }
+#askuser-options { height: auto; max-height: 12; }
+/* Keep the same hierarchy in short terminals, shrinking decoration before content. */
+Screen.compact { border: none; }
+Screen.compact #app-header { height: 3; }
+Screen.compact #title-bar { height: 1; padding: 0 1; border: none; }
+Screen.compact #workspace-bar { height: 2; padding: 0 1; }
+Screen.compact #chat-area { padding: 0 1; }
+Screen.compact #input-area { padding: 0 1; }
+Screen.compact #composer-label, Screen.compact #key-hints { display: none; }
+Screen.compact #chat-input { min-height: 1; max-height: 3; }
+Screen.compact #run-status { margin-bottom: 0; }
+Screen.compact #status-bar { margin-top: 0; }
+Screen.compact #details-panel { padding: 0 1; }
+Screen.compact #details-title { margin-bottom: 0; }
+Screen.compact #task-facts { max-height: 2; margin-bottom: 0; }
+Screen.compact .assistant-label { margin-bottom: 0; }
+Screen.compact CompletionPopup { max-height: 3; }

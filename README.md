@@ -54,6 +54,8 @@ uv sync
 uv run mewcode        # 交互式 TUI
 ```
 
+TUI 用 `›` 区分用户消息、`✦ MewCode` 标识助手；F2 打开开发详情，Ctrl+End 返回最新消息。输入、停止、Git diff 与执行记录的数据口径见 [TUI 指南](guides/tui.md)。
+
 ### 配置 LLM 提供商
 
 编辑 `.mewcode/config.yaml`：

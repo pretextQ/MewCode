@@ -51,8 +51,17 @@ def app_factory(monkeypatch, tmp_path):
     from mewcode.app import MewCodeApp
 
     monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    async def no_network(*_):
+        return ""
+
+    monkeypatch.setattr(MewCodeApp, "_resolve_context_window", no_network)
+    monkeypatch.setattr(MewCodeApp, "_prefetch_relevant_memories", no_network)
+    monkeypatch.setattr(MewCodeApp, "_update_session_summary", no_network)
 
     def _make(client: LLMClient) -> Any:
+        monkeypatch.setattr("mewcode.app.create_client", lambda _: client)
         app = MewCodeApp(providers=[_provider()])
         # 直接注入 mock client / agent，不用真实网络
         app.client = client

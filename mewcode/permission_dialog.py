@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from rich.markup import escape
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
@@ -51,10 +52,10 @@ class InlinePermissionWidget(Vertical, can_focus=True):
 
     def _build_content(self) -> str:
         lines = []
-        lines.append(f"\n  [bold yellow]{self._tool_name} command[/bold yellow]\n")
-        lines.append(f"    {self._description}\n")
-        lines.append("  [dim]This command requires approval[/dim]\n")
-        lines.append("  Do you want to proceed?\n")
+        lines.append(f"  [bold yellow]{escape(self._tool_name)} command[/bold yellow]")
+        lines.append(f"    {escape(self._description)}")
+        lines.append("  [dim]This command requires approval · Esc 拒绝[/dim]")
+        lines.append("  Do you want to proceed?")
 
         for i, (label, _resp) in enumerate(_PERM_OPTIONS):
             if i == self._cursor:
@@ -68,6 +69,7 @@ class InlinePermissionWidget(Vertical, can_focus=True):
     def _refresh(self) -> None:
         content = self.query_one("#perm-content", Static)
         content.update(self._build_content())
+        self.call_after_refresh(self.scroll_visible, animate=False, top=False)
 
     def action_cursor_up(self) -> None:
         if self._cursor > 0:

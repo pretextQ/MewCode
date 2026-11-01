@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from rich.markup import escape
+from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
@@ -44,7 +46,7 @@ class InlineAskUserWidget(Vertical, can_focus=True):
 
 
     def compose(self) -> ComposeResult:
-        yield Static(self._build_content(), id="askuser-content")
+        yield Static(Text.from_markup(self._build_content()), id="askuser-content")
 
     def on_mount(self) -> None:
         self.focus()
@@ -68,7 +70,7 @@ class InlineAskUserWidget(Vertical, can_focus=True):
 
         q = self._questions[self._q_idx]
         header = q.get("question", q.get("message", f"Question {self._q_idx + 1}"))
-        lines.append(f" [bold color(99)]{header}[/]\n")
+        lines.append(f" [bold color(99)]{escape(str(header))}[/]\n")
 
         options = q.get("options", [])
         is_multi = q.get("multiSelect", False)
@@ -87,8 +89,8 @@ class InlineAskUserWidget(Vertical, can_focus=True):
             else:
                 check = ""
 
-            desc_part = f" — [dim]{desc}[/]" if desc else ""
-            lines.append(f"{prefix}{check}{bold}{label}{end_bold}{desc_part}")
+            desc_part = f" — [dim]{escape(desc)}[/]" if desc else ""
+            lines.append(f"{prefix}{check}{bold}{escape(label)}{end_bold}{desc_part}")
 
         # "Other" 选项
         other_idx = len(options)
@@ -99,7 +101,7 @@ class InlineAskUserWidget(Vertical, can_focus=True):
 
         if cursor == other_idx:
             text = self._others[self._q_idx]
-            display = text if text else "[dim]Type your answer here...[/]"
+            display = escape(text) if text else "[dim]Type your answer here...[/]"
             lines.append(f"      {display}█")
 
         if is_multi:
@@ -115,9 +117,9 @@ class InlineAskUserWidget(Vertical, can_focus=True):
             header = q.get("header", f"Q{i+1}")
             check = "☑" if i in self._answered else "☐"
             if i == self._q_idx and not self._on_submit:
-                parts.append(f"[bold reverse] {header} {check} [/]")
+                parts.append(f"[bold reverse] {escape(str(header))} {check} [/]")
             else:
-                parts.append(f" {header} {check} ")
+                parts.append(f" {escape(str(header))} {check} ")
         submit_part = "[bold reverse] ✓ Submit [/]" if self._on_submit else " ✓ Submit "
         parts.append(submit_part)
         left = "[bold]←[/]" if self._q_idx > 0 else "[dim]←[/]"
@@ -130,9 +132,9 @@ class InlineAskUserWidget(Vertical, can_focus=True):
             header = q.get("header", q.get("question", f"Q{i+1}"))
             ans = self._answered.get(i, "")
             if ans:
-                lines.append(f"   {header}: {ans}")
+                lines.append(f"   {escape(str(header))}: {escape(ans)}")
             else:
-                lines.append(f"   {header}: [dim](not answered)[/]")
+                lines.append(f"   {escape(str(header))}: [dim](not answered)[/]")
         lines.append("")
         for j, label in enumerate(["Submit answers", "Cancel"]):
             if j == self._submit_idx:
@@ -142,7 +144,7 @@ class InlineAskUserWidget(Vertical, can_focus=True):
         return "\n".join(lines)
 
     def _refresh(self) -> None:
-        self.query_one("#askuser-content", Static).update(self._build_content())
+        self.query_one("#askuser-content", Static).update(Text.from_markup(self._build_content()))
 
     def _save_current_answer(self) -> None:
         q = self._questions[self._q_idx]
