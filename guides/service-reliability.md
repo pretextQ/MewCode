@@ -73,6 +73,8 @@ Content-Type: application/json
 关停前已排队的修改请求恢复时保留 `changes_requested` 和评审原因。
 进程被硬杀时，尚未落库的 provider 用量可能缺失；执行记录不声称能恢复未知消耗。
 
+开启 `service.enable_supervision` 时，修复后验证另存 pytest 失败指纹、分类与连续比较证据，并关联当前 execution/attempt。相同证据只向获准的下一次重试追加重新诊断建议；基线、取消重派、重启恢复、人工返工不沿用旧连续计数。关闭时保留原反馈。pytest 契约、可能 TDD/环境/超时豁免、原始输出截断和 `prepared` 边界见[监督指南](supervision.md#服务-dead-end-反馈2026-11-01)。
+
 ## 迁移与范围
 
 启动时增量创建新表，并给旧事件补充默认空的 execution ID；历史 Job、状态、用量和审计保留。

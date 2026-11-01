@@ -34,6 +34,7 @@ from mewcode.config import RepoConfig, ServiceConfig
 from mewcode.processes import create_shell_process, kill_process_tree, release_process
 
 from . import sop
+from .failure_feedback import FailureFeedback
 from .jobs import InvalidTransition, Job, JobStore
 from .policy import PolicyError, RepoPolicy, RepoPolicyLoader, effective_policy, stricter_budget
 from .review_models import ReviewResult
@@ -801,6 +802,7 @@ class ExecutionChain:
                 and await self._transition(job.id, "reproducing", reason=f"isolated worktree at {work_dir}") is None):
             return
         baseline = await self._run_tests(job, repo, work_dir, phase="baseline")
+        failure_feedback = FailureFeedback(self.store, job.id, self.config.enable_supervision, work_dir)
 
         # --- 修复 → 验证 → 发布 → CI 门禁 ---
         # 外层循环处理"CI 红了"：带着 CI 失败信息回到 fixing 重来，
@@ -808,7 +810,7 @@ class ExecutionChain:
         feedback = job.last_error if job.status == "changes_requested" else ""
         while True:
             context = await self._fix_and_verify(
-                job, repo, worktree, baseline, feedback, target_branch
+                job, repo, worktree, baseline, feedback, target_branch, failure_feedback
             )
             if context is None:
                 return
@@ -833,6 +835,7 @@ class ExecutionChain:
         baseline: TestOutcome | None,
         feedback: str,
         target_branch: str,
+        failure_feedback: FailureFeedback,
     ) -> ExecutionContext | None:
         """有界修复-验证循环。返回证据上下文；任何失败路径都返回 None（已收尾）。"""
         work_dir = worktree.path
@@ -921,6 +924,7 @@ class ExecutionChain:
             if await self._transition(job.id, "verifying", reason="re-running tests after fix") is None:
                 return None
             verify = await self._run_tests(job, repo, work_dir, phase="verify")
+            await failure_feedback.observe(verify, attempt, changed_files)
             if verify is not None and baseline is not None:
                 await self._event(
                     job.id, "test_delta", f"before: {baseline.summary()} / after: {verify.summary()}"
@@ -976,7 +980,7 @@ class ExecutionChain:
             )
             if next_feedback is None:
                 return None
-            feedback = next_feedback
+            feedback = await failure_feedback.retry_feedback(next_feedback)
 
     async def _verify_failed(
         self, job: Job, attempt: int, reason: str, output: str

@@ -20,6 +20,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
+from .failure_feedback import feedback_reports
 from .jobs import TERMINAL_STATES, Job, JobEvent, JobStore
 from .review_render import review_reports
 
@@ -213,7 +214,8 @@ def _parse_agent_finished(event: JobEvent) -> dict:
 
 def _events_by_kind(events: list[JobEvent], kinds: tuple[str, ...]) -> list[dict]:
     return [
-        {"ts": e.ts, "kind": e.kind, "detail": e.detail} for e in events if e.kind in kinds
+        {"ts": e.ts, "kind": e.kind, "detail": e.detail,
+         "event_seq": e.seq, "execution_id": e.execution_id} for e in events if e.kind in kinds
     ]
 
 
@@ -299,6 +301,7 @@ def build_job_report(job: Job, events: list[JobEvent]) -> dict:
             "mcp": mcp,
         },
         "verification": {
+            "feedback": feedback_reports(events),
             "tests": _events_by_kind(events, VERIFICATION_KINDS),
             "integration": _events_by_kind(events, INTEGRATION_KINDS),
             "ci": _events_by_kind(events, CI_KINDS),

@@ -1,5 +1,12 @@
 # 下次工作入口
 
+2026-11-01 下一阶段更新（优先于下文历史交接）：已按用户“完成、更新文档、提交推送”的授权实现 dead-end 服务反馈。起点 `e4ebb2b5e947cef9a089e93180dfefa9e60a90af`；最终验证及交付见[本轮验收](stage-2026-11-01-dead-end.md)，运行契约见[监督指南](../guides/supervision.md)。本轮没有调用付费模型、创建远端修复 PR 或部署生产。
+
+连续完整 pytest 失败证据比较、动态根路径/标准耗时处理、unknown/可能 TDD/环境/超时边界、默认关闭、execution/attempt 关联和取消/恢复/人工返工隔离已实现。仅对原预算允许的下一次重试追加建议，无提前停止或额外请求；prepared 不等于模型送达或采纳。
+最终本地全量 1579 passed / 19 skipped（246.11 秒），新增专项 48 passed，独立 Docker 16 passed；Ruff、两平台目标 mypy 各 172 文件、工程守卫、四项旧缺陷回植、锁文件、构建及组件脚本 86/86 通过。推送后 SHA 与该提交的远端 CI 应以 Git/Actions 及本次交付答复为准，勿把本地结果混作 CI。
+
+后续可先设计 self-verify 的触发与只读/无测试任务边界，再决定是否实施；token 预算预警、intent anchor、GitHub 评论/评审接入、observe、PR 发布持久化队列仍未实现。本轮授权不自动扩展到这些工作，无多 Agent/TypeScript 迁移、自动合并或新的真实模型预算。下列“下一阶段 dead-end”均为先前交接的历史推荐，勿重复立项或当作待实现清单。
+
 2026-11-01 更新（优先于历史交接）：用户在设计研究会话授权先实施服务可靠性改进，
 已实现通知 Outbox、脱敏策略快照/阶段重验证、轻量执行记录。见[本轮验收](stage-2026-11-01.md)
 与[服务可靠性指南](../guides/service-reliability.md)。本地全量 1531 passed / 19 skipped，独立 Docker 16 passed；
