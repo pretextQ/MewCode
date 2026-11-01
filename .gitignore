@@ -31,6 +31,7 @@ docs/evolution/*
 !docs/evolution/06-tianshu-supervision-notes.md
 !docs/evolution/07-tianshu-test-notes.md
 !docs/evolution/08-next-stage-plan.md
+!docs/evolution/09-tui-redesign-plan.md
 .coverage
 
 .mypy_cache/
