@@ -1,5 +1,13 @@
 # 下次工作入口
 
+2026-11-01 最新交接（优先于下文历史推荐）：self-verify 首期已按授权实现。起点 `cc98162392f02b352dba61133c1a233e654bbb27`，master 开工干净、远端一致。实现、真实验收和交付边界见[本轮报告](stage-2026-11-01-self-verify.md)及[监督指南](../guides/supervision.md)。仍复用默认关闭的监督开关，没有付费模型调用、远端修复 PR 或生产部署。
+
+内置 EditFile/WriteFile 对 Python 路径的成功调用触发观察，下一次原额度决策请求建议适用验证。只读/纯文档/其他语言不触发，无适用检查时说明证据和限制；每 run 最多一条，不加请求或权限。受支持 Bash 调用区分尝试与工具成功，覆盖始终 unknown；验证目标不自动关联改动文件，不能把 adopted 或 successful_revision 当作覆盖通过。steer、新 run、服务 attempt、取消/恢复边界均已接线。Bash/第三方/子代理编辑、其他语言、dirty worktree 盘点、验证范围证明与持久恢复未覆盖。
+
+最终本地全量 1667 passed / 19 skipped（250.78 秒），监督专项 141 passed（88 项新增），独立 Docker 16 passed（最终源码接线另 1 passed）；Ruff、两平台目标 mypy 各 173 文件、工程守卫、四项回植、锁文件、最终源码打包与 verify_subagent 86/86 通过。没有提高 ceiling；日志在忽略的 docs/evidence/self-verify-2026-11-01。基线 cc98162 的远端五项 CI 已另行核实成功，不替代本次提交 CI。
+
+token 预算预警、intent anchor、GitHub 评论/评审接入、observe、PR 发布持久化队列仍未实施；不自动扩展到这些工作、多 Agent/TypeScript 迁移、自动合并或新真实模型预算。后续事项须按新的任务范围选择；下文“先设计 self-verify”和“下一步 dead-end”保留为历史推荐，勿重复立项。最新本地结果见本轮报告，推送 SHA 与对应远端 CI 以交付答复及 Git/Actions 核验为准。
+
 2026-11-01 下一阶段更新（优先于下文历史交接）：已按用户“完成、更新文档、提交推送”的授权实现 dead-end 服务反馈。起点 `e4ebb2b5e947cef9a089e93180dfefa9e60a90af`；最终验证及交付见[本轮验收](stage-2026-11-01-dead-end.md)，运行契约见[监督指南](../guides/supervision.md)。本轮没有调用付费模型、创建远端修复 PR 或部署生产。
 
 连续完整 pytest 失败证据比较、动态根路径/标准耗时处理、unknown/可能 TDD/环境/超时边界、默认关闭、execution/attempt 关联和取消/恢复/人工返工隔离已实现。仅对原预算允许的下一次重试追加建议，无提前停止或额外请求；prepared 不等于模型送达或采纳。

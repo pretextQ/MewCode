@@ -1,5 +1,7 @@
 # 借鉴 Tianshu Harness 的内核监督闭环（原始调研与实施状态）
 
+2026-11-01 最新实施更新：§2.2 self-verify 首期已独立实现为 Python 观察器，复用默认关闭的监督开关与共享循环。只追踪内置 Python 文件成功编辑，在下一次原额度请求建议适用验证；只读/纯文档不触发，无适用检查时说明证据与限制。验证尝试、工具成功和覆盖 unknown 分开，新增 expect 仅核销实际执行的受支持 Bash 验证意图。范围、一次提醒预算、steer/失败/取消/恢复及服务边界见[监督指南](../../guides/supervision.md)，真实验收见[本轮报告](../stage-2026-11-01-self-verify.md)。§2.5 和 token 预警仍未实施。下列各日期“§2.2 未实施”均为历史状态。
+
 2026-11-01 实施更新：§2.3 的服务反馈首期已独立实现，随 `service.enable_supervision` 默认关闭。以两次连续完整 pytest 验证证据比较向获准的下一次完整修复提供建议；不是上游三次文件编辑循环，没有自动终止、额外预算或效果承诺。契约、TDD/环境/超时/unknown 和 execution 隔离见[监督指南](../../guides/supervision.md)，验收见[本轮报告](../stage-2026-11-01-dead-end.md)。§2.2、§2.5 与 token 预警仍未实施；以下保留各日期的原始调研状态。
 
 2026-10-31 实施更新：§2.4 的执行循环预算预警已独立实现，随监督开关默认关闭。按现有循环硬上限计剩余量，不将循环次数与响应 turn 混算；尚无 token 预警。详见[监督指南](../../guides/supervision.md)和[本次验收](../stage-2026-10-31.md)。§2.2、§2.3、§2.5 仍为提案，以下历史说明保留日期。
@@ -68,7 +70,7 @@ MewCode 现状与差距：`mewcode/hooks/engine.py` 的 `_prompt_messages`
 被裁掉或尚未注入的条目不得计为 ignored。有 expect 时区分等待、采纳与到期未采纳，
 无 expect 时只计送达；总线关闭时行为与现状一致。
 
-### 2.2 Self-Verify（未验证就下结论检测）
+### 2.2 Self-Verify（首期已实现；下列为原始调研与适配提案）
 
 Tianshu 实现：`src/agent/hooks/self-verify-hook.ts`（约 128 行实际代码）。
 

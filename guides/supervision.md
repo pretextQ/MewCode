@@ -1,6 +1,6 @@
 # 监督内核与服务失败反馈
 
-默认关闭。纯 Python，2026-10-31 新增一个执行循环预算 detector；开启监督后，接近循环上限时会注入提醒，不增加模型请求。现有 hooks 的用户扩展队列、权限和回调语义保留。没有自动终止、返工、GitHub 动作或生产效果承诺。
+默认关闭。纯 Python，现有执行循环预算 detector 及 2026-11-01 self-verify 首期共用内核；开启监督后，满足各自条件时注入建议，不增加模型请求。现有 hooks 的用户扩展队列、权限和回调语义保留。没有自动终止、返工、GitHub 动作或生产效果承诺。
 
 2026-11-01 增加服务 dead-end 反馈：连续识别到相同 pytest 失败证据时，向已获允许的下一次修复追加重新诊断建议。它在服务验证链实现，与内核循环预算 detector 分开；具体契约和限制见下节。
 
@@ -40,10 +40,11 @@ model turn 是本次决策请求收到首个 provider 响应事件时计一轮�
 
 在压缩和工具结果裁剪之后，从总线选择提醒，复制最终请求上下文再注入；不进入持久对话、fork 快照或之后的请求。仅出队、渲染、选择均不算送达。收到本次真实请求的第一个响应事件才 confirm；无响应失败/取消属于未确认，即使服务端可能实际接收，也不伪称送达。后续流失败保留已确认送达；取消/失败不提前核销未结束窗口。已有请求重试策略保持不变，每次重试重新选择，confirm 幂等，旧 run 响应不能记入新 run。
 
-无 expect 的条目只变成 delivered。支持两种显式行为签名：
+无 expect 的条目只变成 delivered。支持三种显式行为签名：
 
 - `Expectation("tool_call", "Check", within_turns=2)`：模型实际返回该工具调用，表示请求尝试该工具。
 - `Expectation("tool_success", "Check", within_turns=2)`：该工具经过权限/hooks 门禁并实际执行后 `is_error=False`。失败、被拒绝、未知工具不能采纳该条件。
+- `Expectation("verification_attempt", "Bash", within_turns=2)`：实际调用内置 Bash 且满足下节的验证命令识别契约，失败也算尝试。普通 Bash、被拒绝或参数无效的调用不匹配；不表示验证通过或覆盖充分。
 
 它们只证明指定可观察事件；工具成功也不自动证明测试覆盖充分或整个任务通过。expect 窗口含送达当轮，window=1 在当轮工具执行机会结束后可核销；匹配为 adopted，已完整耗尽窗口但未匹配为 ignored，窗口尚未结束为 waiting。正常返回仅表示本次接口结束，不代表任务成功。结束/取消时未到期条目保持未解决，不为凑统计提前 ignored。被通道预算裁掉、未注入、失败未确认和 status-only 提醒均不能 ignored。
 
@@ -77,7 +78,25 @@ Agent 的 `max_iterations` 是执行循环硬上限，不等同于总线的真�
 
 请求内部重试、上下文溢出恢复不额外产生 detector 发布，不增加外层循环额度；预警不追加“收尾请求”，原硬上限和失败/取消语义保持。它不是 token 预算预警，不能替代服务 token 熔断。交互、headless、服务直跑及容器 Agent 共用同一实现；子代理继承开关，各自按自己的循环上限判断。
 
-self-verify、token 预算预警和 intent anchor 仍未实现。基础内核历史验收见[2026-10-30 报告](../docs/next-stage-2026-10-30.md)，循环预警验收见[2026-10-31 报告](../docs/stage-2026-10-31.md)。
+token 预算预警和 intent anchor 仍未实现。基础内核历史验收见[2026-10-30 报告](../docs/next-stage-2026-10-30.md)，循环预警验收见[2026-10-31 报告](../docs/stage-2026-10-31.md)。
+
+## Self-verify 首期（2026-11-01）
+
+复用上述默认关闭的监督开关。交互、headless、服务直跑及容器 Agent 共用实现；子代理按自己的 run 独立观察。服务末端测试和 dead-end 反馈仍是独立证据链，不用模型内部验证信号替代服务验证或人工审查。
+
+只有实际通过权限、hooks、参数验证并成功返回的**内置** EditFile/WriteFile，对大小写不敏感的 `.py`/`.pyi` 路径才增加观察 revision。revision 是本 run 的成功编辑调用计数，不是 Git 提交或字节 diff；成功的相同内容写入也可能触发。只读、问答、纯文档和其他语言任务不产生编辑义务；已有 dirty worktree、Bash/第三方工具/子代理的改动、失败写入后的部分变化不盘点。仅按工具名称冒充的自定义工具不纳入。
+
+在下一次原预算允许的决策请求、压缩和裁剪之后，若有编辑后尚未识别到验证尝试，且当前不是 plan mode、注册表中存在启用的内置 Bash，才发布 `builtin:self-verify`。不会检测自然语言“完成”或事后追加请求；最后一次循环才编辑时可以没有提醒。无测试或没有适用可运行检查的任务，建议要求说明替代证据和限制，不强制执行无关测试、不自动选命令、不授予权限。是否获权限和是否实际执行仍走原门禁。
+
+识别契约仅为直接 `pytest[.exe]`、`mypy[.exe]`、`ruff[.exe] check`，或 `python[3[.版本]][.exe] -m pytest/mypy/ruff check`；可有普通参数和带引号的可执行路径，允许无选项的字面 `uv run` 包装。拒绝 shell 组合、重定向、换行、变量/命令替换等语法以及帮助、版本、仅收集/列举、ruff 自动修复。`uv run --locked pytest`、`py -m pytest`、npm、任意脚本和其他包装器均未知；未知调用不会解除催促。该识别只说明调用意图，不解析输出、不推断 cwd、目标文件或命令真正覆盖的范围。
+
+工具真实进入 execute 前记录 `verification_attempt`；超时、异常、环境缺失或测试失败均已尝试，不误报为未尝试。完成后独立记录 `verification_result.tool_success`（`is_error=False`），不等于测试语义通过。后一次失败不抹掉早先成功信号；事件保留先后关系，`successful_revision` 仅为最近成功工具信号所关联的最大 revision。命令开始前的 revision 关联这次观察，后续编辑不能借用旧验证；`coverage` 始终 `unknown`。一次受支持尝试会抑制当前 revision 的催促，即便失败、目标无关或覆盖很窄；这是减少催促的行为策略，不是质量义务已满足。
+
+每 run 最多接受一条建议，reminder 通道、priority 60、TTL=2，expect 为上述 `verification_attempt/Bash`，窗口含送达当轮的两轮。服从总线 128 key 容量及所有通道/字节限额，不占保留槽位，可能延迟、过期或拒收；后续编辑和 steer 都不重新武装已使用的 key。尚未送达时若已尝试验证或 Bash 不再可用，pending 条目标 superseded，避免陈旧催促。实际送达依然只由请求首响应确认；adopted 只表示匹配到一次验证尝试，不能叫作验证成功。
+
+steer 暂停旧编辑义务并 supersede 原 pending/waiting 提醒；后续新编辑才恢复观察。在途旧工具结果不能恢复旧义务；在途请求仍可能确认已发生的物理送达，不恢复核销。取消/失败不补发或提前核销；新公共 run、服务新 attempt、恢复/重派均清空观察，不从旧历史或磁盘恢复计数。停止或硬杀后无法保证取得最后摘要，也不伪称验证成功。
+
+完整 Agent report / CLI JSON / 容器回读报告中新增有界 `self_verify`：revision、attempted_revision、successful_revision、suspended、coverage；事件仍在最多 256 项环中，不另存源码、路径、命令或原始测试输出。服务落库仍只保存现有紧凑摘要（含总线状态计数），不持久化完整 detector 事件或 revision。关闭时保持原输出和执行行为。验收见[本轮报告](../docs/stage-2026-11-01-self-verify.md)，没有真实模型效果或生产收益结论。
 
 ## 服务 dead-end 反馈（2026-11-01）
 

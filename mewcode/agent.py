@@ -39,7 +39,7 @@ from mewcode.permissions import (
 from mewcode.prompts import build_environment_context, build_plan_mode_reminder, build_system_prompt
 from mewcode.supervision import AdvisoryBus
 from mewcode.supervision.detectors import warn_iteration_budget
-from mewcode.supervision.runtime import supervised_stream, supervision_run
+from mewcode.supervision.runtime import execute_observed_tool, supervised_stream, supervision_run
 from mewcode.tools import ToolRegistry
 from mewcode.tools.base import (
     MAX_OUTPUT_CHARS,
@@ -961,7 +961,7 @@ class Agent:
 
         try:
             params = tool.params_model.model_validate(tc.arguments)
-            result = await tool.execute(params)
+            result = await execute_observed_tool(self, tool, params)
         except ValidationError as e:
             result = ToolResult(output=f"Parameter validation error: {e}", is_error=True)
         except Exception as e:
@@ -1138,7 +1138,7 @@ class Agent:
 
         try:
             params = tool.params_model.model_validate(tc.arguments)
-            result = await tool.execute(params)
+            result = await execute_observed_tool(self, tool, params)
         except ValidationError as e:
             result = ToolResult(
                 output=f"Parameter validation error: {e}", is_error=True
@@ -1513,7 +1513,7 @@ class Agent:
 
         try:
             params = tool.params_model.model_validate(tc.arguments)
-            result = await tool.execute(params)
+            result = await execute_observed_tool(self, tool, params)
         except ValidationError as e:
             result = ToolResult(
                 output=f"Parameter validation error: {e}", is_error=True

@@ -6,17 +6,20 @@ from collections import Counter, deque
 from dataclasses import asdict, dataclass
 from typing import Literal
 
+from .self_verify import SelfVerify
+
 Channel = Literal["system", "reminder", "status"]
 
 
 @dataclass(frozen=True)
 class Expectation:
-    event: Literal["tool_call", "tool_success"]
+    event: Literal["tool_call", "tool_success", "verification_attempt"]
     tool: str
     within_turns: int = 2
 
     def __post_init__(self) -> None:
-        if self.event not in ("tool_call", "tool_success") or not self.tool or self.within_turns < 1:
+        if (self.event not in ("tool_call", "tool_success", "verification_attempt")
+                or not self.tool or self.within_turns < 1):
             raise ValueError("invalid observable expectation")
 
 
@@ -74,6 +77,7 @@ class AdvisoryBus:
         self.last_confirmed_request = ""
         self.started = False
         self.closed = False
+        self.self_verify = SelfVerify(self)
 
     def _event(self, kind: str, **fields: object) -> None:
         if self.enabled:
@@ -88,10 +92,12 @@ class AdvisoryBus:
             self.run_id = uuid.uuid4().hex
             self.turn = self.attempt = self.last_user_input_turn = 0
             self.last_confirmed_request = ""
+            self.self_verify.reset()
         self.started, self.closed = True, False
         self._event("run_started")
 
     def steer(self) -> None:
+        self.self_verify.steer()
         self.last_user_input_turn = self.turn
         for entry in self.entries.values():
             if entry.state in ("pending", "waiting"):
@@ -178,6 +184,7 @@ class AdvisoryBus:
         return {"enabled": True, "run_id": self.run_id, "turn": self.turn,
                 "last_user_input_turn": self.last_user_input_turn, "attempts": self.attempt,
                 "closed": self.closed,
+                "self_verify": self.self_verify.report(),
                 "counts": dict(Counter(entry.state for entry in self.entries.values())),
                 "status": status,
                 "entries": {key: asdict(value) for key, value in self.entries.items()},

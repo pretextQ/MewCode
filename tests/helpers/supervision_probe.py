@@ -30,6 +30,26 @@ class FakeClient(LLMClient):
             yield StreamEnd('end_turn')
 
 
+class VerifyClient(LLMClient):
+    calls = 0
+
+    async def stream(self, conversation, system='', tools=None):
+        self.calls += 1
+        text = system + str(conversation.transient_reminders)
+        if self.calls == 1:
+            yield ToolCallComplete('edit', 'WriteFile', {'file_path': 'probe.py', 'content': 'x = 1\n'})
+        elif self.calls == 2:
+            assert 'builtin:self-verify' in text
+            # Installed pytest is not required: even command failure is an attempt.
+            yield ToolCallComplete('verify', 'Bash', {'command': 'python -m pytest --mewcode-invalid-option'})
+        else:
+            assert 'builtin:self-verify' not in text
+            yield TextDelta('done')
+            yield StreamEnd('end_turn')
+            return
+        yield StreamEnd('tool_use')
+
+
 async def main():
     config = load_config(Path('/workspace/supervision.yaml'))
     client = FakeClient()
@@ -53,6 +73,15 @@ async def main():
     await agent.run_to_completion('Budget detector probe')
     assert bus.entries['builtin:iteration-budget'].state == 'delivered'
     assert bus.turn == 1 and bus.attempt == 1
+    verify_client = VerifyClient()
+    agent.client = verify_client
+    agent.max_iterations = 5
+    await agent.run_to_completion('Self-verify probe')
+    assert verify_client.calls == 3
+    assert bus.entries['builtin:self-verify'].state == 'adopted'
+    assert bus.self_verify.revision == bus.self_verify.attempted_revision == 1
+    assert bus.self_verify.successful_revision == 0
+    assert bus.self_verify.report()['coverage'] == 'unknown'
     print(json.dumps({'probe': 'ok', 'report': bus.report()}))
 
 

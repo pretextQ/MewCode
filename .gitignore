@@ -22,6 +22,7 @@ docs/*
 !docs/stage-2026-10-31.md
 !docs/stage-2026-11-01.md
 !docs/stage-2026-11-01-dead-end.md
+!docs/stage-2026-11-01-self-verify.md
 !docs/evolution/
 docs/evolution/*
 !docs/evolution/README.md

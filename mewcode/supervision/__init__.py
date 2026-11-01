@@ -1,4 +1,4 @@
-"""Opt-in supervision kernel. No detectors or automatic actions."""
+"""Opt-in supervision kernel and conservative advice; no automatic actions."""
 from .bus import Advisory, AdvisoryBus, Expectation
 
 __all__ = ["Advisory", "AdvisoryBus", "Expectation"]
