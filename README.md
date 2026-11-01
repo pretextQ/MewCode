@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/pretextQ/MewCode/actions/workflows/ci.yml/badge.svg)](https://github.com/pretextQ/MewCode/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
+[![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/pretextQ/badge.svg)](https://hub.xerj.org/contributors/pretextQ)
 
 **MewCode 是一个 AI Coding Agent，也是一套告警驱动的自动化开发服务**：同一个 agent 内核，既能作为交互式 CLI 帮你写代码，也能以无头服务的形式常驻——线上告警自动触发，agent 在 OS 级沙箱里定位 bug、写修复、跑测试（含自起 docker-compose 依赖环境的集成验证），以 PR 形式交给人工 review。**人审 PR 是唯一必经的人工点，服务没有任何 merge 权限。**服务暴露 Prometheus 指标与逐单复盘报告，评估集回放让每次提示词/内核改动都能量化对比。
 
@@ -11,6 +12,8 @@
                      job 状态机   git worktree       （告警摘要/根因/
                      重试与去重   agent 内核          测试前后对比/集成验证）
 ```
+
+MewCode 已收录于 [XERJ Corpus Hub](https://hub.xerj.org/corpus/pretextq--mewcode)，可供 AI 编程代理检索，作为代码实现参考。
 
 ## 它解决什么问题
 
