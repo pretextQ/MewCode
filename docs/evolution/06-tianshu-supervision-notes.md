@@ -1,5 +1,7 @@
 # 借鉴 Tianshu Harness 的内核监督闭环（原始调研与实施状态）
 
+2026-11-01 最新实施更新：§2.5 intent anchor 首期已独立实现为 Python detector，复用默认关闭的共享监督内核。仅从 TUI 原文、headless/service 显式 task 和 steer 取目标，不从历史/摘要猜测；20 响应轮与 10 用户静默轮门槛，发布冷却 10 轮、每 run 最多三条、TTL=2，服从总线预算。steer 替换目标且不重置提醒次数，新 run/attempt/恢复重派清空；无 expect，只计实际送达。阈值是本仓保守实现选择，未做模型效果校准。完整来源/摘录/模式/生命周期边界见[监督指南](../../guides/supervision.md)，验收见[本轮报告](../stage-2026-11-01-intent-anchor.md)。token 预警仍未实施；下列“§2.5 未实施”为历史状态。
+
 2026-11-01 最新实施更新：§2.2 self-verify 首期已独立实现为 Python 观察器，复用默认关闭的监督开关与共享循环。只追踪内置 Python 文件成功编辑，在下一次原额度请求建议适用验证；只读/纯文档不触发，无适用检查时说明证据与限制。验证尝试、工具成功和覆盖 unknown 分开，新增 expect 仅核销实际执行的受支持 Bash 验证意图。范围、一次提醒预算、steer/失败/取消/恢复及服务边界见[监督指南](../../guides/supervision.md)，真实验收见[本轮报告](../stage-2026-11-01-self-verify.md)。§2.5 和 token 预警仍未实施。下列各日期“§2.2 未实施”均为历史状态。
 
 2026-11-01 实施更新：§2.3 的服务反馈首期已独立实现，随 `service.enable_supervision` 默认关闭。以两次连续完整 pytest 验证证据比较向获准的下一次完整修复提供建议；不是上游三次文件编辑循环，没有自动终止、额外预算或效果承诺。契约、TDD/环境/超时/unknown 和 execution 隔离见[监督指南](../../guides/supervision.md)，验收见[本轮报告](../stage-2026-11-01-dead-end.md)。§2.2、§2.5 与 token 预警仍未实施；以下保留各日期的原始调研状态。
@@ -143,7 +145,7 @@ MewCode 现状与差距：Agent 已有 max_iterations 限制；服务的 token �
 验收要求：区分轮数与 token 预算；覆盖直跑/沙箱、跨 attempt 累计、不限额与新 run 重置；
 每 run 只预警一次。现有硬边界保持有效，沙箱未接入实时能力时如实标记未支持。
 
-### 2.5 Intent Anchor（长任务防漂移）
+### 2.5 Intent Anchor（首期已实现；下列为原始调研与适配提案）
 
 Tianshu 实现：`src/agent/hooks/intent-anchor-hook.ts`（约 42 行实际代码）。
 

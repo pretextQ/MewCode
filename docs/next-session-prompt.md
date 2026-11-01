@@ -1,5 +1,13 @@
 # 下次工作入口
 
+2026-11-01 最新交接（优先于下列全部历史推荐）：intent anchor 首期已按“继续开发、文档、提交推送”授权实现。起点 `4dd185d6e7790589133bc45755ec8a585828d65c`，master 开工干净、实时 origin/master 一致，未发现适用 AGENTS.md。实现与本轮真实验收见[本轮报告](stage-2026-11-01-intent-anchor.md)，运行契约见[监督指南](../guides/supervision.md)。基线 CI run 41293686354 已交付成功，不能替代新代码的 CI；本轮所属提交、远端 SHA 和 CI 以 Git/Actions 及交付答复核实为准。
+
+仅用显式来源：TUI 用户原文（在 @ 文件扩展前）、headless/service 本次 task、`supervision.steer(text)`；只取前 500 Unicode 字符，转义标签并标明摘录/来源/截断，不推断模型意图。累计 20 响应轮且距用户输入至少 10 轮后，在下一原额度请求提醒；冷却从成功发布算 10 轮，每 run 最多接受三条、TTL=2、priority=40，服从总线预算/容量。无 expect，只确认真实首响应送达。steer 替换目标、废弃旧 pending/waiting，但不重置本 run 提醒数；不带文本的 steer 清除目标。新公共 run/服务 attempt/恢复重派清空，不持久恢复或扫描旧历史。旧 `run(conversation)` 未提供 intent 时只跳过此 detector，其他监督功能保留。
+
+本轮最终本地全量 1704 passed / 19 skipped（259.92 秒），监督与 TUI 专项 181 passed（新增 37 项），真实独立 Docker 16 passed / 83.49 秒；Ruff、win32/linux 目标 mypy 各 174 文件、工程守卫、四项回植、锁文件、最终源码 sdist/wheel 和组件 86/86 通过。未提高 ceiling，锁文件无变更。一次扩展专项的 2 项测试 API 使用错误及公开 Actions 查询 EOF 已纠正并保留事实，见本轮报告；原始日志在忽略的 docs/evidence/intent-anchor-2026-11-01。
+
+本轮无付费模型调用、远端修复 PR 或生产部署；无模型质量、防漂移收益结论。token 预警、GitHub 评论/评审接入、observe、PR 发布持久化队列仍未实施，多 Agent/TypeScript 迁移和自动合并不扩展。本次没有授权下一项真实模型预算。后续应重新选定单个保守增量；若评估 token 预警，须先设计容器内实时用量和跨 attempt 剩余额度传递，不能把宿主结束后汇总当成实时支持。下文“intent anchor 未实现”均为历史状态，勿重复立项。
+
 2026-11-01 最新交接（优先于下文历史推荐）：self-verify 首期已按授权实现。起点 `cc98162392f02b352dba61133c1a233e654bbb27`，master 开工干净、远端一致。实现、真实验收和交付边界见[本轮报告](stage-2026-11-01-self-verify.md)及[监督指南](../guides/supervision.md)。仍复用默认关闭的监督开关，没有付费模型调用、远端修复 PR 或生产部署。
 
 内置 EditFile/WriteFile 对 Python 路径的成功调用触发观察，下一次原额度决策请求建议适用验证。只读/纯文档/其他语言不触发，无适用检查时说明证据和限制；每 run 最多一条，不加请求或权限。受支持 Bash 调用区分尝试与工具成功，覆盖始终 unknown；验证目标不自动关联改动文件，不能把 adopted 或 successful_revision 当作覆盖通过。steer、新 run、服务 attempt、取消/恢复边界均已接线。Bash/第三方/子代理编辑、其他语言、dirty worktree 盘点、验证范围证明与持久恢复未覆盖。

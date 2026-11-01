@@ -1278,6 +1278,7 @@ class MewCodeApp(App):
 
     async def _send_message(self, text: str, is_notification: bool = False) -> None:
         assert self.agent is not None
+        intent = text if not is_notification else ""
 
         # 先同步置位再 await：三个入口（提交/命令/通知）若在 MCP await
         # 期间再次启动，会并行运行两个 agent 循环并互相覆盖 _agent_task
@@ -1317,7 +1318,7 @@ class MewCodeApp(App):
 
             supervision = getattr(self.agent, "supervision", None)
             if supervision is not None and supervision.enabled:
-                supervision.steer()
+                supervision.steer(intent)
             self.conversation.add_user_message(text)
             if self.session:
                 self.session.append(Message(role="user", content=text))
@@ -1371,7 +1372,10 @@ class MewCodeApp(App):
         await asyncio.sleep(0)
 
         try:
-            async for event in self.agent.run(self.conversation):
+            stream = (self.agent.run(self.conversation, intent=intent)
+                      if getattr(self.agent, "supervision", None) and self.agent.supervision.enabled
+                      else self.agent.run(self.conversation))
+            async for event in stream:
                 if isinstance(event, ThinkingText):
                     self.call_after_refresh(chat.scroll_end, animate=False)
 

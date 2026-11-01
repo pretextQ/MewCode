@@ -1,5 +1,7 @@
 # 演进与验证证据
 
+2026-11-01 最新增量：intent anchor 首期已实现，显式任务摘录经共享监督总线有界投递；20 响应轮/10 静默轮门槛、10 轮发布冷却、每 run 最多三条。steer 替换来源，新 run/attempt 清空；不扫描模型摘要，无 expect 或效果结论。见[本轮验收](../stage-2026-11-01-intent-anchor.md)与[监督指南](../../guides/supervision.md)。下列日期记录和验收数字按历史保留。
+
 2026-11-01 最新增量：self-verify 首期已独立实现 Python 观察器，复用默认关闭的共享监督内核。仅成功的内置 Python 文件编辑触发适用验证建议，实际尝试、工具成功和覆盖 unknown 分开；不增加请求或权限。见[本轮验收](../stage-2026-11-01-self-verify.md)与[监督指南](../../guides/supervision.md)。历史数字和提案状态按日期保留。
 
 2026-11-01：服务可靠性与后续 dead-end 服务反馈均已实现。新反馈仅在服务监督开启时比较完整 pytest 失败证据，向获准重试提供重新诊断建议，未知/可能 TDD/环境/超时及新 execution 重置均单列。见[最新验收](../stage-2026-11-01-dead-end.md)、[服务可靠性验收](../stage-2026-11-01.md)和[监督指南](../../guides/supervision.md)。没有生产收益结论；历史记录保留。
@@ -24,7 +26,8 @@
 | 服务可靠性（2026-11-01） | 通知 Outbox、策略快照及重验证、轻量 execution | 已实现，起点/检查见对应验收 |
 | dead-end 服务反馈（2026-11-01） | pytest 指纹、失败分类、重新诊断建议与 execution 证据 | 已实现，默认关闭；不自动停止、不增加请求 |
 | self-verify 首期（2026-11-01） | Python 编辑观察、验证尝试/工具结果、下一请求有界建议 | 已实现，默认关闭；不证明覆盖充分 |
-| 后续 | token 预警、intent anchor、GitHub 返工与问题跟踪、observe、PR 发布队列 | 未实施 |
+| intent anchor 首期（2026-11-01） | 显式任务来源、长任务有界提醒、steer/attempt 隔离 | 已实现，默认关闭；只证明送达 |
+| 后续 | token 预警、GitHub 返工与问题跟踪、observe、PR 发布队列 | 未实施 |
 
 早期 42 项及 R1–R5、R01–R09、N01–N41 均已完成，原始审查不是待修清单。提交映射见[维护记录](../../guides/maintenance.md)。
 

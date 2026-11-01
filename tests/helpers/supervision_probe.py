@@ -50,6 +50,22 @@ class VerifyClient(LLMClient):
         yield StreamEnd('tool_use')
 
 
+class AnchorClient(LLMClient):
+    calls = 0
+
+    async def stream(self, conversation, system='', tools=None):
+        self.calls += 1
+        text = system + str(conversation.transient_reminders)
+        assert ('builtin:intent-anchor:' in text) == (self.calls == 21)
+        if self.calls <= 20:
+            yield ToolCallComplete(str(self.calls), 'ReadFile', {'file_path': 'probe.py'})
+            yield StreamEnd('tool_use')
+        else:
+            assert 'Explicit container task target' in text
+            yield TextDelta('done')
+            yield StreamEnd('end_turn')
+
+
 async def main():
     config = load_config(Path('/workspace/supervision.yaml'))
     client = FakeClient()
@@ -82,6 +98,14 @@ async def main():
     assert bus.self_verify.revision == bus.self_verify.attempted_revision == 1
     assert bus.self_verify.successful_revision == 0
     assert bus.self_verify.report()['coverage'] == 'unknown'
+    anchor_client = AnchorClient()
+    agent.client = anchor_client
+    agent.max_iterations = 25
+    await agent.run_to_completion('Explicit container task target')
+    assert anchor_client.calls == 21 and bus.turn == 21
+    assert bus.entries['builtin:intent-anchor:1'].state == 'delivered'
+    assert bus.entries['builtin:intent-anchor:1'].advisory.expect is None
+    assert bus.intent_anchor.published == 1
     print(json.dumps({'probe': 'ok', 'report': bus.report()}))
 
 

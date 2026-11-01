@@ -6,6 +6,7 @@ from collections import Counter, deque
 from dataclasses import asdict, dataclass
 from typing import Literal
 
+from .intent_anchor import IntentAnchor
 from .self_verify import SelfVerify
 
 Channel = Literal["system", "reminder", "status"]
@@ -78,12 +79,13 @@ class AdvisoryBus:
         self.started = False
         self.closed = False
         self.self_verify = SelfVerify(self)
+        self.intent_anchor = IntentAnchor(self)
 
     def _event(self, kind: str, **fields: object) -> None:
         if self.enabled:
             self.events.append({"type": kind, "run_id": self.run_id, "turn": self.turn, **fields})
 
-    def begin(self) -> None:
+    def begin(self, task: str = "") -> None:
         # A resumed invocation/new service fix attempt is a fresh run. Nothing
         # persists or replays from disk; prequeued entries survive first begin.
         if self.started:
@@ -94,10 +96,12 @@ class AdvisoryBus:
             self.last_confirmed_request = ""
             self.self_verify.reset()
         self.started, self.closed = True, False
+        self.intent_anchor.reset(task)
         self._event("run_started")
 
-    def steer(self) -> None:
+    def steer(self, task: str = "") -> None:
         self.self_verify.steer()
+        self.intent_anchor.update(task)
         self.last_user_input_turn = self.turn
         for entry in self.entries.values():
             if entry.state in ("pending", "waiting"):
@@ -185,6 +189,7 @@ class AdvisoryBus:
                 "last_user_input_turn": self.last_user_input_turn, "attempts": self.attempt,
                 "closed": self.closed,
                 "self_verify": self.self_verify.report(),
+                "intent_anchor": self.intent_anchor.report(),
                 "counts": dict(Counter(entry.state for entry in self.entries.values())),
                 "status": status,
                 "entries": {key: asdict(value) for key, value in self.entries.items()},

@@ -30,6 +30,7 @@ async def supervised_stream(
             yield event
         return
     bus.settle()
+    bus.intent_anchor.suggest()
     bus.self_verify.suggest(not agent.plan_mode and agent.registry.is_enabled("Bash")
                             and type(agent.registry.get("Bash")) is Bash)
     selected = bus.select()
@@ -74,11 +75,11 @@ async def execute_observed_tool(agent: Agent, tool: Tool, params: BaseModel) -> 
 
 
 @asynccontextmanager
-async def supervision_run(bus: AdvisoryBus) -> AsyncGenerator[None, None]:
+async def supervision_run(bus: AdvisoryBus, task: str = "") -> AsyncGenerator[None, None]:
     if not bus.enabled:
         yield
         return
-    bus.begin()
+    bus.begin(task)
     outcome = "completed"
     try:
         yield

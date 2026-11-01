@@ -110,6 +110,31 @@ async def test_send_message_reentrancy_guard(app_factory):
             await asyncio.gather(t1, return_exceptions=True)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize('notification', [False, True])
+async def test_intent_anchor_tui_uses_user_text_before_reference_expansion(app_factory, tmp_path, monkeypatch, notification):
+    from test_supervision import done, make_agent
+    from test_supervision_detectors import step
+
+    app = app_factory(_SlowClient())
+    monkeypatch.setattr('mewcode.app.expand_at_refs', lambda *_: 'expanded external file contents')
+
+    async def no_recall(_):
+        return ''
+
+    app._prefetch_relevant_memories = no_recall
+    async with app.run_test() as _pilot:
+        agent = make_agent(tmp_path, [step(i) for i in range(20)] + [done()])
+        app.agent = agent
+        app._mcp_init_task = None
+        await asyncio.wait_for(app._send_message('Check @parser.py within scope', is_notification=notification), timeout=20)
+        entries = [e for k, e in agent.supervision.entries.items() if k.startswith('builtin:intent-anchor:')]
+        assert bool(entries) != notification
+        if entries:
+            assert 'Check @parser.py within scope' in entries[0].advisory.text
+            assert 'expanded external' not in entries[0].advisory.text
+
+
 class _SlowAgent:
     work_dir = "."
     plan_mode = False

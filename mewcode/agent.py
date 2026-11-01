@@ -420,8 +420,8 @@ class Agent:
             for n in self.hook_engine.drain_notifications()
         ]
 
-    async def run(self, conversation: ConversationManager) -> AsyncIterator[AgentEvent]:
-        async with supervision_run(self.supervision):
+    async def run(self, conversation: ConversationManager, *, intent: str = "") -> AsyncIterator[AgentEvent]:
+        async with supervision_run(self.supervision, intent):
             async for event in self._run(conversation):
                 yield event
 
@@ -430,7 +430,7 @@ class Agent:
         event_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> str:
         try:
-            async with supervision_run(self.supervision):
+            async with supervision_run(self.supervision, task):
                 return await self._run_to_completion(task, conversation, event_callback)
         finally:
             if self.supervision.enabled and event_callback:

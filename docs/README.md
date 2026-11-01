@@ -1,5 +1,9 @@
 # MewCode 当前状态与文档入口
 
+2026-11-01 最新增量（优先于下列历史状态）：intent anchor 首期已实现，复用默认关闭的监督开关。明确的本次任务目标在累计 20 个响应轮、距用户输入至少 10 轮后，可在下一次原额度请求中提醒；冷却 10 轮，每 run 最多三条。TUI 原始用户文本、headless/service 的显式 task 和 steer 是来源，不从模型摘要或历史猜目标。只确认送达，无采纳/防漂移效果结论；完整契约和本轮验收见[本轮报告](stage-2026-11-01-intent-anchor.md)与[监督指南](../guides/supervision.md)。下列数字保留为各阶段历史结果。
+
+本轮最终全量 **1704 passed / 19 skipped**（259.92 秒），监督与 TUI 专项 **181 passed**（本轮新增 37 项），真实独立 Docker **16 passed**（83.49 秒）。Ruff、win32/linux 目标全包 mypy 各 174 文件、工程守卫、四项回植、锁文件、最终源码构建及组件 86/86 通过；初期测试错误和跳过原因保留在本轮报告。对应提交的远端 SHA/CI 以交付答复核验为准。
+
 2026-11-01 最新增量：self-verify 首期已实现，复用默认关闭的监督开关。成功的内置 Python 文件编辑后，在下一次原额度请求中建议适用验证；只读/纯文档任务不触发，无适用测试时解释证据与限制，不增加请求。尝试、工具成功和覆盖 unknown 分开记录。范围、生命周期与验收见[本轮报告](stage-2026-11-01-self-verify.md)和[监督指南](../guides/supervision.md)。下列数字是历史阶段验收，不替代本轮结果。
 
 本轮最终全量 **1667 passed / 19 skipped**（250.78 秒），监督专项 **141 passed**（88 项新增），独立 Docker **16 passed**（最终源码接线另单独 1 passed）；Ruff、win32/linux 目标 mypy 各 173 文件、工程守卫、四项回植、锁文件、构建及组件脚本 86/86 均通过。跳过原因及初期失败保留在本轮报告；推送与对应远端 CI 以交付答复核验为准，无真实模型效果或生产收益结论。
@@ -21,7 +25,7 @@
 
 ## 先看这三份
 
-1. [最新验收](stage-2026-11-01-self-verify.md)：self-verify 首期；[dead-end 验收](stage-2026-11-01-dead-end.md)、[服务可靠性验收](stage-2026-11-01.md)、[循环预算预警验收](stage-2026-10-31.md)、[上期实施验收](next-stage-2026-10-30.md)与[历史验收](acceptance-2026-10-30.md)保持原数字。
+1. [最新验收](stage-2026-11-01-intent-anchor.md)：intent anchor 首期；[self-verify 验收](stage-2026-11-01-self-verify.md)、[dead-end 验收](stage-2026-11-01-dead-end.md)、[服务可靠性验收](stage-2026-11-01.md)、[循环预算预警验收](stage-2026-10-31.md)、[上期实施验收](next-stage-2026-10-30.md)与[历史验收](acceptance-2026-10-30.md)保持原数字。
 2. [下次工作入口](next-session-prompt.md)：剩余事项及推荐顺序。
 3. [公开架构说明](../guides/architecture.md)、[监督指南](../guides/supervision.md)与[独立审查指南](../guides/independent-review.md)：运行行为、开关、证据和预算。
 
@@ -54,10 +58,11 @@
 | 服务可靠性：通知 / 策略 / 执行记录 | 已实现，交付版本见 Git 记录 | 单进程 SQLite；通知不保证恰好一次，旧事件不回填，最终检查见最新验收 |
 | dead-end 服务反馈 | 已实现，默认关闭 | pytest 契约与结构化证据；仅重新诊断建议，未知/TDD/环境/超时不认定重复失败 |
 | self-verify 首期 | 已实现，默认关闭 | 内置 Python 编辑与受支持 Bash 验证意图；尝试/工具成功/覆盖 unknown 分开，每 run 最多一条建议 |
+| intent anchor 首期 | 已实现，默认关闭 | 显式目标摘录、响应轮/用户静默门槛与冷却，每 run 最多三条；无 expect，不证明遵守目标 |
 | 早期 42 项、R1–R5、R01–R09、N01–N41 | 已完成 | 原始报告用于追溯，不是待修清单 |
 | 阶段 1：最小工程守卫 | 已完成 | 四项定点回植，不代表全部历史缺陷覆盖 |
 | 阶段 2：独立审查首期 | 已完成，默认关闭、仅提供意见 | 动态上下文、多轮分块、自动返工未实现；效果验收有限通过 |
-| 阶段 3：监督内核、循环预算预警与 self-verify | 已实现，默认关闭 | 事件、run/turn、总线、TTL、去重、通道预算、送达/expect；无 token 预警或 intent anchor |
+| 阶段 3：监督内核、循环预算预警、self-verify 与 intent anchor | 已实现，默认关闭 | 事件、run/turn、总线、TTL、去重、通道预算、送达/expect；无 token 预警 |
 
 ## 深入阅读
 
