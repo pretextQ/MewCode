@@ -309,6 +309,11 @@ class MewCodeApp(App):
                 yield Static("未配置 MCP", id="mcp-label", markup=False)
                 yield Static("上下文 —", id="context-label", markup=False)
 
+    def _handle_exception(self, error: Exception) -> None:
+        from mewcode.diagnostics import record_exception
+        record_exception("textual", error)
+        super()._handle_exception(error)
+
     def on_mount(self) -> None:
         self.set_interval(1, self._refresh_details)
         if len(self.providers) == 1:
@@ -1183,6 +1188,8 @@ class MewCodeApp(App):
         except Exception as e:
             if streaming_label is not None:
                 await streaming_label.update(accumulated_text)
+            from mewcode.diagnostics import record_exception
+            record_exception("tui-send", e)
             logger.exception("Unexpected error in _send_message")
             for block in tool_blocks.values():
                 block.set_cancelled("出错")

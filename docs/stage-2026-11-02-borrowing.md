@@ -7,8 +7,8 @@
 | ID | 项目 | 状态 | 最终提交 / 远端 SHA | 对应 CI | 本轮验收 |
 | --- | --- | --- | --- | --- | --- |
 | U1 | 受保护配置/技能禁写 | 已推送，五作业成功 | `c81aeb60fc0d4557c7318b1addc96f50cdd553a8` | [41424253094](https://github.com/pretextQ/MewCode/actions/runs/41424253094) | 全量 1823/24；保护专项 60/1 |
-| U2 | AGENTS.md/目录链/include | 本地完成，待本项 CI | 本项提交 | 待推送后核验 | 全量 1871/25；指令专项 11/1 |
-| U3 | 崩溃日志/保留诊断 | 待实施 | — | — | — |
+| U2 | AGENTS.md/目录链/include | 已推送，五作业成功 | `981619f139a47f619826be6ea88dcda1893ffafd` | [41427433417](https://github.com/pretextQ/MewCode/actions/runs/41427433417) | 全量 1871/25；指令专项 11/1 |
+| U3 | 崩溃日志/保留诊断 | 本地完成，待本项 CI | 本项提交 | 待推送后核验 | 全量 1879/26；诊断专项 10/1 |
 | U4 | 拒绝授权附带反馈 | 待实施 | — | — | — |
 | U5 | 编辑后有界 diff | 待实施 | — | — | — |
 | U6 | MCP eager/dispatch | 待实施 | — | — | — |
@@ -47,3 +47,12 @@
 - 初次专项 1 failed（临时 home 与项目重合造成全局文件优先且去重，旧优先级用例因此失效），已改为默认独立 home；Ruff 的未使用导入问题已修正。工程检查通过（mypy 两平台各 190 文件），全量与远端结果后补。U1 远端 SHA 与本地一致，五作业成功后才开始 U2 产品改动。
 
 - 首次全量 2 failed / 1868 passed / 25 skipped（298.87 秒）：默认隔离 home 位于临时沙箱，旧 `~/.ssh` 越界断言不再成立；创建空 home 目录影响原子写入的目录清理断言。改为不预建 home，越界用例显式使用无凭据的虚拟根目录路径。受影响专项最终 90 passed / 2 skipped；最终全量 `uv run --locked pytest -q --maxfail=10 --timeout=120`，1871 passed / 25 skipped（299.31 秒）。Ruff、双平台 mypy、工程守卫、锁文件、diff 检查均通过，未提高预算。指南：[项目指令](../guides/project-instructions.md)。
+
+## U3 实施记录
+
+- 普通日志追加/轮转，独立 PID+会话诊断组保存 start/exit/异常堆栈。CLI wrapper 保留退出码，接入 service/headless/worker asyncio 异常处理、线程、Textual 及 TUI 消息异常入口；旧处理器继续执行，同异常对象去重。
+- faulthandler 单独稳定描述符，安全 dump_traceback 在轮转前后实测；退出时 fault 尾部约 1 MiB，活动进程内不轮转、硬终止可能留未裁剪文件，详见[诊断指南](../guides/diagnostics.md)。保留最近 20 组并用真实文件锁跳过活动组，清理验证绝对边界，不跟随链接删除。日志全部跟随 MEWCODE_LOG_FILE，目录不可用时降级。常见凭据清理、单条日志上限，不主动记录请求/配置/会话。
+- Windows/Python 3.14.4：诊断/CLI/service/worker/TUI 专项 48 passed / 3 skipped（38.91 秒）；补充真实线程入口后诊断专项 8 passed / 1 skipped（8.62 秒）。两次真实 CLI 启动保留历史，异常 exit 1/7 不变，异常不重复，重定向不产生 worktree 日志，模拟路径不可用不改变 exit；本地未进行 POSIX chmod，留给 Linux CI。线程、Textual、异步入口均实测。
+- 初轮工程检查的 import 顺序、win32 目标 fcntl 类型错误已修正，平台分支改为 sys.platform；Ruff、两平台 mypy 各 192 文件、守卫和锁文件通过。U2 对应五作业成功后才实施 U3，全量及本项 CI 完成后补记。
+
+- 最终本地全量 `uv run --locked pytest -q --maxfail=10 --timeout=120`：1879 passed / 26 skipped（308.73 秒）；收集后补充的并发 PID 与跨范围清理探针已专项实测，最终诊断专项 10 passed / 1 skipped（11.28 秒）。最终绝对日志路径修正亦已专项覆盖；远端 CI 覆盖最终文件集。Ruff、双平台 mypy、工程守卫、锁文件及 staged diff 检查通过，未增加 ceiling。

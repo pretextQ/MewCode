@@ -58,6 +58,8 @@ def _serve_main(argv: list[str]) -> None:
 
 
 async def _serve(config: AppConfig, host: str, port: int, recover: bool = True) -> None:
+    from mewcode.diagnostics import install_loop_handler
+    install_loop_handler()
     from aiohttp import web
 
     from mewcode.service.api import create_app
@@ -175,25 +177,29 @@ def _install_signal_handlers(stop: asyncio.Event) -> None:
 
 
 def main() -> None:
+    from mewcode.diagnostics import initialize, record_exception
+    diagnostics = initialize()
+    status = "normal"
+    try:
+        _main()
+    except SystemExit as error:
+        if error.code not in (None, 0):
+            status = "nonzero"
+            record_exception("cli-exit", error.__context__ or error)
+        raise
+    except BaseException as error:
+        status = "error"
+        record_exception("cli", error)
+        raise
+    finally:
+        diagnostics.finish(status)
+
+
+def _main() -> None:
     if len(sys.argv) > 1 and sys.argv[1] == "--teammate":
         from mewcode.teams.spawn_cli import worker_main
         worker_main(sys.argv[2:])
         return
-    # 调试日志默认写在仓库内的 .mewcode/debug.log；沙箱容器里 agent 的 cwd 是
-    # job 的 worktree，写进去就成了"修复产物"的一部分（真机踩到：PR body 的
-    # 改动统计里多出一个 .mewcode/debug.log）。容器用 MEWCODE_LOG_FILE 重定向。
-    log_file = Path(os.environ.get("MEWCODE_LOG_FILE") or ".mewcode/debug.log")
-    try:
-        log_file.parent.mkdir(parents=True, exist_ok=True)
-    except OSError:
-        log_file = Path(os.devnull)  # 只读文件系统等：宁可没有日志也不能崩
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(name)s %(message)s",
-        filename=str(log_file),
-        filemode="w",
-    )
-
     if len(sys.argv) > 1 and sys.argv[1] == "serve":
         _serve_main(sys.argv[2:])
         return
@@ -290,6 +296,8 @@ def _summary_payload(agent, result_text: str, counters: dict, mcp_tools_used: se
 
 
 async def _run_prompt(config, permission_mode, hook_engine, prompt: str, output_format: str = "text") -> None:
+    from mewcode.diagnostics import install_loop_handler
+    install_loop_handler()
     from mewcode.agent import Agent
     from mewcode.agents.loader import AgentLoader
     from mewcode.agents.task_manager import TaskManager

@@ -85,6 +85,8 @@ def write_state(path: Path, state: str, **extra: Any) -> None:
 
 
 async def worker_run(args: argparse.Namespace) -> None:
+    from mewcode.diagnostics import install_loop_handler
+    install_loop_handler()
     from mewcode.agent import Agent
     from mewcode.agents.tool_filter import apply_plan_readonly_filter, build_teammate_tools
     from mewcode.client import create_client
@@ -213,6 +215,8 @@ def worker_main(argv: list[str]) -> None:
     try:
         asyncio.run(worker_run(args))
     except Exception as exc:
+        from mewcode.diagnostics import record_exception
+        record_exception("worker", exc)
         # SDK/config exceptions can contain credentials; expose only the class.
         print(f"Teammate startup/runtime failed ({type(exc).__name__})", file=sys.stderr)
         raise SystemExit(1) from None
