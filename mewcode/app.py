@@ -843,8 +843,10 @@ class MewCodeApp(App):
         from mewcode.permission_dialog import InlinePermissionWidget
         from mewcode.plan_dialog import InlinePlanWidget
 
-        if isinstance(focused, (InlineAskUserWidget, InlinePlanWidget, InlinePermissionWidget)):
-            return focused
+        while focused is not None:
+            if isinstance(focused, (InlineAskUserWidget, InlinePlanWidget, InlinePermissionWidget)):
+                return focused
+            focused = focused.parent
         return None
 
     def action_cancel(self) -> None:
@@ -1495,7 +1497,7 @@ class MewCodeApp(App):
 
         chat = self.query_one("#chat-area", VerticalScroll)
         self._set_run_status("等待权限")
-        widget = InlinePermissionWidget(request.tool_name, request.description)
+        widget = InlinePermissionWidget(request.tool_name, request.description, request_token=request.future)
         self._pending_perm_request = request
         self._details_open = False
         self._layout_details()
@@ -1512,11 +1514,12 @@ class MewCodeApp(App):
     ) -> None:
         from mewcode.permission_dialog import InlinePermissionWidget
 
-        req = getattr(self, "_pending_perm_request", None)
-        if req is not None:
-            if not req.future.done():
-                req.future.set_result(event.response)
-            self._pending_perm_request = None
+        req = self._pending_perm_request
+        if req is None or event.request_token is not req.future:
+            return
+        if not req.future.done():
+            req.future.set_result(event.reply)
+        self._pending_perm_request = None
         self._set_run_status("等待模型响应" if self._streaming else "待输入")
         # 从聊天区移除权限弹窗组件
         try:

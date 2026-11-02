@@ -7,7 +7,6 @@ import time
 import uuid
 from collections.abc import AsyncIterator, Callable, Coroutine
 from dataclasses import dataclass, field
-from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +35,7 @@ from mewcode.permissions import (
     PermissionChecker,
     PermissionMode,
 )
+from mewcode.permissions.replies import PermissionReply, PermissionResponse, denial_result, normalize_reply
 from mewcode.prompts import build_environment_context, build_plan_mode_reminder, build_system_prompt
 from mewcode.supervision import AdvisoryBus
 from mewcode.supervision.detectors import warn_iteration_budget
@@ -136,17 +136,11 @@ class HookEvent:
     success: bool
 
 
-class PermissionResponse(Enum):
-    ALLOW = "allow"
-    DENY = "deny"
-    ALLOW_ALWAYS = "allow_always"
-
-
 @dataclass
 class PermissionRequest:
     tool_name: str
     description: str
-    future: asyncio.Future[PermissionResponse]
+    future: asyncio.Future[PermissionResponse | PermissionReply]
 
 
 AgentEvent = (
@@ -1110,7 +1104,7 @@ class Agent:
 
             if decision.effect == "ask":
                 loop = asyncio.get_running_loop()
-                future: asyncio.Future[PermissionResponse] = loop.create_future()
+                future: asyncio.Future[PermissionResponse | PermissionReply] = loop.create_future()
                 desc = self._build_permission_description(tc)
                 # 向调用方 yield 权限请求事件，由调用方处理
                 yield PermissionRequest(
@@ -1118,13 +1112,11 @@ class Agent:
                     description=desc,
                     future=future,
                 )
-                response = await future
+                reply = normalize_reply(await future)
+                response = reply.response
 
                 if response == PermissionResponse.DENY:
-                    result = ToolResult(
-                        output="Permission denied: 用户拒绝了此操作",
-                        is_error=True,
-                    )
+                    result = denial_result(reply)
                     elapsed = time.monotonic() - start
                     yield result, elapsed, is_unknown
                     return

@@ -1,19 +1,35 @@
 from __future__ import annotations
 
 from rich.markup import escape
+from textual import events
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
 from textual.message import Message
-from textual.widgets import Static
+from textual.widgets import Input, Static
 
-from mewcode.agent import PermissionResponse
+from mewcode.permissions.replies import (
+    MAX_FEEDBACK_CHARS,
+    PermissionReply,
+    PermissionResponse,
+    clean_feedback,
+    normalize_reply,
+)
 
 _PERM_OPTIONS = [
     ("Yes", PermissionResponse.ALLOW),
     ("Yes, and don't ask again for this pattern", PermissionResponse.ALLOW_ALWAYS),
     ("No", PermissionResponse.DENY),
 ]
+
+
+class FeedbackInput(Input):
+    def _on_paste(self, event: events.Paste) -> None:
+        event.stop()
+        event.prevent_default()
+        start, end = sorted(self.selection)
+        available = MAX_FEEDBACK_CHARS - len(self.value) + end - start
+        self.insert_text_at_cursor(clean_feedback(event.text)[:max(0, available)])
 
 
 class InlinePermissionWidget(Vertical, can_focus=True):
@@ -33,21 +49,28 @@ class InlinePermissionWidget(Vertical, can_focus=True):
     class Responded(Message):
 
 
-        def __init__(self, response: PermissionResponse) -> None:
+        def __init__(self, response: PermissionResponse | PermissionReply, request_token: object | None = None) -> None:
             super().__init__()
-            self.response = response
+            self.reply = normalize_reply(response)
+            self.response = self.reply.response
+            self.request_token = request_token
 
-    def __init__(self, tool_name: str, description: str, **kwargs) -> None:
+    def __init__(self, tool_name: str, description: str, request_token: object | None = None, **kwargs) -> None:
         super().__init__(id="perm-inline", **kwargs)
         self._tool_name = tool_name
         self._description = description
         self._cursor = 0
+        self._responded = False
+        self._request_token = request_token
 
     def compose(self) -> ComposeResult:
         yield Static(self._build_content(), id="perm-content")
+        yield FeedbackInput(placeholder="可选拒绝反馈 · Enter 确认 · Esc 无反馈拒绝",
+                    max_length=MAX_FEEDBACK_CHARS, id="perm-feedback")
 
 
     def on_mount(self) -> None:
+        self.query_one("#perm-feedback", Input).display = False
         self.focus()
 
     def _build_content(self) -> str:
@@ -69,6 +92,13 @@ class InlinePermissionWidget(Vertical, can_focus=True):
     def _refresh(self) -> None:
         content = self.query_one("#perm-content", Static)
         content.update(self._build_content())
+        feedback = self.query_one("#perm-feedback", Input)
+        feedback.display = self._cursor == 2
+        if self._cursor == 2:
+            feedback.focus()
+        else:
+            feedback.value = ""
+            self.focus()
         self.call_after_refresh(self.scroll_visible, animate=False, top=False)
 
     def action_cursor_up(self) -> None:
@@ -83,8 +113,19 @@ class InlinePermissionWidget(Vertical, can_focus=True):
 
     def action_select(self) -> None:
         _, response = _PERM_OPTIONS[self._cursor]
-        self.post_message(self.Responded(response))
+        feedback = self.query_one("#perm-feedback", Input).value if response == PermissionResponse.DENY else ""
+        self._respond(PermissionReply(response, feedback))
 
 
     def action_deny(self) -> None:
-        self.post_message(self.Responded(PermissionResponse.DENY))
+        self._respond(PermissionReply(PermissionResponse.DENY))
+
+    def _respond(self, reply: PermissionReply) -> None:
+        if self._responded:
+            return
+        self._responded = True
+        self.post_message(self.Responded(reply, self._request_token))
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        self.action_select()

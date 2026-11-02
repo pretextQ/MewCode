@@ -2,17 +2,17 @@
 
 日期：2026-11-02。执行规范与完整验收：[11 号开发计划](evolution/11-upstream-borrowing-plan.md)。原始能力比较：[对照报告](review/review-2026-11-02-current-borrowing.md)。
 
-用户已授权新会话按 U1 → U2 → U3 → U4 → U5 → U6 → U7 连续实施，每项完成即单独提交推送，确认对应 CI 成功后再开始下一项。实施中；每项结果与边界见下方记录。
+用户已授权新会话按 U1 → U2 → U3 → U4 → U5 → U6 → U7 连续实施，每项完成即单独提交推送，确认对应 CI 成功后再开始下一项。用户后续要求 U4 完成后暂停（额度不足）；U5–U7 等待明确恢复。每项结果与边界见下方记录。
 
 | ID | 项目 | 状态 | 最终提交 / 远端 SHA | 对应 CI | 本轮验收 |
 | --- | --- | --- | --- | --- | --- |
 | U1 | 受保护配置/技能禁写 | 已推送，五作业成功 | `c81aeb60fc0d4557c7318b1addc96f50cdd553a8` | [41424253094](https://github.com/pretextQ/MewCode/actions/runs/41424253094) | 全量 1823/24；保护专项 60/1 |
 | U2 | AGENTS.md/目录链/include | 已推送，五作业成功 | `981619f139a47f619826be6ea88dcda1893ffafd` | [41427433417](https://github.com/pretextQ/MewCode/actions/runs/41427433417) | 全量 1871/25；指令专项 11/1 |
-| U3 | 崩溃日志/保留诊断 | 本地完成，待本项 CI | 本项提交 | 待推送后核验 | 全量 1879/26；诊断专项 10/1 |
-| U4 | 拒绝授权附带反馈 | 待实施 | — | — | — |
-| U5 | 编辑后有界 diff | 待实施 | — | — | — |
-| U6 | MCP eager/dispatch | 待实施 | — | — | — |
-| U7 | 只读 Shell 并发/退出码 | 待实施 | — | — | — |
+| U3 | 崩溃日志/保留诊断 | 已推送，五作业成功 | `a51c67aaa98eeef75be47402d178a697495e67e7` | [41430601257](https://github.com/pretextQ/MewCode/actions/runs/41430601257) | 全量 1879/26；最终诊断专项 11/1 |
+| U4 | 拒绝授权附带反馈 | 本地完成，待本项 CI；交付后暂停 | 本项提交 | 待推送后核验 | 全量 1900/26；反馈专项 18 |
+| U5 | 编辑后有界 diff | 未实施，按用户要求暂停 | — | — | — |
+| U6 | MCP eager/dispatch | 未实施，按用户要求暂停 | — | — | — |
+| U7 | 只读 Shell 并发/退出码 | 未实施，按用户要求暂停 | — | — | — |
 
 ## 每项追加记录格式
 
@@ -58,3 +58,15 @@
 - 最终本地全量 `uv run --locked pytest -q --maxfail=10 --timeout=120`：1879 passed / 26 skipped（308.73 秒）；收集后补充的并发 PID 与跨范围清理探针已专项实测，最终诊断专项 10 passed / 1 skipped（11.28 秒）。最终绝对日志路径修正亦已专项覆盖；远端 CI 覆盖最终文件集。Ruff、双平台 mypy、工程守卫、锁文件及 staged diff 检查通过，未增加 ceiling。
 
 - U3 收尾补充：主提交 `5378ced` 推送后审计发现 `_send_message` 外层异常仅显示错误，已增加同一诊断入口并以真实离线 TUI 验证。最终专项 11 passed / 1 skipped（18.00 秒）；两行诊断接线未改变控制流，复用上次全量并运行受影响端到端与工程检查，远端最终 SHA CI 覆盖累积源码。不拿主提交的 CI 代替补充提交。
+
+## U4 实施记录
+
+- PermissionReply 与共享规范化兼容旧 enum；DENY 才保留反馈，截断 1000 Unicode 字符、清理 ANSI/控制/方向字符，未知回复 fail closed。实际 Agent 拒绝结果为 error，反馈只进入对应 tool_result，无新增用户轮次/模型请求；非交互不发明反馈。
+- No 选项显示 Input，输入/粘贴可用；超长粘贴按剩余长度截取，切换选项丢草稿。Escape 无反馈拒绝，Ctrl+C 复用取消；单次回复守卫、future.done 检查及原请求 future 身份绑定共同覆盖重复/迟到事件，输入恢复。App 优先级 Escape 查找聚焦输入的权限祖先，避免误取消整个 run。TUI 详情原有 markup=False，反馈按纯文本显示。
+- Windows/Python 3.14.4：权限/配对/TUI 专项 124 passed（12.25 秒）；最终反馈专项 13 passed（6.88 秒），覆盖实际 Agent 拒绝保持文件不变，三客户端下一次 SDK payload 的 ID/反馈、并行 ask 不串草稿、结构化 ALLOW_ALWAYS 的真实持久化及无 UI 拒绝。安全 CI 加入新反馈专项。
+- 首轮反馈专项 1 failed（Textual 超长粘贴被整段拒绝），已加有界 paste 处理再通过。早期现有 Grep 2ms 心跳断言出现一次 0 beats，未改动 Grep；同一完整专项有界重跑后 124 passed。初轮 Ruff 格式问题已修正。Ruff、双平台 mypy（193 文件）、工程守卫与锁文件通过，全量/本项 CI 待补。
+- 用户在 U4 实施期间明确要求“u4完成之后，先暂停，我的额度不够了”。完成 U4 验证、提交推送及对应 CI 后暂停，U5–U7 不开始；恢复需用户后续指示。U3 最终补充提交五作业成功后才开始 U4。
+
+- U4 取消竞态与窄屏补充：最终反馈专项 18 passed（8.31 秒），60×18/80×24 输入均可见；旧已取消授权框的迟到反馈不能回答下一请求。请求 token 初次 mypy 将 Any.future 窄化为 object，改用已有带类型 pending 字段后双平台均通过。最终 Ruff、双平台 mypy、工程守卫、锁文件通过。
+
+- U4 首次全量 1 failed / 1894 passed / 26 skipped（322.68 秒）：旧 TUI details 用例直接断言 enum，现已通过共享 normalize_reply 断言新协议；相应 details+反馈专项 38 passed（16.33 秒）。最终全量 `uv run --locked pytest -q --maxfail=10 --timeout=120`：1900 passed / 26 skipped（322.56 秒），覆盖最终请求身份防护和窄屏测试。`uv build --no-sources` 成功，wheel 检查包含 U1–U4 的全部 5 个新模块。Ruff、双平台 mypy（193 文件）、守卫、锁文件、diff 检查通过；未提高 ceiling，无真实模型调用。U4 push CI 成功后记录最终 SHA 并停止。

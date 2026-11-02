@@ -19,6 +19,7 @@ from mewcode.agent import (
 from mewcode.app import ChatInput, ToolCallBlock
 from mewcode.commands.completion import CompletionPopup
 from mewcode.conversation import Message, ToolResultBlock, ToolUseBlock
+from mewcode.permissions.replies import normalize_reply
 from mewcode.tui.messages import ChatScroll, assistant_row
 from tests.helpers.tui_offline import OfflineApp
 
@@ -186,7 +187,7 @@ async def test_permission_escape_precedes_cancel_and_never_executes(tmp_path):
 
         async def run(_):
             yield PermissionRequest("Bash", "echo approval required", future)
-            if await future != PermissionResponse.DENY:
+            if normalize_reply(await future).response != PermissionResponse.DENY:
                 executed.append(True)
             yield LoopComplete(1)
 
@@ -202,7 +203,7 @@ async def test_permission_escape_precedes_cancel_and_never_executes(tmp_path):
         assert "等待权限" in status(app)
         await pilot.press("escape")
         await task
-        assert future.result() == PermissionResponse.DENY
+        assert normalize_reply(future.result()).response == PermissionResponse.DENY
         assert not executed and status(app) == "本次运行结束"
         assert app.focused is app.query_one(ChatInput)
 

@@ -10,6 +10,7 @@ from textual.widgets import Static, TabbedContent
 
 from mewcode.agent import LoopComplete, PermissionRequest, PermissionResponse, ToolResultEvent, ToolUseEvent
 from mewcode.app import ChatInput
+from mewcode.permissions.replies import normalize_reply
 from mewcode.tui.details import DetailsPanel, ExecutionHistory
 from mewcode.tui.git import branch_name, read_git, safe_diff_path, workspace_changes
 from tests.helpers.tui_offline import OfflineApp
@@ -219,7 +220,7 @@ async def test_permission_closes_narrow_details_and_f2_does_not_hide_it(tmp_path
         await pilot.press("f2")
         assert app.focused.id == "perm-inline"
         await pilot.press("escape")
-        assert future.result() == PermissionResponse.DENY
+        assert normalize_reply(future.result()).response == PermissionResponse.DENY
 
 
 @pytest.mark.asyncio

@@ -82,6 +82,7 @@ CompletionPopup { max-height: 4; background: $surface; color: $text; }
 #perm-inline, #askuser-inline, #plan-inline, #resume-inline {
     height: auto; border-left: solid $warning; padding: 0 1;
 }
+#perm-feedback { height: 3; margin: 0; background: $surface; }
 #perm-content, #askuser-content, #plan-content, #resume-content { height: auto; }
 PlanApprovalDialog, AskUserDialog { align: center middle; }
 #plan-dialog, #askuser-dialog {
