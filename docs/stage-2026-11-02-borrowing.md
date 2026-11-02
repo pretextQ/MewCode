@@ -56,3 +56,5 @@
 - 初轮工程检查的 import 顺序、win32 目标 fcntl 类型错误已修正，平台分支改为 sys.platform；Ruff、两平台 mypy 各 192 文件、守卫和锁文件通过。U2 对应五作业成功后才实施 U3，全量及本项 CI 完成后补记。
 
 - 最终本地全量 `uv run --locked pytest -q --maxfail=10 --timeout=120`：1879 passed / 26 skipped（308.73 秒）；收集后补充的并发 PID 与跨范围清理探针已专项实测，最终诊断专项 10 passed / 1 skipped（11.28 秒）。最终绝对日志路径修正亦已专项覆盖；远端 CI 覆盖最终文件集。Ruff、双平台 mypy、工程守卫、锁文件及 staged diff 检查通过，未增加 ceiling。
+
+- U3 收尾补充：主提交 `5378ced` 推送后审计发现 `_send_message` 外层异常仅显示错误，已增加同一诊断入口并以真实离线 TUI 验证。最终专项 11 passed / 1 skipped（18.00 秒）；两行诊断接线未改变控制流，复用上次全量并运行受影响端到端与工程检查，远端最终 SHA CI 覆盖累积源码。不拿主提交的 CI 代替补充提交。

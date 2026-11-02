@@ -207,3 +207,22 @@ def test_retention_never_follows_directory_links(tmp_path, monkeypatch):
     monkeypatch.setattr(storage, 'KEEP_SESSIONS', 0)
     storage.prune(root)
     assert (outside / 'keep').read_text() == 'keep'
+
+
+def test_real_outer_tui_send_failure_is_retained(tmp_path):
+    result = process(tmp_path, '''import asyncio
+from mewcode.diagnostics import initialize
+from tests.helpers.tui_offline import OfflineApp
+session=initialize()
+async def failure(*args):
+    raise RuntimeError('offline outer send probe')
+async def probe():
+    app=OfflineApp('.')
+    async with app.run_test():
+        app._run_message=failure
+        await app._send_message('go')
+asyncio.run(probe())
+session.finish()
+''')
+    assert result.returncode == 0, result.stderr
+    assert 'exception context=tui-run' in logs(tmp_path) and 'offline outer send probe' in logs(tmp_path)

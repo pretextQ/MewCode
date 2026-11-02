@@ -942,6 +942,8 @@ class MewCodeApp(App):
         except asyncio.CancelledError:
             self._set_run_status("已停止")
         except Exception as exc:
+            from mewcode.diagnostics import record_exception
+            record_exception("tui-run", exc)
             self._show_error(str(exc))
             self._set_run_status("出错")
         finally:
