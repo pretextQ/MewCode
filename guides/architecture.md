@@ -3,6 +3,10 @@
 交互式 CLI/TUI 与告警服务共享 `mewcode/agent.py` 执行内核。内核调用提供商适配器，
 通过权限检查后调度工具；无头调用与交互调用都保留 thinking 块，并在上下文溢出时压缩重试一次。
 
+项目规则由[共享指令加载器](project-instructions.md)提供，覆盖全局、仓库根至运行目录及本地覆盖；独立代理加载自己的运行目录，fork 继承已有上下文。文件写门禁包含[配置/技能写保护](permission-semantics.md)，拒绝授权可附反馈进入对应 tool_result，不额外创建模型请求。
+
+[进程诊断](diagnostics.md)在 CLI/service/worker、线程、异步及 Textual 异常入口保留堆栈和退出线索，普通日志追加轮转；独立 faulthandler 文件跟随 `MEWCODE_LOG_FILE`，不随普通日志轮转失去描述符。U1–U4 的精确边界见[Agent 契约](agent-runtime.md)。
+
 服务由 `service/runtime.py` 组装 JobStore、WorkerPool 与 ExecutionChain。
 HTTP 接入先按仓库策略判定，再在 SQLite 事务内去重建单，随后提交有界消费者队列。
 执行链依次完成排查、worktree 创建、基线测试、修复验证、PR 发布和 CI 门禁。
@@ -29,4 +33,4 @@ Compose 文件由宿主验证后冻结，只允许受限选项，禁止 YAML 别
 验证边界：默认测试使用模型和外部服务替身；真实 Docker、模型、GitHub 与 tmux 交互验证需要各自环境。
 
 
-可选[监督内核](supervision.md)由每个 Agent 持有，默认关闭；事件与提醒总线独立于用户 hooks。交互/headless 请求在裁剪之后注入请求副本，首响应确认送达，再用显式行为 expect 核销。服务/容器沿用同一开关及 JSON 报告。首期没有 detector，不增加自动外部动作。
+可选[监督内核](supervision.md)由每个 Agent 持有，默认关闭；事件与提醒总线独立于用户 hooks。交互/headless 请求在裁剪之后注入请求副本，首响应确认送达，再用显式行为 expect 核销。服务/容器沿用同一开关及 JSON 报告。detector 的当前支持范围见监督指南；不增加自动外部动作。

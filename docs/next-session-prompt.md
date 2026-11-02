@@ -1,8 +1,32 @@
-2026-11-02 最新用户指令：U4 完成后先暂停，额度不足。U1 `c81aeb6` / CI 41424253094、U2 `981619f` / CI 41427433417、U3 最终 `a51c67a` / CI 41430601257 均已推送且五作业成功。U4 拒绝反馈本地全量 1900 passed / 26 skipped；主提交 `d942389` 首次 CI 未通过，已追加权限框布局/测试就绪时序修正，Windows 3.11/3.13 与隔离 Linux 专项通过。核验修正提交自己的五作业 CI 后本轮停止，不用旧 SHA 绿灯替代。U5–U7 尚未实施，不自动继续；必须等待用户明确恢复。最终 SHA/CI 记录见[逐项台账](stage-2026-11-02-borrowing.md)及实时 Git/Actions。
-
-本地 `.mewcode/config.yaml` 曾被 U1 测试隔离错误覆盖，用户没有已知备份，无法原样恢复；不得记为已恢复，不猜测凭据。新验证均使用临时环境，`docs/README.md` 原有一条旧本地审查入口改动始终保留未提交。后续不启动真实 TUI、不调用真实模型，除非另获明确范围。
-
 # 下次工作入口
+
+## 当前状态：U4 已交付，开发暂停
+
+用户最新开发指令是 **U4 完成后暂停，额度不足**。本次文档更新不恢复产品开发；U5–U7 未开始，必须等待用户明确要求继续。
+
+| 单元 | 最终产品提交 | 对应 push CI |
+| --- | --- | --- |
+| U1 写保护 | `c81aeb60fc0d4557c7318b1addc96f50cdd553a8` | [41424253094](https://github.com/pretextQ/MewCode/actions/runs/41424253094) |
+| U2 项目指令 | `981619f139a47f619826be6ea88dcda1893ffafd` | [41427433417](https://github.com/pretextQ/MewCode/actions/runs/41427433417) |
+| U3 崩溃诊断 | `a51c67aaa98eeef75be47402d178a697495e67e7` | [41430601257](https://github.com/pretextQ/MewCode/actions/runs/41430601257) |
+| U4 拒绝反馈 | `f2ac5e192fe72dc9dcccda4d451f618743b2f9d5` | [41456722525](https://github.com/pretextQ/MewCode/actions/runs/41456722525) |
+
+上述提交均已正常推送，各自 Windows/Linux × Python 3.11/3.13 和 security 五作业成功。U4 的早期红灯 `d942389`、`a2238ba` 已由最终提交修正；不要重复把它们的待验状态当作当前状态，也不要用别的 SHA 的绿灯代替核验。
+
+详情：[交付台账](stage-2026-11-02-borrowing.md)、[11 号计划](evolution/11-upstream-borrowing-plan.md)、[Agent 契约](../guides/agent-runtime.md)。本地 Windows 主全量 1900 passed / 26 skipped；最终修正的专项和完整 CI 见台账。隔离 Linux 3.11 快照一次全量因缺 .git 有一个失败，补临时 Git 后该用例通过，不能把那次命令写成单次全绿。
+
+## 后续接手约束
+
+- 用户明确恢复后才从 U5 编辑后有界 diff 开始，随后 U6 MCP eager/dispatch、U7 按参数判断只读 Shell 并发；本次不新增任何一项实现。
+- 启动前重新核对 Git、暂存区、远端和适用指令；保留 `docs/README.md` 原有的旧本地审查入口。纯文档更新不覆盖产品提交 SHA 或历史验证数字。
+- 本地 `.mewcode/config.yaml` 曾被 U1 的测试隔离错误覆盖，用户没有已知备份，仍未原样恢复；不得记为已恢复，不猜测凭据，不读取真实配置/记忆。
+- 临时目录及 Docker 测试缓存卷因自动审批拒绝清理而保留，具体名称和原因见台账。本次不重试清理，不触碰这些产物。
+- 没有新的真实模型预算，不启动真实用户 TUI。仅用临时环境、脚本 LLM、SDK 替身和本地 MCP 验证；Windows/Linux 是目标，黑色 TUI 与既有 A1–A5、记忆/配对/进程回收/worktree 契约保持。
+- 实窗人工终端验收与真实模型效果仍按历史边界保留；native/tool_reference、自定义命令、技能安装器、后台记忆整理、浏览器 UI 不扩展。
+
+## 历史交接（不覆盖上方暂停指令）
+
+以下原授权、旧阶段数字及当时状态保留用于追溯；当前状态以上方交付表和最新台账为准。
 
 2026-11-02 最新授权：用户要求为参考库借鉴点编写开发文档，并开启新会话按文档逐项实施，每完成一项提交推送。执行[11 号计划](evolution/11-upstream-borrowing-plan.md)，顺序 U1 写保护 → U2 指令加载 → U3 崩溃诊断 → U4 拒绝反馈 → U5 编辑 diff → U6 MCP eager/dispatch → U7 只读 Shell 并发；每项按[台账](stage-2026-11-02-borrowing.md)记录验收、SHA/远端及五作业 CI，上一项 CI 通过再继续。新会话无需重新逐项征求授权，先读计划并核对实时 Git；历史 A1–A5 不重做。保留 docs/README.md 原有本地审查入口改动，黑色 TUI、Windows/Linux 目标、无真实模型预算及后续范围边界详见计划。下文“不扩展 B/C/V”是旧 A1–A5 阶段边界，本轮授权以上述 U1–U7 为准。
 

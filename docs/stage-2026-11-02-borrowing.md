@@ -9,7 +9,7 @@
 | U1 | 受保护配置/技能禁写 | 已推送，五作业成功 | `c81aeb60fc0d4557c7318b1addc96f50cdd553a8` | [41424253094](https://github.com/pretextQ/MewCode/actions/runs/41424253094) | 全量 1823/24；保护专项 60/1 |
 | U2 | AGENTS.md/目录链/include | 已推送，五作业成功 | `981619f139a47f619826be6ea88dcda1893ffafd` | [41427433417](https://github.com/pretextQ/MewCode/actions/runs/41427433417) | 全量 1871/25；指令专项 11/1 |
 | U3 | 崩溃日志/保留诊断 | 已推送，五作业成功 | `a51c67aaa98eeef75be47402d178a697495e67e7` | [41430601257](https://github.com/pretextQ/MewCode/actions/runs/41430601257) | 全量 1879/26；最终诊断专项 11/1 |
-| U4 | 拒绝授权附带反馈 | 本地完成，待本项 CI；交付后暂停 | 本项提交 | 待推送后核验 | 全量 1900/26；反馈专项 18 |
+| U4 | 拒绝授权附带反馈 | 已推送，五作业成功；本轮已暂停 | `f2ac5e192fe72dc9dcccda4d451f618743b2f9d5` | [41456722525](https://github.com/pretextQ/MewCode/actions/runs/41456722525) | 全量 1900/26；反馈专项 18；三平台补充专项通过 |
 | U5 | 编辑后有界 diff | 未实施，按用户要求暂停 | — | — | — |
 | U6 | MCP eager/dispatch | 未实施，按用户要求暂停 | — | — | — |
 | U7 | 只读 Shell 并发/退出码 | 未实施，按用户要求暂停 | — | — | — |
@@ -28,13 +28,15 @@
 - `docs/README.md` 原有一条本地旧审查入口改动继续留工作区，不夹带。
 - 自定义命令、技能安装器、后台记忆整理、浏览器 UI 为后续方向。
 
+以下实施记录按发生顺序保留；中途失败、补充验证与修正不能替代表首最终 SHA/CI。当前已交付 U1–U4，并在 U4 后暂停。
+
 ## U1 实施记录
 
 - 在共享 PermissionChecker 的文件路径门禁接入写保护；先于显式 allow、PLAN 写例外及模式放行。项目/全局三种配置及 skills 目录均保护，读取与专用规则持久化继续工作。路径同时比较名称和真实目标；Windows 常见别名归一化，链接解析失败拒绝。
 - 技能管理审计：现有命令只列出、查看、重新加载并注册技能，没有安装器写路径，本轮不引入绕过开关。普通源文件、plans/memory/sessions 为正对照。安全作业加入新的保护测试文件。
 - 专项（Windows/Python 3.14.4）：`uv run --locked pytest tests/test_protected_paths.py tests/test_permission_security.py -q --maxfail=3 --timeout=120` 初次修正后 109 passed / 1 skipped；补充 junction 与其余策略目标后保护专项 60 passed / 1 skipped。Windows junction 实测成功；本机 symlink 缺权限跳过，Linux 真实符号链接由对应 CI 覆盖。
 - 失败事实：首轮红灯用例未绑定工具注册表，误将当前仓库 `.mewcode/config.yaml` 覆盖为测试文本并创建 `source.py`。已修正全部新测试为临时目录绑定并删除所创建的 source.py；配置未找到可确认备份，用户回复没有已知备份，无法原样恢复，未用示例配置替代。该事件不混作已满足“未读取/修改真实配置”约束。早期另一轮 CUSTOM 读权限等待已终止，新增明确读 allow 后重新通过。
-- Ruff、win32/linux 目标 mypy（189 文件）、工程守卫、`uv lock --check` 通过；源码预算未提升。全量及提交 CI 结果在完成后补记。
+- Ruff、win32/linux 目标 mypy（189 文件）、工程守卫、`uv lock --check` 通过；源码预算未提升。全量结果见下段，对应提交与成功 CI 见表首。
 
 - 本地全量：`uv run --locked pytest -q --maxfail=10 --timeout=120`，1823 passed / 24 skipped，296.56 秒；该次收集后补充的 37 个边界用例已单独运行，保护专项最终 60 passed / 1 skipped（4.92 秒）。未改变产品实现；本项远端 CI 将覆盖最终测试集。规划提交 `6a6b25534072859c86de446a21a2b5a435685d7d` 的 push CI [41422081170](https://github.com/pretextQ/MewCode/actions/runs/41422081170) 五作业已核实成功。
 
@@ -44,7 +46,7 @@
 - TUI、headless、service 原有入口复用共享 loader；独立子代理/隔离 worktree 新增调用，fork 保留上下文继承。pane bootstrap 标记已加载；旧 payload 在 worker 本地加载，避免双重注入。TUI 恢复 worktree 后按恢复目录重新取启动指令。
 - 新增测试默认临时 home（与项目目录分离），HOME/USERPROFILE 同步传给子进程；显式 isolated_home 仍兼容原契约。该层不替代工具注册表的 work_dir 绑定。
 - Windows/Python 3.14.4：指令/记忆专项 59 passed / 1 skipped；实际入口+真实 worker SDK 子进程 22 passed / 3 skipped；补充恢复目录与目录预算后指令专项 11 passed / 1 skipped。真实 TUI/headless/service/子代理脚本 LLM 请求、worker 本地 HTTP SDK 载荷均看到指令且后续轮次不重复。symlink 本机跳过，junction 越界实测拦截；tmux 集成未本地执行。
-- 初次专项 1 failed（临时 home 与项目重合造成全局文件优先且去重，旧优先级用例因此失效），已改为默认独立 home；Ruff 的未使用导入问题已修正。工程检查通过（mypy 两平台各 190 文件），全量与远端结果后补。U1 远端 SHA 与本地一致，五作业成功后才开始 U2 产品改动。
+- 初次专项 1 failed（临时 home 与项目重合造成全局文件优先且去重，旧优先级用例因此失效），已改为默认独立 home；Ruff 的未使用导入问题已修正。工程检查通过（mypy 两平台各 190 文件），全量与远端最终结果已记在下段和表首。U1 远端 SHA 与本地一致，五作业成功后才开始 U2 产品改动。
 
 - 首次全量 2 failed / 1868 passed / 25 skipped（298.87 秒）：默认隔离 home 位于临时沙箱，旧 `~/.ssh` 越界断言不再成立；创建空 home 目录影响原子写入的目录清理断言。改为不预建 home，越界用例显式使用无凭据的虚拟根目录路径。受影响专项最终 90 passed / 2 skipped；最终全量 `uv run --locked pytest -q --maxfail=10 --timeout=120`，1871 passed / 25 skipped（299.31 秒）。Ruff、双平台 mypy、工程守卫、锁文件、diff 检查均通过，未提高预算。指南：[项目指令](../guides/project-instructions.md)。
 
@@ -53,7 +55,7 @@
 - 普通日志追加/轮转，独立 PID+会话诊断组保存 start/exit/异常堆栈。CLI wrapper 保留退出码，接入 service/headless/worker asyncio 异常处理、线程、Textual 及 TUI 消息异常入口；旧处理器继续执行，同异常对象去重。
 - faulthandler 单独稳定描述符，安全 dump_traceback 在轮转前后实测；退出时 fault 尾部约 1 MiB，活动进程内不轮转、硬终止可能留未裁剪文件，详见[诊断指南](../guides/diagnostics.md)。保留最近 20 组并用真实文件锁跳过活动组，清理验证绝对边界，不跟随链接删除。日志全部跟随 MEWCODE_LOG_FILE，目录不可用时降级。常见凭据清理、单条日志上限，不主动记录请求/配置/会话。
 - Windows/Python 3.14.4：诊断/CLI/service/worker/TUI 专项 48 passed / 3 skipped（38.91 秒）；补充真实线程入口后诊断专项 8 passed / 1 skipped（8.62 秒）。两次真实 CLI 启动保留历史，异常 exit 1/7 不变，异常不重复，重定向不产生 worktree 日志，模拟路径不可用不改变 exit；本地未进行 POSIX chmod，留给 Linux CI。线程、Textual、异步入口均实测。
-- 初轮工程检查的 import 顺序、win32 目标 fcntl 类型错误已修正，平台分支改为 sys.platform；Ruff、两平台 mypy 各 192 文件、守卫和锁文件通过。U2 对应五作业成功后才实施 U3，全量及本项 CI 完成后补记。
+- 初轮工程检查的 import 顺序、win32 目标 fcntl 类型错误已修正，平台分支改为 sys.platform；Ruff、两平台 mypy 各 192 文件、守卫和锁文件通过。U2 对应五作业成功后才实施 U3，全量结果见下段，本项最终修正与成功 CI 见表首及最终交付节。
 
 - 最终本地全量 `uv run --locked pytest -q --maxfail=10 --timeout=120`：1879 passed / 26 skipped（308.73 秒）；收集后补充的并发 PID 与跨范围清理探针已专项实测，最终诊断专项 10 passed / 1 skipped（11.28 秒）。最终绝对日志路径修正亦已专项覆盖；远端 CI 覆盖最终文件集。Ruff、双平台 mypy、工程守卫、锁文件及 staged diff 检查通过，未增加 ceiling。
 
@@ -63,16 +65,28 @@
 
 - PermissionReply 与共享规范化兼容旧 enum；DENY 才保留反馈，截断 1000 Unicode 字符、清理 ANSI/控制/方向字符，未知回复 fail closed。实际 Agent 拒绝结果为 error，反馈只进入对应 tool_result，无新增用户轮次/模型请求；非交互不发明反馈。
 - No 选项显示 Input，输入/粘贴可用；超长粘贴按剩余长度截取，切换选项丢草稿。Escape 无反馈拒绝，Ctrl+C 复用取消；单次回复守卫、future.done 检查及原请求 future 身份绑定共同覆盖重复/迟到事件，输入恢复。App 优先级 Escape 查找聚焦输入的权限祖先，避免误取消整个 run。TUI 详情原有 markup=False，反馈按纯文本显示。
-- Windows/Python 3.14.4：权限/配对/TUI 专项 124 passed（12.25 秒）；最终反馈专项 13 passed（6.88 秒），覆盖实际 Agent 拒绝保持文件不变，三客户端下一次 SDK payload 的 ID/反馈、并行 ask 不串草稿、结构化 ALLOW_ALWAYS 的真实持久化及无 UI 拒绝。安全 CI 加入新反馈专项。
-- 首轮反馈专项 1 failed（Textual 超长粘贴被整段拒绝），已加有界 paste 处理再通过。早期现有 Grep 2ms 心跳断言出现一次 0 beats，未改动 Grep；同一完整专项有界重跑后 124 passed。初轮 Ruff 格式问题已修正。Ruff、双平台 mypy（193 文件）、工程守卫与锁文件通过，全量/本项 CI 待补。
+- Windows/Python 3.14.4：权限/配对/TUI 专项 124 passed（12.25 秒）；该阶段反馈专项 13 passed（6.88 秒），覆盖实际 Agent 拒绝保持文件不变，三客户端下一次 SDK payload 的 ID/反馈、并行 ask 不串草稿、结构化 ALLOW_ALWAYS 的真实持久化及无 UI 拒绝。安全 CI 加入新反馈专项。
+- 首轮反馈专项 1 failed（Textual 超长粘贴被整段拒绝），已加有界 paste 处理再通过。早期现有 Grep 2ms 心跳断言出现一次 0 beats，未改动 Grep；同一完整专项有界重跑后 124 passed。初轮 Ruff 格式问题已修正。Ruff、双平台 mypy（193 文件）、工程守卫与锁文件通过，全量及本项最终 CI 见下方记录与表首。
 - 用户在 U4 实施期间明确要求“u4完成之后，先暂停，我的额度不够了”。完成 U4 验证、提交推送及对应 CI 后暂停，U5–U7 不开始；恢复需用户后续指示。U3 最终补充提交五作业成功后才开始 U4。
 
 - U4 取消竞态与窄屏补充：最终反馈专项 18 passed（8.31 秒），60×18/80×24 输入均可见；旧已取消授权框的迟到反馈不能回答下一请求。请求 token 初次 mypy 将 Any.future 窄化为 object，改用已有带类型 pending 字段后双平台均通过。最终 Ruff、双平台 mypy、工程守卫、锁文件通过。
 
-- U4 首次全量 1 failed / 1894 passed / 26 skipped（322.68 秒）：旧 TUI details 用例直接断言 enum，现已通过共享 normalize_reply 断言新协议；相应 details+反馈专项 38 passed（16.33 秒）。最终全量 `uv run --locked pytest -q --maxfail=10 --timeout=120`：1900 passed / 26 skipped（322.56 秒），覆盖最终请求身份防护和窄屏测试。`uv build --no-sources` 成功，wheel 检查包含 U1–U4 的全部 5 个新模块。Ruff、双平台 mypy（193 文件）、守卫、锁文件、diff 检查通过；未提高 ceiling，无真实模型调用。U4 push CI 成功后记录最终 SHA 并停止。
+- U4 首次全量 1 failed / 1894 passed / 26 skipped（322.68 秒）：旧 TUI details 用例直接断言 enum，现已通过共享 normalize_reply 断言新协议；相应 details+反馈专项 38 passed（16.33 秒）。最终全量 `uv run --locked pytest -q --maxfail=10 --timeout=120`：1900 passed / 26 skipped（322.56 秒），覆盖最终请求身份防护和窄屏测试。`uv build --no-sources` 成功，wheel 检查包含 U1–U4 的全部 5 个新模块。Ruff、双平台 mypy（193 文件）、守卫、锁文件、diff 检查通过；未提高 ceiling，无真实模型调用。该轮之后的 push CI 失败与修正见下文；最终 SHA 和成功 CI 见表首及最终交付节。
 
 - U4 首次 push `d9423899f39193a8fd11d90fcb18b5076e01d19e` / CI [41433858498](https://github.com/pretextQ/MewCode/actions/runs/41433858498) 未通过：security 与 Linux 3.13 成功；Linux 3.11 出现权限框窄屏滚动及 orphan-bash 回收失败，Windows 3.11/3.13 出现反馈框挂载/聚焦时序失败。没有把其中绿灯当整体成功。反馈栏改为首次布局前隐藏，权限框滚动延至布局刷新后；离线交互测试等待实际焦点后发键，失败时也先取消并等待拥有的运行任务，避免 teardown 异常串扰。
 - 修正验收：Windows 3.14 TUI/反馈/details 56 passed（21.82 秒）；隔离 Linux 3.12 同组加进程回收 77 passed（46.75 秒），orphan-bash 个案另连续五次均通过，未修改或放宽进程回收实现/断言，该 CI 单次失败原因未确认。最终冻结源码在临时 venv 的 Windows 3.11.9、3.13.13 同组各 56 passed（69.74/51.01 秒），隔离 Linux 3.12 同组 56 passed（22.81 秒）。不冒充本地已跑 Linux 3.11，仍需最终 SHA 的 CI 确认。临时快照首次因缺 README 无法构建 editable，补齐公开 README/LICENSE 后正常安装锁定依赖；未读取用户配置。
 - 修正后 Ruff、双平台 mypy（193 文件）、工程守卫、锁文件/diff 再通过；复用既有 1900/26 本地全量并执行上述受影响平台专项，修正提交的 CI 负责完整最终源码跨平台回归。仍仅收尾 U4，最终 CI 全绿后按用户要求暂停。
 
 - U4 第二次 push `a2238bac11a3139e2a5543112d54ded372e60722` / CI [41454802016](https://github.com/pretextQ/MewCode/actions/runs/41454802016)：security、Linux 3.13、Windows 3.13 成功；两个 Python 3.11 作业仅剩同一窄屏权限框位置断言失败，反馈输入和进程回收已通过。Textual scroll_visible 自身默认还会延迟一次；布局后回调改用 immediate=True，避免再次排队到后续刷新。Windows 3.11/3.13 最终同组各 56 passed（17.88/18.24 秒），3.14 同组 56 passed（17.83 秒），Ruff/双平台 mypy/守卫/锁文件通过。首次真正 Linux 3.11.17 隔离环境单跑旧失败用例通过（8.15 秒），说明单项并未复现整套 CI 的时序，不能把它写成复现后修复成功；继续用最终 SHA 的完整 CI 验证。
+
+## U4 最终交付与暂停
+
+- 最终有效提交 `f2ac5e192fe72dc9dcccda4d451f618743b2f9d5` 已正常推送 origin/master，远端 SHA 已核对一致；对应 push CI [41456722525](https://github.com/pretextQ/MewCode/actions/runs/41456722525) 的 Windows/Linux × Python 3.11/3.13 及 security 五作业全部 success。早期两个红灯 run 及 TLS 推送失败均保留历史，不替代最终结果；TLS 有界重试后推送恢复，没有改动持久 Git/TLS 配置或关闭证书校验。
+- 最终冻结源码另跑隔离 Linux 3.11.17 全量：1882 passed / 43 skipped / 1 failed（217.72 秒），唯一失败是导出快照没有 .git，既有 test_e2e_rule_allows_git 的 git status 因此返回非零。为临时快照补 Git 初始化后同用例 1 passed（3.62 秒）。该环境问题未修改产品权限或进程回收，也不将这组本地命令冒称单次全绿；最终真实 CI 两个 Linux 作业均全绿。
+- 本地 Windows 主全量 1900/26、最终修正后的 3.11/3.13/3.14 各 56 项专项、两平台 mypy、Ruff、守卫、锁文件、diff 及最终构建已通过。全程没有真实模型调用、真实用户 TUI 会话或新 native MCP 协议。源码预算未提升。
+- 按用户最新要求在 U4 后暂停；U5–U7 未开始，必须等待明确恢复。此处记录最终产品 SHA/CI；后续纯文档更新不改写产品交付 SHA，也不冒充新的产品验证。原 docs/README.md 用户入口改动仍未提交。U1 隔离错误覆盖的本地配置无已知备份，仍未恢复，不将工作区描述为完全无损。
+- 临时环境清理命令被自动审批策略拒绝（仅返回 blocked by policy，无具体原因），未执行删除；临时目录 C:/Users/32519/AppData/Local/Temp/mewcode-u4-linux-wzpqg9m2 与缓存卷 mewcode-u4-linux311-cache-01a19b9e 保留。所有本轮测试进程和 --rm 容器均已正常结束。
+
+## 文档同步
+
+2026-11-02：按用户后续要求同步仓库 README、docs 总入口、演进索引、计划、交接、Agent/架构指南与维护映射，移除当前入口的“规划阶段/等待 U4 CI”过期状态。保留全部历史数字、失败事实、配置未恢复与清理被拒记录；U5–U7 继续暂停。本次仅改 Markdown，沿用上述产品验证与 CI，不重跑模型或真实 TUI。

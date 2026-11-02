@@ -1,5 +1,7 @@
 # 2026-10-24 审查修复与维护交接
 
+2026-11-02 更新：U1–U4 已交付并通过各自五作业 CI；U5–U7 按用户要求暂停。最新提交映射在本页末尾，完整事实见[参考库借鉴台账](../docs/stage-2026-11-02-borrowing.md)。以下旧日期报告保留原验收口径。
+
 原始审查基线：`03f6687`。代码修复验证基线：`6d457b0`。本轮覆盖 N01–N41，修复使用独立提交，并逐次推送到 `origin/master`。
 当前版本为 0.3.0，许可证为用户选定的 MIT。实际代码版本以 `git rev-parse HEAD` 为准。
 
@@ -207,3 +209,16 @@ SDK 仅使用测试 key 离线构造，未调用真实模型，未向演示仓�
 最终本机全量 1475 passed / 19 skipped；Docker 独立 16 passed；Ruff、两平台目标 mypy 各 167 文件、工程守卫、四项回植、锁文件、子代理 86/86 和打包通过。修复过的 Docker 断言放置与 TUI 替身兼容失败保留在原始日志。新增模型调用保守估计 0.136408 元，连同历史累计 0.197888 元；不是账单金额，不自动授权未来调用。
 
 本期验收、证据及远端 CI 见[实施报告](../docs/next-stage-2026-10-30.md)；开关与生命周期见[监督指南](supervision.md)。上面的 2026-10-28 收尾范围和原始数字仍按当时日期解释。
+
+## 参考库借鉴交付（2026-11-02）
+
+| 单元 | 最终产品提交 | 对应成功 CI |
+| --- | --- | --- |
+| U1 配置/技能写保护 | `c81aeb6` | [41424253094](https://github.com/pretextQ/MewCode/actions/runs/41424253094) |
+| U2 AGENTS.md/目录链/include | `981619f` | [41427433417](https://github.com/pretextQ/MewCode/actions/runs/41427433417) |
+| U3 崩溃诊断/日志保留 | `a51c67a` | [41430601257](https://github.com/pretextQ/MewCode/actions/runs/41430601257) |
+| U4 拒绝授权反馈 | `f2ac5e1` | [41456722525](https://github.com/pretextQ/MewCode/actions/runs/41456722525) |
+
+各 CI 均为对应 push 的 Windows/Linux × Python 3.11/3.13 及 security 五作业成功。U3/U4 表中为含必要修正的最终产品 SHA，不使用早期红灯代替。Windows 主全量 1900 passed / 26 skipped；最终 UI 修正另有平台专项和完整 CI。Linux 快照的环境失败与重测、原配置未恢复及临时环境保留见[台账](../docs/stage-2026-11-02-borrowing.md)，不删改失败事实。
+
+U5–U7 未实施，必须等待用户明确恢复。本次文档同步不修改代码、不开真实 TUI、不调用模型，沿用所属产品提交的验收结果。

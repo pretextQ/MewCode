@@ -1,6 +1,8 @@
 # MewCode 当前状态与文档入口
 
-2026-11-02 新开发授权：按[11 号参考库借鉴计划](evolution/11-upstream-borrowing-plan.md)逐项实施 U1–U7，每项完成提交推送并核实对应 CI；范围、验收与迁移边界见计划，真实进度见[交付台账](stage-2026-11-02-borrowing.md)。当前为规划阶段，不代表功能已落地。
+2026-11-02 当前交付：参考库借鉴 **U1–U4 已实施、独立提交推送，各项对应五作业 CI 成功**；U4 最终产品提交 `f2ac5e192fe72dc9dcccda4d451f618743b2f9d5`，[对应 push CI](https://github.com/pretextQ/MewCode/actions/runs/41456722525) 已完成。用户要求 U4 后暂停，**U5–U7 尚未实施，等待明确恢复**。设计见[11 号计划](evolution/11-upstream-borrowing-plan.md)，完整 SHA、失败修正、平台结果及未解决事项见[逐项台账](stage-2026-11-02-borrowing.md)。
+
+已交付：配置/技能写保护、AGENTS.md 与目录链/include、进程诊断与日志保留、拒绝授权附带反馈。公开行为见[权限语义](../guides/permission-semantics.md)、[项目指令](../guides/project-instructions.md)、[进程诊断](../guides/diagnostics.md)和[TUI 指南](../guides/tui.md)。本地 Windows 主全量 1900 passed / 26 skipped；最终修正又经各平台专项及上述完整 CI 验证。隔离 Linux 快照的一次环境失败、原配置未恢复及临时环境保留均在台账如实记录，不将离线接线或 CI 成功等同于真实模型效果。
 
 平台适用范围：按用户确认，项目以 Windows/Linux 的实际需求验收；不在 macOS 使用，macOS/iTerm2 不列为待办或交付缺口。
 
@@ -39,7 +41,7 @@
 
 ## 先看这三份
 
-1. [最新验收](stage-2026-11-01-intent-anchor.md)：intent anchor 首期；[self-verify 验收](stage-2026-11-01-self-verify.md)、[dead-end 验收](stage-2026-11-01-dead-end.md)、[服务可靠性验收](stage-2026-11-01.md)、[循环预算预警验收](stage-2026-10-31.md)、[上期实施验收](next-stage-2026-10-30.md)与[历史验收](acceptance-2026-10-30.md)保持原数字。
+1. [当前交付台账](stage-2026-11-02-borrowing.md)：U1–U4 最终提交/CI、验证边界与暂停点；[A1–A5 台账](stage-2026-11-02-a1-a5.md)保持独立。[intent anchor 验收](stage-2026-11-01-intent-anchor.md)、[self-verify 验收](stage-2026-11-01-self-verify.md)、[dead-end 验收](stage-2026-11-01-dead-end.md)、[服务可靠性验收](stage-2026-11-01.md)、[循环预算预警验收](stage-2026-10-31.md)、[上期实施验收](next-stage-2026-10-30.md)与[历史验收](acceptance-2026-10-30.md)保持原数字。
 2. [下次工作入口](next-session-prompt.md)：剩余事项及推荐顺序。
 3. [公开架构说明](../guides/architecture.md)、[监督指南](../guides/supervision.md)与[独立审查指南](../guides/independent-review.md)：运行行为、开关、证据和预算。
 
@@ -83,7 +85,7 @@
 - [已授权的下一阶段实施计划](evolution/08-next-stage-plan.md)：先修正局部 diff 审查及效果评估，再实现最小监督内核；A/B 首期已实施，验证见本期报告。
 
 - [演进与验证证据](evolution/README.md)：里程碑与历史回放口径。
-- [当前参考库借鉴建议](review/review-2026-11-02-current-borrowing.md)：2026-11-02 对照当前代码的七项建议、迁移限制及离线探针；历史 A1–A5 已落地，不再重复列为新待办。
+- [参考库借鉴计划](evolution/11-upstream-borrowing-plan.md)与[交付台账](stage-2026-11-02-borrowing.md)：U1–U4 已交付，U5–U7 暂停；[原始对照报告](review/review-2026-11-02-current-borrowing.md)保留实施前建议与离线探针，不作为当前未实施清单。
 - [PR 审查路线](evolution/05-pr-review-improvements.md)：首期边界和后续扩展。
 - [监督闭环设计](evolution/06-tianshu-supervision-notes.md)：首期已实现；后续 detector 待实施。
 - [测试体系设计与实施边界](evolution/07-tianshu-test-notes.md)：最小守卫已完成，其余是提案。

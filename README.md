@@ -26,8 +26,10 @@ MewCode 已收录于 [XERJ Corpus Hub](https://hub.xerj.org/corpus/pretextq--mew
 ## 核心特性
 
 **执行内核（CLI / TUI）**
-- 工具集：文件读写编辑、Bash、Glob/Grep、子代理、任务管理；权限分层管线（危险命令检测 → 路径沙箱 → 规则引擎 → 模式判定），deny 优先于白名单
+- 工具集：文件读写编辑、Bash、Glob/Grep、子代理、任务管理；权限分层管线（危险命令检测 → 路径沙箱与配置/技能写保护 → 规则引擎 → 模式判定），deny 优先于白名单；拒绝授权时可附带短反馈（见[权限语义](guides/permission-semantics.md)）
 - Skill 机制（内置 incident-triage / org-code-style 等，仓库级 `.mewcode/skills/` 可覆盖普通 skill；服务的 org-code-style 自查清单固定取内置版本）与 MCP 接入（stdio / Streamable HTTP）
+- [项目指令](guides/project-instructions.md)：加载全局与仓库根到运行目录的 MEWCODE.md / AGENTS.md，支持有范围和预算限制的 include
+- [进程诊断](guides/diagnostics.md)：跨启动追加/轮转日志、独立进程堆栈及异常记录，继续支持 `MEWCODE_LOG_FILE`
 - 上下文压缩、任务状态机、hook 引擎；Windows 是一等公民平台（见[平台说明](#平台说明)）
 
 **服务化（headless）**
@@ -42,6 +44,8 @@ MewCode 已收录于 [XERJ Corpus Hub](https://hub.xerj.org/corpus/pretextq--mew
 - **Docker 沙箱**：agent 在容器内执行（非 root、`--cap-drop=ALL`、`no-new-privileges`、只读根文件系统、CPU/内存/PID 限额、硬超时强杀）；依赖按锁文件钉版构建，镜像 tag 内容寻址
 - **内部工具链只读**：内置两个 MCP server——生产日志查询（Loki）与 CI 状态（GitHub），整条取数路径只有 GET；未声明 `readOnlyHint` 的工具在服务模式一律不挂
 - **自起测试环境**：仓库带 `docker-compose.yml` 时，服务自动 `up -d --wait` 起依赖，在沙箱容器内（加入 compose 网络、按服务名寻址）跑集成测试，无论成败 `down -v` 清理；无容器运行时则如实记录"未执行"，不用假验证充数
+
+参考库能力借鉴已交付 U1–U4，最终产品提交 `f2ac5e1` 的[五作业 CI](https://github.com/pretextQ/MewCode/actions/runs/41456722525) 全部通过。按用户要求，U5 编辑后 diff、U6 MCP 加载/分发、U7 只读 Shell 并发/退出码仍未实施并暂停；已有 Git diff 详情不等于 U5。进度和验证边界见[交付台账](docs/stage-2026-11-02-borrowing.md)。
 
 ## 快速开始（CLI / TUI）
 
@@ -267,6 +271,7 @@ Windows 是一等公民运行平台，已知边界（GBK 编码读取、行尾�
 见 [guides/windows-platform-notes.md](guides/windows-platform-notes.md)。
 权限分层语义见 [guides/permission-semantics.md](guides/permission-semantics.md)，
 hook stdin JSON 契约见 [guides/hook-contract.md](guides/hook-contract.md)。
+项目指令顺序及 include 预算见[项目指令指南](guides/project-instructions.md)，日志路径与保留限制见[进程诊断指南](guides/diagnostics.md)。
 
 本轮审查修复、提交映射与验证边界见 [维护交接](guides/maintenance.md)。
 

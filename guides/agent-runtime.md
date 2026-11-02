@@ -51,3 +51,12 @@ TaskStop 是终止操作：运行中和 idle 成员都可停止，重复调用�
 TUI 召回按当前请求实际已注入或首次即将完整注入的扁平条目过滤自动派生项。过滤发生在候选上限裁剪前，已注入自动条目不会挤掉较旧的手写文件。没有剩余候选时不创建 selector 客户端；手写类型化文件仍可正常召回。尚未注入的新自动条目出现后，原有 selector 可能实际执行，因此不能声称本改动减少 token 或测得模型质量提升。side-query 客户端在结束/取消时关闭。
 
 验证入口：`tests/test_auto_memory_view.py`，使用临时 home/cwd、真实并发文件与脚本 selector，覆盖存量回填、原始 load、正文召回、手写冲突、路径/符号链接、失败重试、线程/进程并发与 selector 调用次数。没有读取真实用户记忆做内容验证，没有真实模型调用。
+
+## 参考库借鉴运行契约（U1–U4）
+
+- **U1 写保护**：普通 Agent 文件写入不能改项目/全局 `.mewcode` 的三种配置及技能定义，先于 PLAN 写例外、显式 allow 和权限模式放行；授权读取与“始终允许”的专用持久化路径保留。这不是任意 Shell 的 OS 沙箱，详见[权限语义](permission-semantics.md)。
+- **U2 项目指令**：共享 loader 按全局、仓库根到运行目录、本地覆盖顺序加载并标来源，支持 AGENTS.md、去重和有界 include；独立代理按自己的运行目录加载，fork 继承上下文。只按运行目录加载，不随任意编辑目标动态追踪子目录规则，详见[项目指令](project-instructions.md)。
+- **U3 诊断**：CLI/headless/service/worker 和 Textual 异常入口记录进程线索，普通日志追加轮转、faulthandler 使用独立稳定句柄；日志故障不改变应用原退出码。缺少退出标记不能直接证明崩溃原因，详见[进程诊断](diagnostics.md)。
+- **U4 拒绝反馈**：共享规范化兼容旧 PermissionResponse 与新 PermissionReply；只保留 DENY 的反馈，其他选择丢草稿。反馈只进入该次拒绝的错误 tool_result，随原有下一请求送达，不新增用户轮次或模型请求。原请求身份绑定防止迟到回复回答下一次授权；无人值守不虚构反馈，详见[权限语义](permission-semantics.md)与[TUI 指南](tui.md)。
+
+四项均已交付；完整提交、对应 CI、历史失败与离线验证限制见[台账](../docs/stage-2026-11-02-borrowing.md)。U5–U7 尚未实施，按用户要求暂停；没有真实模型效果或缓存收益结论。
