@@ -81,6 +81,7 @@
 - [已授权的下一阶段实施计划](evolution/08-next-stage-plan.md)：先修正局部 diff 审查及效果评估，再实现最小监督内核；A/B 首期已实施，验证见本期报告。
 
 - [演进与验证证据](evolution/README.md)：里程碑与历史回放口径。
+- [当前参考库借鉴建议](review/review-2026-11-02-current-borrowing.md)：2026-11-02 对照当前代码的七项建议、迁移限制及离线探针；历史 A1–A5 已落地，不再重复列为新待办。
 - [PR 审查路线](evolution/05-pr-review-improvements.md)：首期边界和后续扩展。
 - [监督闭环设计](evolution/06-tianshu-supervision-notes.md)：首期已实现；后续 detector 待实施。
 - [测试体系设计与实施边界](evolution/07-tianshu-test-notes.md)：最小守卫已完成，其余是提案。

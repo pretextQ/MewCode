@@ -27,6 +27,13 @@ docs/*
 !docs/stage-2026-11-01-tui.md
 !docs/stage-2026-11-02-terminal.md
 !docs/stage-2026-11-02-a1-a5.md
+!docs/review/
+docs/review/*
+!docs/review/review-2026-11-02-current-borrowing.md
+!docs/review/evidence-2026-11-02-borrowing/
+docs/review/evidence-2026-11-02-borrowing/*
+!docs/review/evidence-2026-11-02-borrowing/compare_probes.py
+!docs/review/evidence-2026-11-02-borrowing/observations.json
 !docs/evolution/
 docs/evolution/*
 !docs/evolution/README.md

@@ -1,0 +1,54 @@
+{
+  "local": {
+    "instructions": {
+      "GLOBAL_INSTRUCTION": true,
+      "ROOT_AGENT_INSTRUCTION": false,
+      "LEAF_AGENT_INSTRUCTION": false,
+      "LEAF_MEW_INSTRUCTION": true,
+      "LOCAL_OVERRIDE_INSTRUCTION": false
+    },
+    "write_decisions_bypass": {
+      ".mewcode/config.yaml": "allow",
+      ".mewcode/permissions.local.yaml": "allow",
+      ".mewcode/skills/demo/SKILL.md": "allow",
+      "src/normal.py": "allow"
+    },
+    "bash_exit_7": {
+      "output": "(no output)",
+      "is_error": true
+    },
+    "bash_read_concurrent": false,
+    "mcp_schema_changed_after_search": true,
+    "mcp_schema_counts": [
+      0,
+      1
+    ]
+  },
+  "reference": {
+    "instructions": {
+      "GLOBAL_INSTRUCTION": true,
+      "ROOT_AGENT_INSTRUCTION": true,
+      "LEAF_AGENT_INSTRUCTION": true,
+      "LEAF_MEW_INSTRUCTION": true,
+      "LOCAL_OVERRIDE_INSTRUCTION": true
+    },
+    "write_decisions_bypass": {
+      ".mewcode/config.yaml": "deny",
+      ".mewcode/permissions.local.yaml": "deny",
+      ".mewcode/skills/demo/SKILL.md": "deny",
+      "src/normal.py": "allow"
+    },
+    "bash_exit_7": {
+      "output": "Exit code 7",
+      "is_error": false,
+      "content_blocks": null
+    },
+    "bash_read_concurrent": true,
+    "mcp_runtime_unavailable": "cannot import name 'Client' from 'mcp' (D:\\projects\\MewCode\\.venv\\Lib\\site-packages\\mcp\\__init__.py)",
+    "mcp_modes": {
+      "small": "eager",
+      "large_compat": "dispatch",
+      "large_official": "native"
+    }
+  }
+}
