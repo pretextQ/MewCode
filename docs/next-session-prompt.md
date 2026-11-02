@@ -1,5 +1,7 @@
 # 下次工作入口
 
+2026-11-02 最新授权：用户要求为参考库借鉴点编写开发文档，并开启新会话按文档逐项实施，每完成一项提交推送。执行[11 号计划](evolution/11-upstream-borrowing-plan.md)，顺序 U1 写保护 → U2 指令加载 → U3 崩溃诊断 → U4 拒绝反馈 → U5 编辑 diff → U6 MCP eager/dispatch → U7 只读 Shell 并发；每项按[台账](stage-2026-11-02-borrowing.md)记录验收、SHA/远端及五作业 CI，上一项 CI 通过再继续。新会话无需重新逐项征求授权，先读计划并核对实时 Git；历史 A1–A5 不重做。保留 docs/README.md 原有本地审查入口改动，黑色 TUI、Windows/Linux 目标、无真实模型预算及后续范围边界详见计划。下文“不扩展 B/C/V”是旧 A1–A5 阶段边界，本轮授权以上述 U1–U7 为准。
+
 2026-11-02 用户确认：本项目不在 macOS 使用。后续按 Windows/Linux 的实际需求验收，macOS/iTerm2 不再列为待办或交付缺口；不因此删除已有后端代码或改写历史测试证据。
 
 A1–A5 执行台账：[本轮修复验收](stage-2026-11-02-a1-a5.md)，公开契约：[Agent 运行指南](../guides/agent-runtime.md)。逐项交付状态以台账和实时 CI 为准。

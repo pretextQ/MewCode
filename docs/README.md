@@ -1,5 +1,7 @@
 # MewCode 当前状态与文档入口
 
+2026-11-02 新开发授权：按[11 号参考库借鉴计划](evolution/11-upstream-borrowing-plan.md)逐项实施 U1–U7，每项完成提交推送并核实对应 CI；范围、验收与迁移边界见计划，真实进度见[交付台账](stage-2026-11-02-borrowing.md)。当前为规划阶段，不代表功能已落地。
+
 平台适用范围：按用户确认，项目以 Windows/Linux 的实际需求验收；不在 macOS 使用，macOS/iTerm2 不列为待办或交付缺口。
 
 2026-11-02 A1–A5 修复入口：[实施计划](evolution/10-review-a1-a5-fix-plan.md)、[逐项验收与提交台账](stage-2026-11-02-a1-a5.md)、[运行契约](../guides/agent-runtime.md)。按 A5→A3→A1→A2→A4 独立实现、验收和提交推送；每项五作业 CI 核验及最终 SHA 以台账、Git/Actions 和交付答复为准。原终端实窗人工待验项独立保留。
