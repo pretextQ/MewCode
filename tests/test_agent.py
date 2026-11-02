@@ -213,8 +213,11 @@ async def test_stop_max_iterations():
     assert "maximum iterations" in c["error"][0].message
 
 @pytest.mark.asyncio
-async def test_stop_cancel():
+@pytest.mark.parametrize("startup_delay", [0.01, 0.2])
+async def test_stop_cancel(startup_delay, isolated_home, monkeypatch):
     """Agent 在收到 CancelledError 时干净地停止。"""
+    monkeypatch.chdir(isolated_home)
+    (isolated_home / "README.md").write_text("offline fixture", encoding="utf-8")
 
     class SlowMockClient(LLMClient):
         """在事件之间 sleep 的 mock 客户端，以便留出取消的时机。"""
@@ -228,7 +231,7 @@ async def test_stop_cancel():
             tools: list[dict[str, Any]] | None = None,
         ) -> AsyncIterator[StreamEvent]:
             self._call_count += 1
-            await asyncio.sleep(0.01)
+            await asyncio.sleep(startup_delay)
             yield TextDelta(f"Step {self._call_count}")
             await asyncio.sleep(0.01)
             yield ToolCallComplete(f"t{self._call_count}", "ReadFile", {"file_path": "README.md"})
@@ -243,18 +246,26 @@ async def test_stop_cancel():
 
     events: list = []
     cancelled = False
+    turn_seen = asyncio.Event()
 
     async def run_agent():
         async for e in agent.run(conv):
             events.append(e)
+            if isinstance(e, TurnComplete):
+                turn_seen.set()
 
     task = asyncio.create_task(run_agent())
-    await asyncio.sleep(0.15)
-    task.cancel()
     try:
-        await task
-    except asyncio.CancelledError:
-        cancelled = True
+        await asyncio.wait_for(turn_seen.wait(), timeout=5)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            cancelled = True
+    finally:
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
     assert cancelled
     c = _collect(events)
