@@ -892,11 +892,14 @@ class MewCodeApp(App):
             mini_conv = ConversationManager()
             mini_conv.history = [Message(role="user", content=user_message)]
             collected = ""
-            async for event in side_client.stream(mini_conv, system=system_prompt):
-                if isinstance(event, TextDelta):
-                    collected += event.text
-                elif isinstance(event, StreamEnd):
-                    pass
+            try:
+                async for event in side_client.stream(mini_conv, system=system_prompt):
+                    if isinstance(event, TextDelta):
+                        collected += event.text
+                    elif isinstance(event, StreamEnd):
+                        pass
+            finally:
+                await side_client.close()
             return collected
 
         try:
@@ -908,6 +911,7 @@ class MewCodeApp(App):
                     recent_tools=None,
                     already_surfaced=None,
                     selector=selector,
+                    injected_keys=self.memory_manager.injected_keys(self.conversation),
                 ),
                 timeout=8.0,
             )

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
-from threading import RLock
 from typing import Any
 
 from mewcode.atomic import atomic_write_text
 from mewcode.conversation import ConversationManager, Message
+from mewcode.memory.typed_view import MANIFEST, entries, memory_transaction, sync_view
 
-_MEMORY_LOCK = RLock()
+log = logging.getLogger(__name__)
 
 USER_MEMORIES_RELPATH = ".mewcode/memories.md"
 PROJECT_MEMORIES_RELPATH = ".mewcode/memories.md"
@@ -47,8 +48,43 @@ _PROJECT_LEVEL_HEADERS = {"项目知识", "参考资料"}
 class MemoryManager:
     def __init__(self, project_root: str) -> None:
         self._user_path = Path.home() / USER_MEMORIES_RELPATH
-        self._project_path = Path(project_root) / PROJECT_MEMORIES_RELPATH
+        self._project_path = Path(project_root).resolve() / PROJECT_MEMORIES_RELPATH
         self._last_extraction_msg_count = 0
+        self.view_errors: list[str] = []
+        if any(p.exists() or (p.parent / "memory" / MANIFEST).exists() for p in self._sources()):
+            self.refresh_derived()
+
+    def _sources(self) -> dict[Path, set[str]]:
+        sources = {self._user_path: {"user", "feedback"}}
+        sources.setdefault(self._project_path, set()).update({"project", "reference"})
+        return sources
+
+    def _refresh_locked(self) -> None:
+        self.view_errors.clear()
+        for source, kinds in self._sources().items():
+            try:
+                sync_view(source, kinds)
+            except Exception as exc:
+                self.view_errors.append(f"{source}: {type(exc).__name__}")
+                log.warning("Derived memory view refresh failed for %s (%s); flat source retained",
+                            source, type(exc).__name__)
+
+    def refresh_derived(self) -> None:
+        try:
+            with memory_transaction(self._sources()):
+                self._refresh_locked()
+        except Exception as exc:
+            self.view_errors = [type(exc).__name__]
+            log.warning("Derived memory refresh could not acquire its transaction (%s)", type(exc).__name__)
+
+    def injected_keys(self, conversation: ConversationManager) -> set[str]:
+        if not conversation.ltm_injected:
+            # The Agent will inject this complete flat source before its first request.
+            return set(entries(self.load()))
+        text = "\n".join(m.content.split("# autoMemory\n", 1)[1].split("\n\n# currentDate", 1)[0]
+                         for m in conversation.history if m.role == "user"
+                         and m.content.startswith("<system-reminder>") and "# autoMemory\n" in m.content)
+        return set(entries(text))
 
 
     @property
@@ -147,13 +183,13 @@ class MemoryManager:
         except Exception:
             return
 
-        self._last_extraction_msg_count = len(conversation.history)
-
         collected = collected.strip()
         if not collected:
+            self._last_extraction_msg_count = len(conversation.history)
             return
 
         self._write_memories(collected)
+        self._last_extraction_msg_count = len(conversation.history)
 
     def _write_memories(self, content: str) -> None:
         user_sections: list[str] = []
@@ -178,7 +214,7 @@ class MemoryManager:
                 current_header, current_lines, user_sections, project_sections
             )
 
-        with _MEMORY_LOCK:
+        with memory_transaction(self._sources()):
             for path, additions in ((self._user_path, user_sections), (self._project_path, project_sections)):
                 if not additions:
                     continue
@@ -198,6 +234,7 @@ class MemoryManager:
                     for header, lines in sections.items()
                 ).strip() + "\n"
                 atomic_write_text(path, merged)
+            self._refresh_locked()
 
     @staticmethod
     def _is_placeholder(line: str) -> bool:
@@ -230,10 +267,11 @@ class MemoryManager:
 
 
     def clear(self) -> None:
-        if self._user_path.exists():
-            self._user_path.write_text("", encoding="utf-8")
-        if self._project_path.exists():
-            self._project_path.write_text("", encoding="utf-8")
+        with memory_transaction(self._sources()):
+            for path in self._sources():
+                if path.exists():
+                    atomic_write_text(path, "")
+            self._refresh_locked()
 
     def get_display_text(self) -> str:
         parts: list[str] = []
@@ -248,6 +286,8 @@ class MemoryManager:
             if content:
                 parts.append(f"[项目级] {self._project_path}\n{content}")
 
+        if self.view_errors:
+            parts.append("自动记忆源文件已保留，召回索引更新失败；重新启动应用可重试。")
         if not parts:
             return "当前没有任何自动记忆。"
 

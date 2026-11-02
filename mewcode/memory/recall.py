@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from mewcode.memory.typed_view import owned_key
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -56,6 +58,7 @@ class MemoryHeader:
     mtime_ms: int      # modification time, ms since epoch
     description: str   # frontmatter description; "" if absent
     type: str          # frontmatter type; "" if unrecognized
+    auto_key: str = ""  # Verified owned derivation; hand-written files have no key.
 
 
 @dataclass
@@ -200,6 +203,7 @@ def _read_memory_header(
         mtime_ms=mtime_ms,
         description=fm["description"],
         type=fm["type"],
+        auto_key=owned_key(file_path),
     )
 
 
@@ -239,6 +243,7 @@ async def find_relevant_memories(
     recent_tools: list[str] | None,
     already_surfaced: set[str] | None,
     selector: SelectorFn,
+    injected_keys: set[str] | None = None,
 ) -> list[RelevantMemory]:
     """Scan both dirs, filter already-surfaced, ask selector to pick up to 5
     relevant filenames, and return the corresponding paths + mtimes.
@@ -254,7 +259,10 @@ async def find_relevant_memories(
         all_headers.extend(await asyncio.to_thread(scan_memory_files, project_mem_dir, "project"))
 
     surfaced = already_surfaced or set()
-    candidates = [m for m in all_headers if m.file_path not in surfaced]
+    injected = injected_keys or set()
+    candidates = list({m.file_path: m for m in all_headers if m.file_path not in surfaced
+                       and not m.auto_key.startswith("retired:")
+                       and not (m.auto_key and m.auto_key in injected)}.values())
     if not candidates:
         return []
 

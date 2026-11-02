@@ -769,11 +769,12 @@ def test_resume_repairs_dangling_last_line(tmp_path):
         assert line.strip() == "" or _json.loads(line)
 
 
-def test_reset_extraction_cursor_restores_extraction():
+def test_reset_extraction_cursor_restores_extraction(tmp_path, isolated_home, monkeypatch):
     """compact 后重置计数器，新的 history 增量可继续进入提取窗口。"""
     from mewcode.memory.auto_memory import MemoryManager
 
-    mm = MemoryManager(project_root=str(Path("/tmp/nonexistent-mem")))
+    monkeypatch.chdir(tmp_path)
+    mm = MemoryManager(project_root=str(tmp_path / "project"))
     mm._last_extraction_msg_count = 100  # compact 前的旧计数
     mm.reset_extraction_cursor()
     assert mm._last_extraction_msg_count == 0
