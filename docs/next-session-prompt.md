@@ -1,5 +1,11 @@
 # 下次工作入口
 
+A1–A5 执行台账：[本轮修复验收](stage-2026-11-02-a1-a5.md)，公开契约：[Agent 运行指南](../guides/agent-runtime.md)。逐项交付状态以台账和实时 CI 为准。
+
+2026-11-02 最新授权：用户要求规划 A1–A5 并开启新会话逐项修复，每完成一项提交推送一次。执行入口为 [10 号修复计划](evolution/10-review-a1-a5-fix-plan.md)，顺序 A5→A3→A1→A2→A4；逐项专项/必要全量、工程检查、文档、独立提交推送与对应 CI，不攒成一个大提交。基线 `0d2e213`，原有 docs/README.md 本地审查入口留工作区；本次规划改动可随第一项修复提交。无需重新逐项征求授权，没有真实模型预算或 B/C/V 扩展。
+
+五条已在本地离线独立复核，见 `docs/review/verification-2026-11-02.md` 和 evidence；该目录被忽略。A4 是自动写入/召回脱节而非召回永远无效，A5 只实测三客户端配对缺口未测远端400。先读计划和实时仓库再实施，不把旧缺陷复现脚本的绿灯当修复通过。终端实窗人工待验边界保持。
+
 2026-11-02 交付更新：用户已授权先提交推送本轮终端验收，再核实上游审查 A1–A5。仅提交本轮 helper、runner 与验收文档，原有 docs/README.md 本地参考库审查入口继续保留工作区；提交 SHA、远端及 CI 以实际 Git/Actions 核验为准。
 
 2026-11-02 最新交接：用户要求先完成真实终端待办。已增加离线交互替身 `tests/helpers/tui_terminal_smoke.py` 与可复跑的 `scripts/verify_terminal_smoke.py`；Windows ConPTY 和 Linux POSIX PTY 各 32 项、Windows 异常退出恢复另 6 项通过，原有 TUI/详情/视觉/启动器回归 47 passed / 20.96 秒。没有产品逻辑改动、真实模型调用或提交推送，原有 docs/README.md 审查入口保留。详情与命令见[本轮记录](stage-2026-11-02-terminal.md)。

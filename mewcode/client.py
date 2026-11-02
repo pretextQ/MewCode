@@ -10,6 +10,7 @@ from openai import AsyncOpenAI
 
 from mewcode.config import ProviderConfig
 from mewcode.conversation import ConversationManager
+from mewcode.conversation_pairing import pair_request_messages
 from mewcode.serialization import (
     build_anthropic_messages,
     build_chat_completion_messages,
@@ -213,7 +214,7 @@ class AnthropicClient(LLMClient):
     ) -> AsyncIterator[StreamEvent]:
         import anthropic as _anthropic
 
-        messages = build_anthropic_messages(conversation.get_messages())
+        messages = build_anthropic_messages(pair_request_messages(conversation.get_messages()))
 
         # 在最长稳定前缀上标记 prompt cache 断点：system、tools
         # 以及最后一条 user 消息的尾部。Anthropic 会缓存到每个断点，
@@ -353,7 +354,7 @@ class OpenAIClient(LLMClient):
     ) -> AsyncIterator[StreamEvent]:
         import openai as _openai
 
-        input_messages = build_openai_input(conversation.get_messages())
+        input_messages = build_openai_input(pair_request_messages(conversation.get_messages()))
 
         kwargs: dict[str, Any] = {
             "model": self.model,
@@ -529,7 +530,7 @@ class OpenAICompatClient(LLMClient):
     ) -> AsyncIterator[StreamEvent]:
         import openai as _openai
 
-        messages = build_chat_completion_messages(conversation.get_messages())
+        messages = build_chat_completion_messages(pair_request_messages(conversation.get_messages()))
 
         # 如果有 system 消息则插入到消息列表头部。
         if system:

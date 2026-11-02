@@ -26,6 +26,7 @@ docs/*
 !docs/stage-2026-11-01-intent-anchor.md
 !docs/stage-2026-11-01-tui.md
 !docs/stage-2026-11-02-terminal.md
+!docs/stage-2026-11-02-a1-a5.md
 !docs/evolution/
 docs/evolution/*
 !docs/evolution/README.md
@@ -34,6 +35,7 @@ docs/evolution/*
 !docs/evolution/07-tianshu-test-notes.md
 !docs/evolution/08-next-stage-plan.md
 !docs/evolution/09-tui-redesign-plan.md
+!docs/evolution/10-review-a1-a5-fix-plan.md
 .coverage
 
 .mypy_cache/
