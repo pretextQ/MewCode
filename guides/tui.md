@@ -42,6 +42,8 @@ Git 查询异步执行，每个子命令超时 3 秒、输出最多 48,000 字�
 
 headless 控件测试与 SVG 不代替真实 Windows Terminal/Linux 终端的重绘、缩放、滚动和退出恢复人工烟测。实际验收范围与环境限制见[本轮记录](../docs/stage-2026-11-01-tui.md)。
 
+新增 `scripts/verify_terminal_smoke.py` 可用真实 Windows ConPTY 或 Linux POSIX PTY 运行正式 OS 驱动，检查鼠标滚轮协议、尺寸变化、中英输入、权限、流式取消和退出后的终端模式恢复；`--crash` 在 Windows 检查离线子进程异常退出后的父启动器清理。可选依赖仅验收进程需要，不加入产品依赖。复跑命令和无需模型的实窗人工入口见[终端验收记录](../docs/stage-2026-11-02-terminal.md)；PTY 证据不等于字体、拖选和 GUI 重绘已人工验收。
+
 ## Windows 终端启动和恢复
 
 Windows 建议从仓库使用 `powershell -NoLogo -NoProfile -File .\scripts\run_tui.ps1` 启动。它在父 PowerShell 外层保存控制台输入/输出模式，子进程返回后复位鼠标、焦点、粘贴、键盘协议和光标，并恢复环境。通常在空闲 TUI 中 Ctrl+C 正常退出；执行中第一次 Ctrl+C 请求停止。

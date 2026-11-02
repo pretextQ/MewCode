@@ -1,5 +1,11 @@
 # 下次工作入口
 
+2026-11-02 交付更新：用户已授权先提交推送本轮终端验收，再核实上游审查 A1–A5。仅提交本轮 helper、runner 与验收文档，原有 docs/README.md 本地参考库审查入口继续保留工作区；提交 SHA、远端及 CI 以实际 Git/Actions 核验为准。
+
+2026-11-02 最新交接：用户要求先完成真实终端待办。已增加离线交互替身 `tests/helpers/tui_terminal_smoke.py` 与可复跑的 `scripts/verify_terminal_smoke.py`；Windows ConPTY 和 Linux POSIX PTY 各 32 项、Windows 异常退出恢复另 6 项通过，原有 TUI/详情/视觉/启动器回归 47 passed / 20.96 秒。没有产品逻辑改动、真实模型调用或提交推送，原有 docs/README.md 审查入口保留。详情与命令见[本轮记录](stage-2026-11-02-terminal.md)。
+
+边界：computer-use 工具未暴露 Windows Terminal 控制面，技能操作规则禁止自动化终端应用；本机仅 docker-desktop WSL，无普通 Linux 桌面环境。因此本轮执行的是非 headless 的真实驱动 PTY 集成，不是实窗人工烟测。字体/全角字形、鼠标拖选、GUI resize/zoom 重绘和真实 scrollback 回看仍待 Windows Terminal 与独立 Linux 终端人工确认；不要把待办 1 标为全部完成。已准备无需模型的交互入口，不需要重开真实模型会话。
+
 提交交付更新：用户已授权将本轮黑色 TUI、只读详情及 Windows 退出清理提交推送至 master。原有 docs/README.md 参考库审查入口保留工作区、不夹带。提交复核补齐了 Git clean/process filter 禁用，47 项 TUI/启动器专项通过；最终全量 1746 passed / 19 skipped（272.63 秒）、两平台 mypy 181 文件及工程检查通过。提交/CI 记录见本轮报告“提交交付核验”，不要用旧版数字替代。TUI 当前已停止，不自动重启。
 
 最新运行状态：用户已查看真实黑色版并表示“可以了，帮我停止吧”；已通过控制台 Ctrl+C 停止，确认 uv/MewCode、父 shell 及对应终端窗口均退出，未强杀。当前保持停止，默认黑色外观已获认可。
