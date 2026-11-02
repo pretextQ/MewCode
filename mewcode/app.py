@@ -1502,7 +1502,7 @@ class MewCodeApp(App):
         self._details_open = False
         self._layout_details()
         await chat.mount(widget)
-        widget.scroll_visible(animate=False, top=True)
+        widget.call_after_refresh(widget.scroll_visible, animate=False, top=True)
         # 权限提示弹窗期间禁用输入框
         try:
             self.query_one("#chat-input").disabled = True

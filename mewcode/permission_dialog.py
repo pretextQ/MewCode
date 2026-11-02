@@ -65,12 +65,13 @@ class InlinePermissionWidget(Vertical, can_focus=True):
 
     def compose(self) -> ComposeResult:
         yield Static(self._build_content(), id="perm-content")
-        yield FeedbackInput(placeholder="可选拒绝反馈 · Enter 确认 · Esc 无反馈拒绝",
-                    max_length=MAX_FEEDBACK_CHARS, id="perm-feedback")
+        feedback = FeedbackInput(placeholder="可选拒绝反馈 · Enter 确认 · Esc 无反馈拒绝",
+                                 max_length=MAX_FEEDBACK_CHARS, id="perm-feedback")
+        feedback.display = False
+        yield feedback
 
 
     def on_mount(self) -> None:
-        self.query_one("#perm-feedback", Input).display = False
         self.focus()
 
     def _build_content(self) -> str:

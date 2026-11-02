@@ -96,39 +96,44 @@ async def test_real_inline_feedback_input_paste_and_cancellation(tmp_path, endin
     async with app.run_test(size=size) as pilot:
         app.agent.run=run
         task=asyncio.create_task(app._send_message('go'))
-        for _ in range(100):
-            await pilot.pause(0.01)
-            if app.query('#perm-inline'):
-                break
-        widget=app.query_one(InlinePermissionWidget)
-        await pilot.press('down','down')
-        field=widget.query_one(Input)
-        await pilot.pause()
-        assert field.display and app.focused is field
-        assert field.region in app.screen.region
-        field.post_message(Paste('feedback [red] ' + 'x' * 1500))
-        await pilot.pause()
-        assert len(field.value) <= MAX_FEEDBACK_CHARS
-        if ending == 'switch':
-            await pilot.press('up')
-            assert not field.value and not field.display
-            await pilot.press('down','enter')
-        else:
-            await pilot.press(ending)
-        await task
-        if ending == 'ctrl+c':
-            assert future.cancelled() or future.done()
-        else:
-            reply=normalize_reply(future.result())
-            assert reply.response == PermissionResponse.DENY
-            assert bool(reply.feedback) == (ending == 'enter')
-            if ending == 'enter':
-                assert '[red]' in reply.feedback
-            widget.action_deny()  # A late duplicate cannot change the completed reply.
-            assert normalize_reply(future.result()) == reply
-        assert app.query_one('#chat-input').disabled is False
-        assert not app.query('#perm-inline')
-
+        try:
+            for _ in range(100):
+                await pilot.pause(0.01)
+                if app.query('#perm-inline') and app.focused is app.query_one(InlinePermissionWidget):
+                    break
+            widget=app.query_one(InlinePermissionWidget)
+            assert app.focused is widget
+            await pilot.press('down','down')
+            field=widget.query_one(Input)
+            await pilot.pause()
+            assert field.display and app.focused is field
+            assert field.region in app.screen.region
+            field.post_message(Paste('feedback [red] ' + 'x' * 1500))
+            await pilot.pause()
+            assert len(field.value) <= MAX_FEEDBACK_CHARS
+            if ending == 'switch':
+                await pilot.press('up')
+                assert not field.value and not field.display
+                await pilot.press('down','enter')
+            else:
+                await pilot.press(ending)
+            await task
+            if ending == 'ctrl+c':
+                assert future.cancelled() or future.done()
+            else:
+                reply=normalize_reply(future.result())
+                assert reply.response == PermissionResponse.DENY
+                assert bool(reply.feedback) == (ending == 'enter')
+                if ending == 'enter':
+                    assert '[red]' in reply.feedback
+                widget.action_deny()  # A late duplicate cannot change the completed reply.
+                assert normalize_reply(future.result()) == reply
+            assert app.query_one('#chat-input').disabled is False
+            assert not app.query('#perm-inline')
+        finally:
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
 
 @pytest.mark.asyncio

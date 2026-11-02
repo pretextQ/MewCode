@@ -70,3 +70,7 @@
 - U4 取消竞态与窄屏补充：最终反馈专项 18 passed（8.31 秒），60×18/80×24 输入均可见；旧已取消授权框的迟到反馈不能回答下一请求。请求 token 初次 mypy 将 Any.future 窄化为 object，改用已有带类型 pending 字段后双平台均通过。最终 Ruff、双平台 mypy、工程守卫、锁文件通过。
 
 - U4 首次全量 1 failed / 1894 passed / 26 skipped（322.68 秒）：旧 TUI details 用例直接断言 enum，现已通过共享 normalize_reply 断言新协议；相应 details+反馈专项 38 passed（16.33 秒）。最终全量 `uv run --locked pytest -q --maxfail=10 --timeout=120`：1900 passed / 26 skipped（322.56 秒），覆盖最终请求身份防护和窄屏测试。`uv build --no-sources` 成功，wheel 检查包含 U1–U4 的全部 5 个新模块。Ruff、双平台 mypy（193 文件）、守卫、锁文件、diff 检查通过；未提高 ceiling，无真实模型调用。U4 push CI 成功后记录最终 SHA 并停止。
+
+- U4 首次 push `d9423899f39193a8fd11d90fcb18b5076e01d19e` / CI [41433858498](https://github.com/pretextQ/MewCode/actions/runs/41433858498) 未通过：security 与 Linux 3.13 成功；Linux 3.11 出现权限框窄屏滚动及 orphan-bash 回收失败，Windows 3.11/3.13 出现反馈框挂载/聚焦时序失败。没有把其中绿灯当整体成功。反馈栏改为首次布局前隐藏，权限框滚动延至布局刷新后；离线交互测试等待实际焦点后发键，失败时也先取消并等待拥有的运行任务，避免 teardown 异常串扰。
+- 修正验收：Windows 3.14 TUI/反馈/details 56 passed（21.82 秒）；隔离 Linux 3.12 同组加进程回收 77 passed（46.75 秒），orphan-bash 个案另连续五次均通过，未修改或放宽进程回收实现/断言，该 CI 单次失败原因未确认。最终冻结源码在临时 venv 的 Windows 3.11.9、3.13.13 同组各 56 passed（69.74/51.01 秒），隔离 Linux 3.12 同组 56 passed（22.81 秒）。不冒充本地已跑 Linux 3.11，仍需最终 SHA 的 CI 确认。临时快照首次因缺 README 无法构建 editable，补齐公开 README/LICENSE 后正常安装锁定依赖；未读取用户配置。
+- 修正后 Ruff、双平台 mypy（193 文件）、工程守卫、锁文件/diff 再通过；复用既有 1900/26 本地全量并执行上述受影响平台专项，修正提交的 CI 负责完整最终源码跨平台回归。仍仅收尾 U4，最终 CI 全绿后按用户要求暂停。
