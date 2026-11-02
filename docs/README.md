@@ -1,5 +1,7 @@
 # MewCode 当前状态与文档入口
 
+平台适用范围：按用户确认，项目以 Windows/Linux 的实际需求验收；不在 macOS 使用，macOS/iTerm2 不列为待办或交付缺口。
+
 2026-11-02 A1–A5 修复入口：[实施计划](evolution/10-review-a1-a5-fix-plan.md)、[逐项验收与提交台账](stage-2026-11-02-a1-a5.md)、[运行契约](../guides/agent-runtime.md)。按 A5→A3→A1→A2→A4 独立实现、验收和提交推送；每项五作业 CI 核验及最终 SHA 以台账、Git/Actions 和交付答复为准。原终端实窗人工待验项独立保留。
 
 2026-11-02 终端增量：Windows ConPTY 与 Linux POSIX PTY 各 32 项协议集成检查通过，Windows 替身异常退出后的父启动器恢复另 6 项通过，TUI 回归 47 passed。使用真实 OS 驱动，无模型调用；未完成实窗人工字体/鼠标选择/缩放重绘验收，不能将待办 1 标为全部完成。可复跑入口、失败修正与人工清单见[终端验收](stage-2026-11-02-terminal.md)。原有本地参考库审查入口改动保留。

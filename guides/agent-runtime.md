@@ -1,5 +1,7 @@
 # Agent 请求与队友运行契约
 
+项目适用与验收范围为 Windows/Linux。用户明确不在 macOS 使用；以下 iTerm2 内容仅记录已有后端契约，macOS/iTerm2 实窗验证不作为本项目待办或交付缺口。
+
 ## 中断后的请求配对（A5）
 
 三个 provider 客户端在合并 transient reminders 后，对发送副本规范化工具调用与结果，不修改真实历史、会话文件或审计。正常历史保留正文、thinking/signature 和缓存标记策略。
