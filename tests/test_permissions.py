@@ -132,7 +132,11 @@ class TestPathSandbox:
         assert not ok
         assert "沙箱" in reason
 
-    def test_home_ssh(self) -> None:
+    def test_home_ssh(self, monkeypatch) -> None:
+        # This is a path-only probe, outside the sandbox's allowed temp root.
+        home = str(Path(self.tmpdir.anchor) / "_mewcode_virtual_home")
+        monkeypatch.setenv("HOME", home)
+        monkeypatch.setenv("USERPROFILE", home)
         ok, _ = self.sandbox.check("~/.ssh/id_rsa")
         assert not ok
 

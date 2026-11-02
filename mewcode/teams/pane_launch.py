@@ -38,7 +38,7 @@ def bootstrap_payload(tool: Any, team: Any, member: Any, agent: Any, conversatio
         "agent_id": member.agent_id, "name": member.name, "agent_type": member.agent_type,
         "team_config": team.config_path, "work_dir": member.worktree_path, "provider": provider_data,
         "parent_id": agent.parent_id, "trace_id": agent.trace_id,
-        "instructions": agent.instructions_content, "max_iterations": agent.max_iterations,
+        "instructions_loaded": True, "instructions": agent.instructions_content, "max_iterations": agent.max_iterations,
         "permission_mode": checker.mode.value if checker else "dontAsk",
         "rule_paths": [str(getattr(rules, attr) or "") if rules else ""
                        for attr in ("_user_path", "_project_path", "_local_path")],

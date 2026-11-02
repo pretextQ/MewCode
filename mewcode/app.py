@@ -430,6 +430,8 @@ class MewCodeApp(App):
         restored = self.worktree_manager.restore_session()
         if restored:
             self.agent.work_dir = restored.worktree_path
+            self._instructions_content = load_instructions(restored.worktree_path)
+            self.agent.instructions_content = self._instructions_content
 
         wt_command = create_worktree_command(self.worktree_manager)
         self.command_registry.register_sync(wt_command)

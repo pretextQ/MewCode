@@ -12,10 +12,20 @@ from mewcode.cache import FileCache
 from mewcode.filehistory import FileHistory
 
 
+@pytest.fixture(autouse=True)
+def _default_isolated_home(monkeypatch, tmp_path: Path) -> None:
+    home = tmp_path / "isolated-user-home"
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+
+
 @pytest.fixture
 def isolated_home(monkeypatch, tmp_path: Path) -> Path:
     """把 Path.home 指向临时目录，防止测试读写真实 ~/.mewcode。"""
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     return tmp_path
 
 

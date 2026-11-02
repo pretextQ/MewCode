@@ -6,8 +6,8 @@
 
 | ID | 项目 | 状态 | 最终提交 / 远端 SHA | 对应 CI | 本轮验收 |
 | --- | --- | --- | --- | --- | --- |
-| U1 | 受保护配置/技能禁写 | 本地完成，待本项 CI | 本项提交 | 待推送后核验 | 全量 1823/24；保护专项 60/1 |
-| U2 | AGENTS.md/目录链/include | 待实施 | — | — | — |
+| U1 | 受保护配置/技能禁写 | 已推送，五作业成功 | `c81aeb60fc0d4557c7318b1addc96f50cdd553a8` | [41424253094](https://github.com/pretextQ/MewCode/actions/runs/41424253094) | 全量 1823/24；保护专项 60/1 |
+| U2 | AGENTS.md/目录链/include | 本地完成，待本项 CI | 本项提交 | 待推送后核验 | 全量 1871/25；指令专项 11/1 |
 | U3 | 崩溃日志/保留诊断 | 待实施 | — | — | — |
 | U4 | 拒绝授权附带反馈 | 待实施 | — | — | — |
 | U5 | 编辑后有界 diff | 待实施 | — | — | — |
@@ -33,7 +33,17 @@
 - 在共享 PermissionChecker 的文件路径门禁接入写保护；先于显式 allow、PLAN 写例外及模式放行。项目/全局三种配置及 skills 目录均保护，读取与专用规则持久化继续工作。路径同时比较名称和真实目标；Windows 常见别名归一化，链接解析失败拒绝。
 - 技能管理审计：现有命令只列出、查看、重新加载并注册技能，没有安装器写路径，本轮不引入绕过开关。普通源文件、plans/memory/sessions 为正对照。安全作业加入新的保护测试文件。
 - 专项（Windows/Python 3.14.4）：`uv run --locked pytest tests/test_protected_paths.py tests/test_permission_security.py -q --maxfail=3 --timeout=120` 初次修正后 109 passed / 1 skipped；补充 junction 与其余策略目标后保护专项 60 passed / 1 skipped。Windows junction 实测成功；本机 symlink 缺权限跳过，Linux 真实符号链接由对应 CI 覆盖。
-- 失败事实：首轮红灯用例未绑定工具注册表，误将当前仓库 `.mewcode/config.yaml` 覆盖为测试文本并创建 `source.py`。已修正全部新测试为临时目录绑定并删除所创建的 source.py；配置未找到可确认备份，已向用户说明并请求备份路径，未用示例配置替代。该事件不混作已满足“未读取/修改真实配置”约束。早期另一轮 CUSTOM 读权限等待已终止，新增明确读 allow 后重新通过。
+- 失败事实：首轮红灯用例未绑定工具注册表，误将当前仓库 `.mewcode/config.yaml` 覆盖为测试文本并创建 `source.py`。已修正全部新测试为临时目录绑定并删除所创建的 source.py；配置未找到可确认备份，用户回复没有已知备份，无法原样恢复，未用示例配置替代。该事件不混作已满足“未读取/修改真实配置”约束。早期另一轮 CUSTOM 读权限等待已终止，新增明确读 allow 后重新通过。
 - Ruff、win32/linux 目标 mypy（189 文件）、工程守卫、`uv lock --check` 通过；源码预算未提升。全量及提交 CI 结果在完成后补记。
 
 - 本地全量：`uv run --locked pytest -q --maxfail=10 --timeout=120`，1823 passed / 24 skipped，296.56 秒；该次收集后补充的 37 个边界用例已单独运行，保护专项最终 60 passed / 1 skipped（4.92 秒）。未改变产品实现；本项远端 CI 将覆盖最终测试集。规划提交 `6a6b25534072859c86de446a21a2b5a435685d7d` 的 push CI [41422081170](https://github.com/pretextQ/MewCode/actions/runs/41422081170) 五作业已核实成功。
+
+## U2 实施记录
+
+- 全局→最近 Git 根到运行目录→本地覆盖的共享 loader，增加 AGENTS.md、来源与真实路径去重。include 限各自 scope，围栏不展开，文件错误变成诊断；64 KiB 单文件/256 KiB 总字节/128 文件/5 层 include/64 级目录，超过预算整文件跳过。选择显式有界读取，不调用 Git 子进程。
+- TUI、headless、service 原有入口复用共享 loader；独立子代理/隔离 worktree 新增调用，fork 保留上下文继承。pane bootstrap 标记已加载；旧 payload 在 worker 本地加载，避免双重注入。TUI 恢复 worktree 后按恢复目录重新取启动指令。
+- 新增测试默认临时 home（与项目目录分离），HOME/USERPROFILE 同步传给子进程；显式 isolated_home 仍兼容原契约。该层不替代工具注册表的 work_dir 绑定。
+- Windows/Python 3.14.4：指令/记忆专项 59 passed / 1 skipped；实际入口+真实 worker SDK 子进程 22 passed / 3 skipped；补充恢复目录与目录预算后指令专项 11 passed / 1 skipped。真实 TUI/headless/service/子代理脚本 LLM 请求、worker 本地 HTTP SDK 载荷均看到指令且后续轮次不重复。symlink 本机跳过，junction 越界实测拦截；tmux 集成未本地执行。
+- 初次专项 1 failed（临时 home 与项目重合造成全局文件优先且去重，旧优先级用例因此失效），已改为默认独立 home；Ruff 的未使用导入问题已修正。工程检查通过（mypy 两平台各 190 文件），全量与远端结果后补。U1 远端 SHA 与本地一致，五作业成功后才开始 U2 产品改动。
+
+- 首次全量 2 failed / 1868 passed / 25 skipped（298.87 秒）：默认隔离 home 位于临时沙箱，旧 `~/.ssh` 越界断言不再成立；创建空 home 目录影响原子写入的目录清理断言。改为不预建 home，越界用例显式使用无凭据的虚拟根目录路径。受影响专项最终 90 passed / 2 skipped；最终全量 `uv run --locked pytest -q --maxfail=10 --timeout=120`，1871 passed / 25 skipped（299.31 秒）。Ruff、双平台 mypy、工程守卫、锁文件、diff 检查均通过，未提高预算。指南：[项目指令](../guides/project-instructions.md)。

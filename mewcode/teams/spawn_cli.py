@@ -142,9 +142,13 @@ async def worker_run(args: argparse.Namespace) -> None:
             DangerousCommandDetector(), PathSandbox(args.work_dir),
             RuleEngine(*[Path(p) if p else None for p in payload["rule_paths"]]), mode=mode,
         )
+        from mewcode.memory.instructions import agent_instructions
+        instructions = payload["instructions"]
+        if not payload.get("instructions_loaded", False):
+            instructions = agent_instructions(args.work_dir, instructions)
         agent = Agent(client, permitted.bind_work_dir(args.work_dir), provider.protocol, work_dir=args.work_dir,
                       permission_checker=checker, max_iterations=payload["max_iterations"],
-                      context_window=provider.get_context_window(), instructions_content=payload["instructions"],
+                      context_window=provider.get_context_window(), instructions_content=instructions,
                       hook_engine=decode_hooks(payload.get("hooks", [])),
                       enable_supervision=payload.get("enable_supervision", False))
         agent.agent_id, agent.parent_id, agent.trace_id = args.agent_id, payload["parent_id"], payload["trace_id"]

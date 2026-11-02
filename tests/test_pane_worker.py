@@ -107,6 +107,7 @@ async def test_worker_real_sdk_followup_shutdown(native_pane, stop_running, tmp_
     team = manager.create_team("offline", "parent-id", is_interactive=False)
     member = TeammateInfo("中文 worker 'x", "worker-id", "role", "offline-model", str(tmp_path), "tmux", True)
     manager.register_member(team.name, member)
+    (tmp_path / "AGENTS.md").write_text("unique worker scoped policy", encoding="utf-8")
     requests = []
     release_response = asyncio.Event()
 
@@ -171,6 +172,7 @@ async def test_worker_real_sdk_followup_shutdown(native_pane, stop_running, tmp_
         identity = json.loads(state_file.read_text(encoding="utf-8"))
         assert identity["agent_id"] == "worker-id" and identity["parent_id"] == "parent-id"
         assert identity["trace_id"] == "trace-id" and identity["model"] == "offline-model"
+        assert str(requests[0]).count("unique worker scoped policy") == 1
         assert requests[0]["model"] == "offline-model" and "offline role policy" in str(requests[0])
         if stop_running:
             from mewcode.tools.task_stop import TaskStopParams, TaskStopTool
@@ -188,6 +190,7 @@ async def test_worker_real_sdk_followup_shutdown(native_pane, stop_running, tmp_
         mailbox.write(member.agent_id, create_message("parent-id", member.agent_id, "follow-up"))
         await until(lambda: len(requests) == 2 and state_is("listening"))
         assert "follow-up" in str(requests[-1])
+        assert str(requests[-1]).count("unique worker scoped policy") == 1
         assert "initial" in str(requests[-1])  # persistent worker conversation
         mailbox.write(member.agent_id, create_message("parent-id", member.agent_id, "stop", message_type="shutdown_request",
                                                        metadata={"request_id": "stop-id"}))

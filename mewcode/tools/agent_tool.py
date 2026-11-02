@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
+from mewcode.memory.instructions import agent_instructions
 from mewcode.tools.base import Tool, ToolResult
 
 if TYPE_CHECKING:
@@ -287,7 +288,8 @@ class AgentTool(Tool[AgentToolParams]):
             max_iterations=definition.max_turns,
             permission_checker=checker,
             context_window=self._parent_agent.context_window,
-            instructions_content=definition.system_prompt,
+            instructions_content=(agent_instructions(self._parent_agent.work_dir, definition.system_prompt)
+                                  if p.subagent_type else definition.system_prompt),
             hook_engine=self._parent_agent.hook_engine,
             enable_supervision=getattr(getattr(self._parent_agent, "supervision", None), "enabled", False),
         )
@@ -482,7 +484,7 @@ class AgentTool(Tool[AgentToolParams]):
             max_iterations=definition.max_turns,
             permission_checker=checker,
             context_window=self._parent_agent.context_window,
-            instructions_content=instructions,
+            instructions_content=agent_instructions(wt.path, instructions),
             hook_engine=self._parent_agent.hook_engine,
             enable_supervision=getattr(getattr(self._parent_agent, "supervision", None), "enabled", False),
         )
@@ -639,7 +641,7 @@ class AgentTool(Tool[AgentToolParams]):
             max_iterations=definition.max_turns,
             permission_checker=checker,
             context_window=self._parent_agent.context_window,
-            instructions_content=definition.system_prompt,
+            instructions_content=agent_instructions(wt.path, definition.system_prompt),
             hook_engine=self._parent_agent.hook_engine,
             enable_supervision=getattr(getattr(self._parent_agent, "supervision", None), "enabled", False),
         )
