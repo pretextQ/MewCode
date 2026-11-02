@@ -24,6 +24,10 @@ class PathSandbox:
     def project_root(self) -> Path:
         return self._allowed_roots[0]
 
+    def check_write(self, path: str) -> tuple[bool, str]:
+        from mewcode.permissions.protected_paths import check_protected_write
+        return check_protected_write(path, self.project_root)
+
 
     def check(self, path: str) -> tuple[bool, str]:
         p = Path(path).expanduser()

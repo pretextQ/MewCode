@@ -76,7 +76,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          uv run pytest tests/test_permission_security.py -q --maxfail=1 --timeout=120 2>&1 | tee security.log
+          uv run pytest tests/test_permission_security.py tests/test_protected_paths.py -q --maxfail=1 --timeout=120 2>&1 | tee security.log
           exit ${PIPESTATUS[0]}
 
       - name: Audit locked dependencies

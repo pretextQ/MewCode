@@ -56,6 +56,10 @@ class PermissionChecker:
             if not targets and content:
                 targets = [content]
             for target in targets:
+                if tool.category == "write":
+                    ok, reason = self.sandbox.check_write(target)
+                    if not ok:
+                        return Decision(effect="deny", reason=reason)
                 ok, reason = self.sandbox.check(target)
                 if not ok:
                     return Decision(effect="deny", reason=f"路径沙箱拦截: {reason}")
