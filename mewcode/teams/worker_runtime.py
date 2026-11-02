@@ -35,10 +35,10 @@ async def run_team_worker(
         result = await action()
         manager.update_worker_activity(team, agent_id, bool(queued))
         completed(result)
-        state("running" if queued else "listening")
         mailbox.write(team.lead_agent_id, create_message(
             name, team.lead_agent_id, f"[idle] {name}: completed task\n{result}", summary=f"{name} idle",
         ))
+        state("running" if queued else "listening")
 
     running: asyncio.Task[None] | None = asyncio.create_task(turn(initial_run))
     try:

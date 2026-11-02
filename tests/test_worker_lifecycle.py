@@ -228,6 +228,23 @@ async def test_real_headless_team_finishes_and_reaps_owned_listeners(isolated_ho
 
 
 @pytest.mark.asyncio
+async def test_listening_is_published_only_after_idle_delivery(isolated_home):
+    from mewcode.teams.worker_runtime import run_team_worker
+    manager = TeamManager()
+    team = manager.create_team("publication", "actual-lead", is_interactive=False)
+    manager.register_member(team.name, TeammateInfo("worker", "worker-id", "role", "offline", "", "in-process"))
+    mailbox = manager.get_mailbox(team.name)
+    async def run(prompt=""):
+        return "result"
+    def state_changed(state):
+        if state == "listening":
+            assert any("idle" in m.content for m in mailbox.read(team.lead_agent_id))
+            mailbox.write("worker-id", create_message("actual-lead", "worker-id", "stop", message_type="shutdown_request"))
+    await asyncio.wait_for(run_team_worker(manager, team.name, "worker-id", "worker", run, run,
+                                          lambda result: None, state_changed), 3)
+
+
+@pytest.mark.asyncio
 @pytest.mark.skipif(os.environ.get("MEWCODE_LONG_LISTENER_TEST") != "1", reason="explicit real >60s offline integration")
 async def test_real_listener_after_sixty_seconds(isolated_home):
     manager, team, tasks, tid, calls, sender = worker_fixture()

@@ -158,7 +158,12 @@ async def test_worker_real_sdk_followup_shutdown(native_pane, stop_running, tmp_
                             stderr=asyncio.subprocess.PIPE, env={**os.environ, "PYTHONPATH": str(ROOT)},
                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             def state_is(value):
-                return state_file.exists() and json.loads(state_file.read_text(encoding="utf-8"))["state"] == value
+                try:
+                    return json.loads(state_file.read_text(encoding="utf-8"))["state"] == value
+                except (OSError, ValueError):
+                    # Like PaneHandle.status: replacement may briefly deny a
+                    # Windows read. Keep polling; persistent errors still time out.
+                    return False
             if stop_running:
                 await until(lambda: len(requests) == 1 and state_is("running"))
             else:
