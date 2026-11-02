@@ -141,7 +141,9 @@ def parse_frontmatter(content: str) -> dict[str, str]:
 # Scanning
 # ---------------------------------------------------------------------------
 
-def scan_memory_files(memory_dir: Path, scope: str) -> list[MemoryHeader]:
+def scan_memory_files(
+    memory_dir: Path, scope: str, *, excluded_auto_keys: set[str] | None = None,
+) -> list[MemoryHeader]:
     """Walk memory_dir for .md files (excluding MEMORY.md), read frontmatter
     from each, and return a header list sorted newest-first, capped at
     MAX_MEMORY_FILES.
@@ -158,9 +160,11 @@ def scan_memory_files(memory_dir: Path, scope: str) -> list[MemoryHeader]:
         return []
 
     results: list[MemoryHeader] = []
+    excluded = excluded_auto_keys or set()
     for fp in md_files:
         hdr = _read_memory_header(fp, memory_dir, scope)
-        if hdr is not None:
+        if (hdr is not None and not hdr.auto_key.startswith("retired:")
+                and not (hdr.auto_key and hdr.auto_key in excluded)):
             results.append(hdr)
 
     # Sort newest-first.
@@ -254,9 +258,11 @@ async def find_relevant_memories(
     all_headers: list[MemoryHeader] = []
     # 同步 rglob + 逐文件读取放线程池，外层 wait_for 才能真正超时抢占
     if user_mem_dir is not None:
-        all_headers.extend(await asyncio.to_thread(scan_memory_files, user_mem_dir, "user"))
+        all_headers.extend(await asyncio.to_thread(scan_memory_files, user_mem_dir, "user",
+                                                   excluded_auto_keys=injected_keys))
     if project_mem_dir is not None:
-        all_headers.extend(await asyncio.to_thread(scan_memory_files, project_mem_dir, "project"))
+        all_headers.extend(await asyncio.to_thread(scan_memory_files, project_mem_dir, "project",
+                                                   excluded_auto_keys=injected_keys))
 
     surfaced = already_surfaced or set()
     injected = injected_keys or set()

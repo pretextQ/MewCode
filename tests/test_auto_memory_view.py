@@ -297,3 +297,22 @@ async def test_already_injected_auto_entries_skip_selector_but_manual_files_stil
                                  injected_keys=manager.injected_keys(conv))
     assert selector.await_count == 1 and "新增且尚未注入的知识" in selector.call_args.args[1]
     assert "喜欢简洁代码" not in selector.call_args.args[1]
+
+
+@pytest.mark.asyncio
+async def test_injected_auto_files_do_not_consume_manual_candidate_budget(tmp_path, monkeypatch):
+    from mewcode.conversation import ConversationManager
+    monkeypatch.setattr("mewcode.memory.recall.MAX_MEMORY_FILES", 2)
+    manager = MemoryManager(str(tmp_path / "project"))
+    manager.project_mem_dir.mkdir(parents=True)
+    manual = manager.project_mem_dir / "manual.md"
+    manual.write_text("---\nname: older manual\ntype: project\ndescription: manual positive control\n---\nkeep recall", encoding="utf-8")
+    os.utime(manual, (1, 1))
+    manager._write_memories(FACTS)
+    conv = ConversationManager()
+    conv.inject_long_term_memory("", manager.load())
+    selector = AsyncMock(return_value='{"selected_memories": ["manual.md"]}')
+    selected = await find_relevant_memories("q", manager.user_mem_dir, manager.project_mem_dir, None, None, selector,
+                                           injected_keys=manager.injected_keys(conv))
+    assert len(selected) == 1 and selected[0].path == str(manual.resolve())
+    assert selector.await_count == 1
