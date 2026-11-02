@@ -100,7 +100,7 @@ class InlinePermissionWidget(Vertical, can_focus=True):
         else:
             feedback.value = ""
             self.focus()
-        self.call_after_refresh(self.scroll_visible, animate=False, top=False)
+        self.call_after_refresh(self.scroll_visible, animate=False, top=False, immediate=True)
 
     def action_cursor_up(self) -> None:
         if self._cursor > 0:

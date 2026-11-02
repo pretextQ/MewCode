@@ -1502,7 +1502,8 @@ class MewCodeApp(App):
         self._details_open = False
         self._layout_details()
         await chat.mount(widget)
-        widget.call_after_refresh(widget.scroll_visible, animate=False, top=True)
+        # Already after layout: a second deferred scroll may have no refresh to run in.
+        widget.call_after_refresh(widget.scroll_visible, animate=False, top=True, immediate=True)
         # 权限提示弹窗期间禁用输入框
         try:
             self.query_one("#chat-input").disabled = True
