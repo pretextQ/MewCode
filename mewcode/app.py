@@ -1702,6 +1702,8 @@ class MewCodeApp(App):
 
     async def on_unmount(self) -> None:
         await self.task_manager.shutdown_all()
+        if hasattr(self, "team_manager"):
+            await self.team_manager.shutdown_all()
         # Textual cancels workers on shutdown; wait for bounded Git pipe cleanup too.
         workers = list(self.workers)
         for worker in workers:

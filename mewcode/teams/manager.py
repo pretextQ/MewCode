@@ -37,6 +37,7 @@ class TeamManager:
         self._inprocess_handles: dict[str, InProcessTeammateHandle] = {}
         self._pane_ids: dict[str, str] = {}  # agent_id -> pane_id (tmux/iterm2)
         self._task_handles: dict[str, tuple[TaskManager, str]] = {}
+        self._worker_process = False
         self._detected_backend: BackendType | None = None
         self._worktree_manager = worktree_manager
         self._trace_manager = trace_manager
@@ -94,7 +95,12 @@ class TeamManager:
         # 旧实现直接用原始名查询，display name 永远 miss
         slug = sanitize_team_name(name)
         if slug in self._teams:
-            return self._teams[slug]
+            team = self._teams[slug]
+            if self._worker_process:
+                team = AgentTeam.load(team.config_path)
+                self._teams[slug] = team
+            self._refresh_pane_activity(team)
+            return team
         if name in self._teams:
             return self._teams[name]
         team_dir = resolve_team_dir(name)
@@ -104,6 +110,25 @@ class TeamManager:
             self._teams[slug] = team
             return team
         return None
+
+    def attach_worker_team(self, config_path: str) -> AgentTeam:
+        team = AgentTeam.load(config_path)
+        self._worker_process = True
+        self._teams[team.name] = team
+        self._mailboxes[team.name] = Mailbox(Path(config_path).parent / "mailbox")
+        self._task_stores[team.name] = SharedTaskStore(Path(config_path).parent / "tasks.json")
+        return team
+
+    def update_worker_activity(self, team: AgentTeam, agent_id: str, active: bool) -> None:
+        team.set_member_active(agent_id, active)
+        if not self._worker_process:
+            team.save()
+
+    def _refresh_pane_activity(self, team: AgentTeam) -> None:
+        for member in team.members:
+            handle = self.get_pane_handle(member.agent_id, team)
+            if handle:
+                member.is_active = handle.status in ("starting", "ready", "running") and handle.exists(live_only=True)
 
     def get_task_store(self, team_name: str) -> SharedTaskStore | None:
         slug = sanitize_team_name(team_name)
@@ -169,6 +194,31 @@ class TeamManager:
     def register_pane_id(self, agent_id: str, pane_id: str) -> None:
         self._pane_ids[agent_id] = pane_id
 
+    def register_pane_handle(self, agent_id: str, handle: Any) -> None:
+        import json
+
+        from mewcode.atomic import atomic_write_text
+        self.register_pane_id(agent_id, handle.pane_id)
+        atomic_write_text(handle.state_file.with_suffix(".pane"),
+                          json.dumps({"pane_id": handle.pane_id, "backend": handle.backend,
+                                      "owner_pid": handle.owner_pid}))
+
+    def get_pane_handle(self, agent_id: str, team: AgentTeam | None = None) -> Any:
+        import json
+
+        from mewcode.teams.pane_handle import PaneHandle
+        from mewcode.teams.spawn_cli import state_path
+        if team is None:
+            team = next((t for t in self._teams.values() if t.get_member(agent_id)), None)
+        if team is None:
+            return None
+        path = state_path(team.config_path, agent_id)
+        try:
+            data = json.loads(path.with_suffix(".pane").read_text(encoding="utf-8"))
+            return PaneHandle(data["pane_id"], data["backend"], path, data.get("owner_pid", ""))
+        except (OSError, ValueError, KeyError):
+            return None
+
     def register_task_handle(self, agent_id: str, manager: TaskManager, task_id: str) -> None:
         self._task_handles[agent_id] = (manager, task_id)
 
@@ -177,13 +227,20 @@ class TeamManager:
             manager, task_id = self._task_handles[agent_id]
             return manager.is_live(task_id)
         handle = self._inprocess_handles.get(agent_id)
-        return handle is not None and not handle.done
+        if handle is not None:
+            return not handle.done
+        pane = self.get_pane_handle(agent_id)
+        return pane is not None and pane.online
 
     async def shutdown_team(self, team_name: str) -> None:
         team = self.get_team(team_name)
         if team is None:
             raise TeamError(f"Team '{team_name}' not found")
         for member in team.members:
+            pane = self.get_pane_handle(member.agent_id, team)
+            mailbox = self.get_mailbox(team_name)
+            if pane and mailbox and not await pane.stop(mailbox, member.agent_id, team.lead_agent_id):
+                raise TeamError(f"Pane worker '{member.name}' did not stop")
             if member.agent_id in self._task_handles:
                 manager, task_id = self._task_handles[member.agent_id]
                 if not await manager.stop(task_id):
@@ -197,6 +254,10 @@ class TeamManager:
                     raise TeamError(f"Worker '{member.name}' did not stop")
             member.is_active = False
         team.save()
+
+    async def shutdown_all(self) -> None:
+        for name in list(self._teams):
+            await self.shutdown_team(name)
 
 
     def get_pane_id(self, agent_id: str) -> str | None:
@@ -306,24 +367,29 @@ class TeamManager:
             if backend_type == BackendType.TMUX.value:
                 from mewcode.teams.spawn_tmux import kill_pane
                 kill_pane(pane_id)
+            elif backend_type == BackendType.ITERM2.value:
+                from mewcode.teams.spawn_iterm2 import kill_pane as close_session
+                close_session(pane_id)
         except Exception as e:
             log.warning("Failed to kill pane %s: %s", pane_id, e)
 
     def _cleanup_worktree(self, worktree_path: str) -> None:
         import subprocess
+
+        from mewcode.worktree.changes import has_worktree_changes
         try:
-            subprocess.run(
-                ["git", "worktree", "remove", worktree_path, "--force"],
-                capture_output=True, timeout=10,
-            )
+            # Team deletion is not permission to discard a teammate's edits or commits.
+            base = next((wt.head_commit for wt in self._worktree_manager.active.values()
+                         if wt.path == worktree_path), "") if self._worktree_manager else ""
+            if not base or has_worktree_changes(worktree_path, base):
+                log.info("Preserving worktree with changes or unknown base: %s", worktree_path)
+                return
+            result = subprocess.run(["git", "worktree", "remove", worktree_path],
+                                    capture_output=True, timeout=10)
+            if result.returncode:
+                log.warning("Preserving worktree after git removal failed: %s", worktree_path)
         except Exception as e:
-            log.warning("git worktree remove failed for %s: %s", worktree_path, e)
-            import shutil
-            try:
-                if Path(worktree_path).exists():
-                    shutil.rmtree(worktree_path, ignore_errors=True)
-            except Exception:
-                pass
+            log.warning("Preserving worktree after cleanup error for %s: %s", worktree_path, type(e).__name__)
 
     def _remove_dir(self, path: Path) -> None:
         import shutil

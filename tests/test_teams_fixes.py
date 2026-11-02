@@ -167,9 +167,12 @@ class TestSpawnQuoting:
             prompt="do it",
             mailbox_dir="/tmp/mb",
         )
-        assert "MEWCODE_TEAM_NAME='my team'" in cmd
-        assert "MEWCODE_TEAMMATE_NAME='alice smith'" in cmd
-        assert "MEWCODE_MAILBOX_DIR='/tmp/mb'" in cmd
+        import shlex
+
+        from mewcode.teams.spawn_cli import worker_parser
+        args = worker_parser().parse_args(shlex.split(cmd)[5:])
+        assert args.team_name == "my team" and args.name == "alice smith"
+        assert args.team_config.replace("\\", "/") == "/tmp/config.json"
 
     def test_quote_in_value_is_escaped(self):
         from mewcode.teams.spawn_tmux import build_cli_command
@@ -180,7 +183,7 @@ class TestSpawnQuoting:
             worktree_path="/tmp/wt",
             prompt="x",
         )
-        assert "rm -rf /" in cmd
-        assert "eve'; rm -rf /" not in cmd.replace("'\\''", ""), (
-            f"单引号未转义: {cmd}"
-        )
+        import shlex
+
+        from mewcode.teams.spawn_cli import worker_parser
+        assert worker_parser().parse_args(shlex.split(cmd)[5:]).name == "eve'; rm -rf /"

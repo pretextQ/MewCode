@@ -11,6 +11,7 @@ log = logging.getLogger(__name__)
 class TmuxPaneInfo:
     pane_id: str
     session: str
+    owner_pid: str = ""
 
 
 class TmuxSpawnError(Exception):
@@ -29,87 +30,39 @@ def _run_tmux(*args: str) -> str:
     return result.stdout.strip()
 
 
-def build_cli_command(
-    team_name: str,
-    teammate_name: str,
-    worktree_path: str,
-    prompt: str,
-    agent_type: str = "",
-    model: str = "",
-    mailbox_dir: str = "",
-) -> str:
-    parts = ["mewcode", "-p"]
-    parts.extend(["--work-dir", worktree_path])
-    if agent_type:
-        parts.extend(["--agent-type", agent_type])
-    if model:
-        parts.extend(["--model", model])
-    def _sh_quote(value: str) -> str:
-        # teammate 名由 LLM 生成可含空格/元字符：单引号包裹并转义内部单引号
-        return "'" + value.replace("'", "'\\''") + "'"
+def build_cli_command(*args, **kwargs) -> str:
+    import shlex
 
-    env_parts = [
-        f"MEWCODE_TEAM_NAME={_sh_quote(team_name)}",
-        f"MEWCODE_TEAMMATE_NAME={_sh_quote(teammate_name)}",
-    ]
-    if mailbox_dir:
-        env_parts.append(f"MEWCODE_MAILBOX_DIR={_sh_quote(mailbox_dir)}")
-    env_prefix = " ".join(env_parts)
-    cmd = " ".join(parts)
-    full_prompt = prompt.replace("'", "'\\''")
-    return f"{env_prefix} {cmd} '{full_prompt}'"
+    from mewcode.teams.spawn_cli import build_worker_argv
+    return "exec " + shlex.join(build_worker_argv(*args, **kwargs))
 
 
 def spawn_tmux_teammate(
-    team_name: str,
-    teammate_name: str,
-    worktree_path: str,
-    prompt: str,
-    agent_type: str = "",
-    model: str = "",
-    mailbox_dir: str = "",
+    team_name: str, teammate_name: str, worktree_path: str, prompt: str,
+    agent_type: str = "", model: str = "", mailbox_dir: str = "", **worker_options,
 ) -> TmuxPaneInfo:
-    window_name = f"{team_name}-{teammate_name}"
-
+    command = build_cli_command(team_name, teammate_name, worktree_path, prompt,
+                                agent_type, model, mailbox_dir, **worker_options)
     try:
-        pane_id = _run_tmux(
-            "split-window",
-            "-h",
-            "-P",
-            "-F", "#{pane_id}",
-            "-t", f"{team_name}",
-        )
+        pane_id = _run_tmux("split-window", "-h", "-d", "-P", "-F", "#{pane_id} #{pane_pid}",
+                            "-t", team_name, "-c", worktree_path, command)
     except TmuxSpawnError:
         try:
-            _run_tmux("new-window", "-t", f"{team_name}", "-n", window_name, "-P", "-F", "#{pane_id}")
-            pane_id = _run_tmux(
-                "split-window",
-                "-h",
-                "-P",
-                "-F", "#{pane_id}",
-                "-t", f"{team_name}:{window_name}",
-            )
+            pane_id = _run_tmux("new-window", "-d", "-t", team_name, "-n", teammate_name,
+                                "-P", "-F", "#{pane_id} #{pane_pid}", "-c", worktree_path, command)
         except TmuxSpawnError:
-            _run_tmux("new-session", "-d", "-s", team_name, "-n", window_name)
-            pane_id = _run_tmux(
-                "list-panes",
-                "-t", f"{team_name}:{window_name}",
-                "-F", "#{pane_id}",
-            ).split("\n")[0]
+            pane_id = _run_tmux("new-session", "-d", "-s", team_name, "-n", teammate_name,
+                                "-P", "-F", "#{pane_id} #{pane_pid}", "-c", worktree_path, command)
+    pane_id, owner_pid = pane_id.rsplit(" ", 1)
+    return TmuxPaneInfo(pane_id=pane_id, session=team_name, owner_pid=owner_pid)
 
-    cli_cmd = build_cli_command(
-        team_name=team_name,
-        teammate_name=teammate_name,
-        worktree_path=worktree_path,
-        prompt=prompt,
-        agent_type=agent_type,
-        model=model,
-        mailbox_dir=mailbox_dir,
-    )
-    _run_tmux("send-keys", "-t", pane_id, cli_cmd, "Enter")
 
-    log.info("Spawned tmux teammate %s in pane %s", teammate_name, pane_id)
-    return TmuxPaneInfo(pane_id=pane_id, session=team_name)
+def pane_exists(pane_id: str, *, live_only: bool = False, owner_pid: str = "") -> bool:
+    try:
+        dead, pid = _run_tmux("display-message", "-p", "-t", pane_id, "#{pane_dead} #{pane_pid}").split()
+        return (not owner_pid or pid == owner_pid) and (not live_only or dead == "0")
+    except TmuxSpawnError:
+        return False
 
 
 def send_keys_to_pane(pane_id: str, keys: str = "") -> None:

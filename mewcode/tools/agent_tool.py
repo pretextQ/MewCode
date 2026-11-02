@@ -417,7 +417,9 @@ class AgentTool(Tool[AgentToolParams]):
             )
 
         # 2. 创建 worktree
-        wt_name = f"team-{p.team_name}/{teammate_name}"
+        from mewcode.teams.pane_launch import new_worktree, worktree_name
+        wt_name = worktree_name(team.name, teammate_name)
+        owns_worktree = new_worktree(self._worktree_manager, wt_name)
         try:
             wt = await self._worktree_manager.create(wt_name, "HEAD")
         except Exception as e:
@@ -491,6 +493,7 @@ class AgentTool(Tool[AgentToolParams]):
         sub_agent._team_manager = self._team_manager
 
         # 7. 注册名称和成员信息
+        previous_registration = AgentNameRegistry.instance().resolve(teammate_name)
         AgentNameRegistry.instance().register(teammate_name, agent_id)
 
         member = TeammateInfo(
@@ -506,9 +509,9 @@ class AgentTool(Tool[AgentToolParams]):
 
         # 8. 按后端类型启动队友
         if backend in (BackendType.TMUX, BackendType.ITERM2):
-            return self._spawn_pane_teammate(
-                p, team, member, backend, wt, agent_id, teammate_name
-            )
+            from mewcode.teams.pane_launch import launch_pane_worker
+            return await launch_pane_worker(self, p, team, member, backend, wt,
+                                            sub_agent, conversation, owns_worktree, previous_registration)
 
         # 进程内模式：直接用 task_manager 执行并通知结果
         task_id = self._task_manager.launch(
@@ -526,57 +529,6 @@ class AgentTool(Tool[AgentToolParams]):
                 f"Worktree: {wt.path}\n"
                 f"Task ID: {task_id}\n"
                 f"The system will notify when it completes."
-            )
-        )
-
-
-    def _spawn_pane_teammate(
-        self, p: Any, team: Any, member: Any, backend: Any, wt: Any,
-        agent_id: str, teammate_name: str,
-    ) -> ToolResult:
-        from mewcode.teams.models import BackendType
-
-        mailbox = self._team_manager.get_mailbox(p.team_name)
-        mailbox_dir = str(mailbox._base_dir) if mailbox else ""
-
-        try:
-            if backend == BackendType.TMUX:
-                from mewcode.teams.spawn_tmux import spawn_tmux_teammate
-                pane_info = spawn_tmux_teammate(
-                    team_name=p.team_name,
-                    teammate_name=teammate_name,
-                    worktree_path=wt.path,
-                    prompt=p.prompt,
-                    agent_type=p.subagent_type or "",
-                    model=p.model or "",
-                    mailbox_dir=mailbox_dir,
-                )
-                self._team_manager.register_pane_id(agent_id, pane_info.pane_id)
-            elif backend == BackendType.ITERM2:
-                from mewcode.teams.spawn_iterm2 import spawn_iterm2_teammate
-                spawn_iterm2_teammate(
-                    team_name=p.team_name,
-                    teammate_name=teammate_name,
-                    worktree_path=wt.path,
-                    prompt=p.prompt,
-                    agent_type=p.subagent_type or "",
-                    model=p.model or "",
-                    mailbox_dir=mailbox_dir,
-                )
-        except Exception as e:
-            log.warning("Pane spawn failed, falling back to in-process: %s", e)
-            return ToolResult(
-                output=f"Pane spawn failed ({e}), teammate not started. Retry or set teammate_mode to in-process.",
-                is_error=True,
-            )
-
-        return ToolResult(
-            output=(
-                f"Teammate '{teammate_name}' spawned in team '{p.team_name}'.\n"
-                f"Agent ID: {agent_id}\n"
-                f"Backend: {backend.value} (pane)\n"
-                f"Worktree: {wt.path}\n"
-                f"The teammate is running in an independent process."
             )
         )
 
@@ -728,8 +680,9 @@ class AgentTool(Tool[AgentToolParams]):
         if self._provider_config is None:
             return None
 
+        from dataclasses import replace
+
         from mewcode.client import create_client
-        from mewcode.config import ProviderConfig
 
         model_map = {
             "haiku": "claude-haiku-4-5-20251001",
@@ -738,14 +691,7 @@ class AgentTool(Tool[AgentToolParams]):
         }
         model_id = model_map.get(model_alias, model_alias)
 
-        config = ProviderConfig(
-            name=f"sub-{model_alias}",
-            protocol=self._provider_config.protocol,
-            base_url=self._provider_config.base_url,
-            model=model_id,
-            api_key=self._provider_config.api_key,
-            context_window=self._provider_config.context_window,
-        )
+        config = replace(self._provider_config, name=f"sub-{model_alias}", model=model_id)
         try:
             return create_client(config)
         except Exception:

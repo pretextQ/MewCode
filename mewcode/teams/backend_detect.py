@@ -18,8 +18,8 @@ def _in_iterm2() -> bool:
     return os.environ.get("TERM_PROGRAM") == "iTerm.app"
 
 
-def _it2_available() -> bool:
-    return shutil.which("it2") is not None
+def _applescript_available() -> bool:
+    return shutil.which("osascript") is not None
 
 
 def _tmux_installed() -> bool:
@@ -50,10 +50,10 @@ def detect_backend(
         )
 
     if teammate_mode == "iterm2":
-        if _in_iterm2() and _it2_available():
+        if _in_iterm2() and _applescript_available():
             return BackendType.ITERM2
         raise BackendDetectionError(
-            "teammate_mode 'iterm2' is configured but iTerm2 + it2 CLI is not available.\n"
+            "teammate_mode 'iterm2' is configured but iTerm2 + osascript is not available.\n"
             "Or set 'teammate_mode: \"in-process\"' in config.yaml to use in-process backend."
         )
 
@@ -71,7 +71,7 @@ def detect_pane_backend(
     if _in_tmux_session():
         return BackendType.TMUX
 
-    if _in_iterm2() and _it2_available():
+    if _in_iterm2() and _applescript_available():
         return BackendType.ITERM2
 
     if _tmux_installed():
@@ -81,6 +81,6 @@ def detect_pane_backend(
         "No suitable terminal backend found for Agent Team.\n"
         "Install one of the following:\n"
         "  - tmux: brew install tmux\n"
-        "  - iTerm2 + it2 CLI: https://iterm2.com/utilities/it2check\n"
+        "  - iTerm2 + osascript: https://iterm2.com/documentation-scripting.html\n"
         "Or set 'teammate_mode: \"in-process\"' in config.yaml to use in-process backend."
     )

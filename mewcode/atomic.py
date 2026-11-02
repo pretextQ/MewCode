@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
 from pathlib import Path
 
 
@@ -15,6 +16,15 @@ def atomic_write_text(path: Path, content: str) -> None:
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        for attempt in range(10):
+            try:
+                os.replace(temporary, path)
+                break
+            except PermissionError:
+                # Windows readers may briefly deny delete sharing. Keep the
+                # complete temporary file and retry replacement, never truncate.
+                if attempt == 9:
+                    raise
+                time.sleep(0.02)
     finally:
         temporary.unlink(missing_ok=True)

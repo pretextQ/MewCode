@@ -343,13 +343,13 @@ class TestBackendDetect:
             result = detect_backend()
             assert result == BackendType.TMUX
 
-    def test_iterm2_with_it2(self):
+    def test_iterm2_with_applescript(self):
         env = {"TERM_PROGRAM": "iTerm.app"}
         with patch.dict(os.environ, env, clear=False):
             with patch("mewcode.teams.backend_detect.shutil.which") as mock_which:
                 def which_side_effect(cmd):
-                    if cmd == "it2":
-                        return "/usr/local/bin/it2"
+                    if cmd == "osascript":
+                        return "/usr/bin/osascript"
                     if cmd == "tmux":
                         return None
                     return None

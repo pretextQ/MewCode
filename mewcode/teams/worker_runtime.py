@@ -29,11 +29,9 @@ async def run_team_worker(
 
     async def turn(action: Callable[[], Awaitable[str]]) -> None:
         state("running")
-        team.set_member_active(agent_id, True)
-        team.save()
+        manager.update_worker_activity(team, agent_id, True)
         result = await action()
-        team.set_member_active(agent_id, False)
-        team.save()
+        manager.update_worker_activity(team, agent_id, False)
         completed(result)
         state("listening")
         mailbox.write(team.lead_agent_id, create_message(
@@ -58,6 +56,5 @@ async def run_team_worker(
                 prompt = "\n\n".join(f"[Message from {m.from_agent}] {m.content}" for m in text)
                 await turn(partial(run, prompt))
     finally:
-        team.set_member_active(agent_id, False)
         # Deletion callers must await the worker before removing its resources.
-        team.save()
+        manager.update_worker_activity(team, agent_id, False)

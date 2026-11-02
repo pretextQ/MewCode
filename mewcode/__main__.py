@@ -175,6 +175,10 @@ def _install_signal_handlers(stop: asyncio.Event) -> None:
 
 
 def main() -> None:
+    if len(sys.argv) > 1 and sys.argv[1] == "--teammate":
+        from mewcode.teams.spawn_cli import worker_main
+        worker_main(sys.argv[2:])
+        return
     # 调试日志默认写在仓库内的 .mewcode/debug.log；沙箱容器里 agent 的 cwd 是
     # job 的 worktree，写进去就成了"修复产物"的一部分（真机踩到：PR body 的
     # 改动统计里多出一个 .mewcode/debug.log）。容器用 MEWCODE_LOG_FILE 重定向。
@@ -194,7 +198,8 @@ def main() -> None:
         _serve_main(sys.argv[2:])
         return
 
-    parser = argparse.ArgumentParser(prog="mewcode", description="MewCode AI coding assistant")
+    parser = argparse.ArgumentParser(prog="mewcode", description="MewCode AI coding assistant",
+                                     epilog="Independent team worker: mewcode --teammate --help")
     parser.add_argument(
         "--mode",
         choices=[m.value for m in PermissionMode],
@@ -449,6 +454,7 @@ async def _run_prompt(config, permission_mode, hook_engine, prompt: str, output_
     finally:
         try:
             await task_manager.shutdown_all()
+            await team_manager.shutdown_all()
         finally:
             # 显式收尾 MCP stdio 子进程：不能依赖进程退出兜底（仓库已知坑）
             await close_mcp(mcp_result)

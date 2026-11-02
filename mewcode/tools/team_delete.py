@@ -19,7 +19,8 @@ class TeamDeleteParams(BaseModel):
 class TeamDeleteTool(Tool[TeamDeleteParams]):
     name = "TeamDelete"
     description = (
-        "Delete an Agent Team. Terminates all pane processes, removes worktrees, "
+        "Delete an Agent Team. Terminates owned pane processes, removes clean worktrees with a known base, "
+        "preserves worktrees containing edits or new commits, "
         "cleans up mailbox and team directory. Requires all members to be idle."
     )
     params_model = TeamDeleteParams
