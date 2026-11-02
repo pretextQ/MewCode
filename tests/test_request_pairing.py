@@ -17,6 +17,11 @@ from mewcode.tools import create_default_registry
 from mewcode.tools.base import StreamEnd, Tool, ToolCallComplete
 
 
+@pytest.fixture(autouse=True)
+def offline_environment(isolated_home, monkeypatch):
+    monkeypatch.chdir(isolated_home)
+
+
 class WaitParams(BaseModel):
     pass
 

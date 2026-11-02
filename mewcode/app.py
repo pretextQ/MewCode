@@ -1195,9 +1195,6 @@ class MewCodeApp(App):
                 f"{status_icon} 后台任务完成: [{task.id}] {task.name} — {task.status}"
             )
 
-            if hasattr(self, 'team_manager'):
-                self.team_manager.on_teammate_completed(task.agent.agent_id)
-
         if self._streaming or (self._agent_task and not self._agent_task.done()):
             return
         self._agent_task = asyncio.create_task(
@@ -1683,11 +1680,13 @@ class MewCodeApp(App):
                 self._stale_cleanup_task.cancel()
 
             if hasattr(self, 'team_manager'):
+                await self.task_manager.shutdown_all()
                 for name in list(self.team_manager._teams):
                     try:
                         team = self.team_manager._teams[name]
                         for m in team.members:
                             team.set_member_active(m.name, False)
+                        await self.team_manager.shutdown_team(name)
                         self.team_manager.delete_team(name)
                     except Exception:
                         pass
@@ -1702,6 +1701,7 @@ class MewCodeApp(App):
         self.exit()
 
     async def on_unmount(self) -> None:
+        await self.task_manager.shutdown_all()
         # Textual cancels workers on shutdown; wait for bounded Git pipe cleanup too.
         workers = list(self.workers)
         for worker in workers:

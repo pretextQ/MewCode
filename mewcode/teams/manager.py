@@ -20,7 +20,7 @@ from mewcode.teams.shared_task import SharedTaskStore
 from mewcode.teams.spawn_inprocess import InProcessTeammateHandle
 
 if TYPE_CHECKING:
-    pass
+    from mewcode.agents.task_manager import TaskManager
 
 log = logging.getLogger(__name__)
 
@@ -36,6 +36,7 @@ class TeamManager:
         self._mailboxes: dict[str, Mailbox] = {}
         self._inprocess_handles: dict[str, InProcessTeammateHandle] = {}
         self._pane_ids: dict[str, str] = {}  # agent_id -> pane_id (tmux/iterm2)
+        self._task_handles: dict[str, tuple[TaskManager, str]] = {}
         self._detected_backend: BackendType | None = None
         self._worktree_manager = worktree_manager
         self._trace_manager = trace_manager
@@ -168,6 +169,35 @@ class TeamManager:
     def register_pane_id(self, agent_id: str, pane_id: str) -> None:
         self._pane_ids[agent_id] = pane_id
 
+    def register_task_handle(self, agent_id: str, manager: TaskManager, task_id: str) -> None:
+        self._task_handles[agent_id] = (manager, task_id)
+
+    def member_is_online(self, agent_id: str) -> bool:
+        if agent_id in self._task_handles:
+            manager, task_id = self._task_handles[agent_id]
+            return manager.is_live(task_id)
+        handle = self._inprocess_handles.get(agent_id)
+        return handle is not None and not handle.done
+
+    async def shutdown_team(self, team_name: str) -> None:
+        team = self.get_team(team_name)
+        if team is None:
+            raise TeamError(f"Team '{team_name}' not found")
+        for member in team.members:
+            if member.agent_id in self._task_handles:
+                manager, task_id = self._task_handles[member.agent_id]
+                if not await manager.stop(task_id):
+                    raise TeamError(f"Worker '{member.name}' did not stop")
+            handle = self._inprocess_handles.get(member.agent_id)
+            if handle and not handle.done:
+                import asyncio
+                handle.cancel()
+                _, pending = await asyncio.wait([handle.task], timeout=5)
+                if pending:
+                    raise TeamError(f"Worker '{member.name}' did not stop")
+            member.is_active = False
+        team.save()
+
 
     def get_pane_id(self, agent_id: str) -> str | None:
         return self._pane_ids.get(agent_id)
@@ -182,9 +212,13 @@ class TeamManager:
             names = ", ".join(m.name for m in active)
             raise TeamError(f"Cannot delete team: active members: {names}")
 
+        if any(self.member_is_online(m.agent_id) for m in team.members):
+            raise TeamError("Await shutdown_team before deleting listening workers")
+
         for member in list(team.members):
             AgentNameRegistry.instance().unregister(member.name)
             self._teammate_team_map.pop(member.agent_id, None)
+            self._task_handles.pop(member.agent_id, None)
 
             handle = self._inprocess_handles.pop(member.agent_id, None)
             if handle and not handle.done:

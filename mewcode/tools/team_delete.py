@@ -38,6 +38,11 @@ class TeamDeleteTool(Tool[TeamDeleteParams]):
         from mewcode.teams.manager import TeamError
 
         try:
+            team = self._team_manager.get_team(p.team_name)
+            if team and team.active_members():
+                names = ", ".join(m.name for m in team.active_members())
+                raise TeamError(f"Cannot delete team: active members: {names}")
+            await self._team_manager.shutdown_team(p.team_name)
             self._team_manager.delete_team(p.team_name)
         except TeamError as e:
             return ToolResult(output=str(e), is_error=True)

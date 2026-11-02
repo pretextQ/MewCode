@@ -447,8 +447,11 @@ async def _run_prompt(config, permission_mode, hook_engine, prompt: str, output_
             payload = _summary_payload(agent, last_result, counters, mcp_tools_used)
             print(json.dumps(payload, ensure_ascii=False), flush=True)
     finally:
-        # 显式收尾 MCP stdio 子进程：不能依赖进程退出兜底（仓库已知坑）
-        await close_mcp(mcp_result)
+        try:
+            await task_manager.shutdown_all()
+        finally:
+            # 显式收尾 MCP stdio 子进程：不能依赖进程退出兜底（仓库已知坑）
+            await close_mcp(mcp_result)
 
 
 if __name__ == "__main__":

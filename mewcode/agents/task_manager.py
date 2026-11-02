@@ -5,7 +5,7 @@ import logging
 import secrets
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -41,7 +41,7 @@ class TaskManager:
 
     def __init__(self) -> None:
         self._tasks: dict[str, BackgroundTask] = {}
-        self._notify_queue: asyncio.Queue[str] = asyncio.Queue()
+        self._notify_queue: asyncio.Queue[BackgroundTask] = asyncio.Queue()
         self._async_tasks: dict[str, asyncio.Task[None]] = {}
 
 
@@ -67,6 +67,9 @@ class TaskManager:
         self._async_tasks[task_id] = async_task
 
         bg.cancel = async_task.cancel
+        async_task.add_done_callback(lambda task: self._finalize(bg, task))
+        if agent.team_name and agent._team_manager:
+            agent._team_manager.register_task_handle(agent.agent_id, self, task_id)
         return task_id
 
 
@@ -77,55 +80,24 @@ class TaskManager:
         if bg is None:
             return
 
-        notified = False
         try:
-            if fork_conversation is not None:
-                result = await bg.agent.run_to_completion("", fork_conversation)
-            else:
-                result = await bg.agent.run_to_completion(bg.task)
-            bg.result = result
-            bg.status = "completed"
-
-            # 完成通知立即入队，与后续的邮箱监听解耦——
-            # 否则团队任务的完成消息会被推迟最多 60s
-            await self._notify_queue.put(task_id)
-            notified = True
+            async def initial_run() -> str:
+                if fork_conversation is not None:
+                    result = await bg.agent.run_to_completion("", fork_conversation)
+                else:
+                    result = await bg.agent.run_to_completion(bg.task)
+                return (bg.result + "\n" + result).strip() if bg.result else result
 
             if bg.agent.team_name and bg.agent._team_manager:
-                mailbox = bg.agent._team_manager.get_mailbox(bg.agent.team_name)
-                if mailbox:
-                    from mewcode.teams.mailbox import create_message
-                    msg = create_message(
-                        from_agent=bg.name,
-                        to_agent="lead",
-                        content=f"[idle] {bg.name}: completed initial task",
-                        summary=f"{bg.name} idle",
-                    )
-                    mailbox.write("lead", msg)
-
-                    # listening：主循环已结束，等待邮箱消息触发后续轮次
-                    bg.status = "listening"
-                    for _ in range(60):
-                        await asyncio.sleep(1)
-                        msgs = mailbox.consume(bg.agent.agent_id)
-                        if not msgs:
-                            continue
-                        prompt = "\n\n".join(
-                            f"[Message from {m.from_agent}] {m.content}" for m in msgs
-                        )
-                        bg.status = "running"
-                        result = await bg.agent.run_to_completion(prompt)
-                        bg.result = result
-                        bg.status = "listening"
-                        msg = create_message(
-                            from_agent=bg.name,
-                            to_agent="lead",
-                            content=f"[idle] {bg.name}: completed follow-up",
-                            summary=f"{bg.name} idle",
-                        )
-                        mailbox.write("lead", msg)
-                        await self._notify_queue.put(task_id)
-
+                from mewcode.teams.worker_runtime import run_team_worker
+                await run_team_worker(
+                    bg.agent._team_manager, bg.agent.team_name, bg.agent.agent_id, bg.name,
+                    initial_run, bg.agent.run_to_completion,
+                    lambda result: self._completed_turn(bg, result),
+                    lambda status: setattr(bg, "status", status),
+                )
+            else:
+                self._completed_turn(bg, await initial_run())
         except asyncio.CancelledError:
             bg.status = "cancelled"
             bg.result = "Task was cancelled"
@@ -135,12 +107,38 @@ class TaskManager:
             bg.status = "failed"
             bg.result = f"Error: {e}"
         finally:
-            bg.end_time = time.monotonic()
-            bg.progress.input_tokens = bg.agent.total_input_tokens
-            bg.progress.output_tokens = bg.agent.total_output_tokens
-            self._async_tasks.pop(task_id, None)
-            if not notified:
-                await self._notify_queue.put(task_id)
+            self._finish(bg)
+
+    def _completed_turn(self, bg: BackgroundTask, result: str) -> None:
+        bg.result = result
+        bg.status = "completed"
+        self._notify_queue.put_nowait(replace(
+            bg, end_time=time.monotonic(), progress=replace(bg.progress,
+                input_tokens=bg.agent.total_input_tokens, output_tokens=bg.agent.total_output_tokens),
+        ))
+
+    def _finish(self, bg: BackgroundTask) -> None:
+        if bg.end_time is not None:
+            return
+        bg.end_time = time.monotonic()
+        bg.progress.input_tokens = bg.agent.total_input_tokens
+        bg.progress.output_tokens = bg.agent.total_output_tokens
+        if bg.agent.team_name and bg.agent._team_manager:
+            team = bg.agent._team_manager.get_team(bg.agent.team_name)
+            if team:
+                team.set_member_active(bg.agent.agent_id, False)
+                team.save()
+        if bg.status != "completed":
+            self._notify_queue.put_nowait(replace(bg, progress=replace(bg.progress)))
+
+    def _finalize(self, bg: BackgroundTask, task: asyncio.Task[None]) -> None:
+        # Cancellation before the coroutine's first instruction bypasses finally.
+        if bg.end_time is None:
+            bg.status = "cancelled" if task.cancelled() else "failed"
+            bg.result = "Task was cancelled" if task.cancelled() else "Worker exited unexpectedly"
+            self._finish(bg)
+        self._async_tasks.pop(bg.id, None)
+
 
 
     def adopt_running(
@@ -163,32 +161,14 @@ class TaskManager:
         async_task = asyncio.create_task(self._continue_background(task_id))
         self._async_tasks[task_id] = async_task
         bg.cancel = async_task.cancel
+        async_task.add_done_callback(lambda task: self._finalize(bg, task))
+        if agent.team_name and agent._team_manager:
+            agent._team_manager.register_task_handle(agent.agent_id, self, task_id)
         return task_id
 
 
     async def _continue_background(self, task_id: str) -> None:
-        bg = self._tasks.get(task_id)
-        if bg is None:
-            return
-
-        try:
-            result = await bg.agent.run_to_completion(bg.task)
-            bg.result = (bg.result + "\n" + result).strip() if bg.result else result
-            bg.status = "completed"
-        except asyncio.CancelledError:
-            bg.status = "cancelled"
-            bg.result = "Task was cancelled"
-            raise
-        except Exception as e:
-            log.error("Background task %s failed: %s", task_id, e)
-            bg.status = "failed"
-            bg.result = f"Error: {e}"
-        finally:
-            bg.end_time = time.monotonic()
-            bg.progress.input_tokens = bg.agent.total_input_tokens
-            bg.progress.output_tokens = bg.agent.total_output_tokens
-            self._async_tasks.pop(task_id, None)
-            await self._notify_queue.put(task_id)
+        await self._run_background(task_id)
 
     def get(self, task_id: str) -> BackgroundTask | None:
         return self._tasks.get(task_id)
@@ -206,26 +186,51 @@ class TaskManager:
             return True
         return False
 
-    def has_pending_work(self) -> bool:
-        """是否存在仍在运行/监听的后台任务，或尚未消费的完成通知。
+    async def stop(self, task_id: str, timeout: float = 5.0) -> bool:
+        handle = self._async_tasks.get(task_id)
+        if handle is None or handle.done():
+            return True
+        handle.cancel()
+        done, _ = await asyncio.wait([handle], timeout=timeout)
+        return bool(done)
 
-        非交互运行的门控依据：不关心具体是团队还是普通后台任务。
-        """
+    async def shutdown_all(self) -> None:
+        handles = list(self._async_tasks.values())
+        for handle in handles:
+            handle.cancel()
+        if handles:
+            done, pending = await asyncio.wait(handles, timeout=5)
+            if pending:
+                raise RuntimeError("Background workers did not stop within 5 seconds")
+
+    def is_live(self, task_id: str) -> bool:
+        handle = self._async_tasks.get(task_id)
+        return handle is not None and not handle.done() and not handle.cancelling()
+
+    def has_pending_work(self) -> bool:
+        """Outstanding turns/notifications keep headless alive; idle listeners do not."""
         if not self._notify_queue.empty():
             return True
         for bg in self._tasks.values():
-            if bg.status in ("running", "listening"):
+            if not self.is_live(bg.id):
+                continue
+            if bg.status == "running":
                 return True
-        return any(not t.done() for t in self._async_tasks.values())
+            if bg.status == "listening" and bg.agent._team_manager:
+                mailbox = bg.agent._team_manager.get_mailbox(bg.agent.team_name)
+                if mailbox and any(m.message_type in ("text", "shutdown_request")
+                                   for m in mailbox.read(bg.agent.agent_id)):
+                    return True
+        return False
 
     def poll_completed(self) -> list[BackgroundTask]:
         completed: list[BackgroundTask] = []
         while not self._notify_queue.empty():
             try:
-                task_id = self._notify_queue.get_nowait()
-                bg = self._tasks.pop(task_id, None)
-                if bg is not None:
-                    completed.append(bg)
+                snapshot = self._notify_queue.get_nowait()
+                completed.append(snapshot)
+                if not self.is_live(snapshot.id):
+                    self._tasks.pop(snapshot.id, None)
             except asyncio.QueueEmpty:
                 break
         return completed

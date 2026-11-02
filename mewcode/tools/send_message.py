@@ -67,7 +67,6 @@ class SendMessageTool(Tool[SendMessageParams]):
             )
 
         from mewcode.teams.mailbox import create_message
-        from mewcode.teams.registry import AgentNameRegistry
 
         team = self._team_manager.get_team(self._team_name)
         if team is None:
@@ -86,8 +85,6 @@ class SendMessageTool(Tool[SendMessageParams]):
             metadata=p.metadata,
         )
 
-        registry = AgentNameRegistry.instance()
-
         if p.to == "*":
             member_ids = [
                 m.agent_id for m in team.members
@@ -95,16 +92,24 @@ class SendMessageTool(Tool[SendMessageParams]):
             ]
             if team.lead_agent_id != self._from_agent_id:
                 member_ids.append(team.lead_agent_id)
+            offline = [aid for aid in member_ids if aid != team.lead_agent_id
+                       and not self._team_manager.member_is_online(aid)]
+            if offline:
+                return ToolResult(output=f"Recipients offline; nothing sent: {', '.join(offline)}", is_error=True)
             mailbox.broadcast(member_ids, msg, exclude=self._from_agent_id)
             self._wake_pane_members(team, member_ids)
             return ToolResult(output=f"Message broadcast to {len(member_ids)} teammates.")
 
-        target_id = registry.resolve(p.to)
+        member = team.get_member(p.to)
+        target_id = team.lead_agent_id if p.to in ("lead", team.lead_agent_id) else member.agent_id if member else None
         if target_id is None:
             return ToolResult(
                 output=f"Cannot resolve recipient '{p.to}'. Check the name or agent ID.",
                 is_error=True,
             )
+
+        if target_id != team.lead_agent_id and not self._team_manager.member_is_online(target_id):
+            return ToolResult(output=f"Recipient '{p.to}' is offline; no worker is listening.", is_error=True)
 
         mailbox.write(target_id, msg)
         self._wake_pane(target_id)

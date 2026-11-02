@@ -744,31 +744,26 @@ class TestAgentExtensions:
 # F3.4 后台任务状态机
 # ---------------------------------------------------------------------------
 
-class _FakeMailbox:
-    def write(self, to_agent, msg):
-        pass
-
-    def consume(self, agent_id):
-        return []
-
-
-class _FakeTeamManager:
-    def get_mailbox(self, name):
-        return _FakeMailbox()
-
-
 class _FakeBgAgent:
-    team_name = "team1"
     agent_id = "a1"
-    _team_manager = _FakeTeamManager()
     total_input_tokens = 0
     total_output_tokens = 0
+
+    def __init__(self):
+        from mewcode.teams.manager import TeamManager
+        from mewcode.teams.models import TeammateInfo
+        self._team_manager = TeamManager()
+        team = self._team_manager.create_team("team1", "actual-lead", is_interactive=False)
+        self.team_name = team.name
+        self._team_manager.register_member(team.name, TeammateInfo("worker", self.agent_id, "worker", "offline",
+                                                                  "", "in-process", True))
 
     async def run_to_completion(self, prompt, conversation=None):
         await asyncio.sleep(0.01)
         return "done"
 
 
+@pytest.mark.usefixtures("isolated_home")
 class TestTaskManagerStateMachine:
     @pytest.mark.asyncio
     async def test_completion_notification_immediate(self):
@@ -807,8 +802,8 @@ class TestTaskManagerStateMachine:
         await asyncio.wait_for(_wait_cancelled(), timeout=2.0)
 
     @pytest.mark.asyncio
-    async def test_poll_completed_removes_tasks(self):
-        """poll_completed 消费后任务从 _tasks 移除，不无界增长。"""
+    async def test_poll_completed_preserves_live_listener_then_removes_terminal_task(self):
+        """Notifications do not remove live handles; terminal tasks are pruned."""
         from mewcode.agents.task_manager import TaskManager
 
         tm = TaskManager()
@@ -821,6 +816,9 @@ class TestTaskManagerStateMachine:
         await asyncio.wait_for(_wait_notify(), timeout=3.0)
         completed = tm.poll_completed()
         assert len(completed) == 1
+        assert task_id in tm._tasks
+        assert await tm.stop(task_id)
+        tm.poll_completed()
         assert task_id not in tm._tasks
 
     @pytest.mark.asyncio
