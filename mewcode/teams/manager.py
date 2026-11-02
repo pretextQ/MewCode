@@ -232,28 +232,49 @@ class TeamManager:
         pane = self.get_pane_handle(agent_id)
         return pane is not None and pane.online
 
+    async def stop_member(self, team_name: str, agent_id: str, *, timeout: float = 5,
+                          terminal_status: str = "stopped") -> bool:
+        team = self.get_team(team_name)
+        member = team.get_member(agent_id) if team else None
+        if team is None or member is None:
+            raise TeamError("Unknown team member")
+        if agent_id in self._task_handles:
+            manager, task_id = self._task_handles[agent_id]
+            if not await manager.stop(task_id, timeout, terminal_status=terminal_status):
+                return False
+        handle = self._inprocess_handles.get(agent_id)
+        if handle and not handle.done:
+            import asyncio
+            if not handle.task.cancelling():
+                handle.cancel()
+            _, pending = await asyncio.wait([handle.task], timeout=timeout)
+            if pending:
+                return False
+        pane = self.get_pane_handle(agent_id, team)
+        mailbox = self.get_mailbox(team_name)
+        if pane:
+            if not mailbox or not await pane.stop(mailbox, agent_id, team.lead_agent_id, timeout=min(timeout, 3)):
+                return False
+            import json
+
+            from mewcode.atomic import atomic_write_text
+            try:
+                data = json.loads(pane.state_file.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                data = {}
+            data.update(state="stopped", stopped_by=team.lead_agent_id)
+            atomic_write_text(pane.state_file, json.dumps(data))
+        member.is_active = False
+        team.save()
+        return True
+
     async def shutdown_team(self, team_name: str) -> None:
         team = self.get_team(team_name)
         if team is None:
             raise TeamError(f"Team '{team_name}' not found")
         for member in team.members:
-            pane = self.get_pane_handle(member.agent_id, team)
-            mailbox = self.get_mailbox(team_name)
-            if pane and mailbox and not await pane.stop(mailbox, member.agent_id, team.lead_agent_id):
-                raise TeamError(f"Pane worker '{member.name}' did not stop")
-            if member.agent_id in self._task_handles:
-                manager, task_id = self._task_handles[member.agent_id]
-                if not await manager.stop(task_id):
-                    raise TeamError(f"Worker '{member.name}' did not stop")
-            handle = self._inprocess_handles.get(member.agent_id)
-            if handle and not handle.done:
-                import asyncio
-                handle.cancel()
-                _, pending = await asyncio.wait([handle.task], timeout=5)
-                if pending:
-                    raise TeamError(f"Worker '{member.name}' did not stop")
-            member.is_active = False
-        team.save()
+            if not await self.stop_member(team_name, member.agent_id, terminal_status="cancelled"):
+                raise TeamError(f"Worker '{member.name}' did not stop")
 
     async def shutdown_all(self) -> None:
         for name in list(self._teams):

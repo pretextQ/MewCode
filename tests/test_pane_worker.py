@@ -88,8 +88,9 @@ async def until(predicate, timeout=12):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("native_pane", [False, True], ids=["subprocess", "tmux"])
-async def test_worker_real_sdk_followup_shutdown(native_pane, tmp_path, monkeypatch):
+@pytest.mark.parametrize("native_pane,stop_running", [(False, False), (True, False), (True, True)],
+                         ids=["subprocess", "tmux", "tmux-taskstop-running"])
+async def test_worker_real_sdk_followup_shutdown(native_pane, stop_running, tmp_path, monkeypatch):
     from aiohttp import web
 
     from mewcode.config import ProviderConfig
@@ -107,10 +108,13 @@ async def test_worker_real_sdk_followup_shutdown(native_pane, tmp_path, monkeypa
     member = TeammateInfo("中文 worker 'x", "worker-id", "role", "offline-model", str(tmp_path), "tmux", True)
     manager.register_member(team.name, member)
     requests = []
+    release_response = asyncio.Event()
 
     async def reply(request):
         requests.append(await request.json())
         assert request.headers["Authorization"] == "Bearer offline-test-token"
+        if stop_running:
+            await release_response.wait()
         event = {"id": "offline", "object": "chat.completion.chunk", "created": 0, "model": "offline-model",
                  "choices": [{"index": 0, "delta": {"content": "offline result"}, "finish_reason": "stop"}]}
         return web.Response(text="data: " + json.dumps(event) + "\n\ndata: [DONE]\n\n", content_type="text/event-stream")
@@ -155,11 +159,25 @@ async def test_worker_real_sdk_followup_shutdown(native_pane, tmp_path, monkeypa
                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             def state_is(value):
                 return state_file.exists() and json.loads(state_file.read_text(encoding="utf-8"))["state"] == value
-            await until(lambda: state_is("listening"))
+            if stop_running:
+                await until(lambda: len(requests) == 1 and state_is("running"))
+            else:
+                await until(lambda: state_is("listening"))
         identity = json.loads(state_file.read_text(encoding="utf-8"))
         assert identity["agent_id"] == "worker-id" and identity["parent_id"] == "parent-id"
         assert identity["trace_id"] == "trace-id" and identity["model"] == "offline-model"
         assert requests[0]["model"] == "offline-model" and "offline role policy" in str(requests[0])
+        if stop_running:
+            from mewcode.tools.task_stop import TaskStopParams, TaskStopTool
+            stopper = TaskStopTool(manager, team.lead_agent_id, timeout=3)
+            with patch("mewcode.teams.spawn_tmux.kill_pane") as force_kill:
+                stopped = await stopper.execute(TaskStopParams(agent_id=member.agent_id))
+                assert not stopped.is_error, stopped.output
+                assert not pane.exists()
+                force_kill.assert_not_called()
+            assert not (await stopper.execute(TaskStopParams(agent_id=member.agent_id))).is_error
+            assert len(requests) == 1
+            return
         mailbox = manager.get_mailbox(team.name)
         assert "idle" in str(manager.drain_lead_mailbox())
         mailbox.write(member.agent_id, create_message("parent-id", member.agent_id, "follow-up"))
@@ -182,6 +200,7 @@ async def test_worker_real_sdk_followup_shutdown(native_pane, tmp_path, monkeypa
         assert all("offline-test-token" not in p.read_text(encoding="utf-8")
                    for p in Path(team.config_path).parent.rglob("*.json"))
     finally:
+        release_response.set()
         if process and process.returncode is None:
             process.kill()
             await process.wait()

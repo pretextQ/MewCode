@@ -34,6 +34,7 @@ class BackgroundTask:
     end_time: float | None = None
     cancel: Callable[[], bool] | None = None
     progress: ProgressInfo = field(default_factory=ProgressInfo)
+    stop_status: str = "cancelled"
 
 
 class TaskManager:
@@ -99,8 +100,8 @@ class TaskManager:
             else:
                 self._completed_turn(bg, await initial_run())
         except asyncio.CancelledError:
-            bg.status = "cancelled"
-            bg.result = "Task was cancelled"
+            bg.status = bg.stop_status
+            bg.result = "Worker was stopped" if bg.stop_status == "stopped" else "Task was cancelled"
             raise
         except Exception as e:
             log.error("Background task %s failed: %s", task_id, e)
@@ -134,8 +135,8 @@ class TaskManager:
     def _finalize(self, bg: BackgroundTask, task: asyncio.Task[None]) -> None:
         # Cancellation before the coroutine's first instruction bypasses finally.
         if bg.end_time is None:
-            bg.status = "cancelled" if task.cancelled() else "failed"
-            bg.result = "Task was cancelled" if task.cancelled() else "Worker exited unexpectedly"
+            bg.status = bg.stop_status if task.cancelled() else "failed"
+            bg.result = f"Task was {bg.stop_status}" if task.cancelled() else "Worker exited unexpectedly"
             self._finish(bg)
         self._async_tasks.pop(bg.id, None)
 
@@ -182,22 +183,28 @@ class TaskManager:
             return False
         async_task = self._async_tasks.get(task_id)
         if async_task and not async_task.done():
-            async_task.cancel()
+            if not async_task.cancelling():
+                async_task.cancel()
             return True
         return False
 
-    async def stop(self, task_id: str, timeout: float = 5.0) -> bool:
+    async def stop(self, task_id: str, timeout: float = 5.0, *, terminal_status: str = "cancelled") -> bool:
         handle = self._async_tasks.get(task_id)
         if handle is None or handle.done():
             return True
-        handle.cancel()
+        bg = self._tasks.get(task_id)
+        if bg:
+            bg.stop_status = terminal_status
+        if not handle.cancelling():
+            handle.cancel()
         done, _ = await asyncio.wait([handle], timeout=timeout)
         return bool(done)
 
     async def shutdown_all(self) -> None:
         handles = list(self._async_tasks.values())
         for handle in handles:
-            handle.cancel()
+            if not handle.cancelling():
+                handle.cancel()
         if handles:
             done, pending = await asyncio.wait(handles, timeout=5)
             if pending:

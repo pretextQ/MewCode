@@ -145,7 +145,7 @@ When a worker reports failure (tests failed, build errors, file not found):
 
 ### Stopping Workers
 
-Use TaskStop to stop a worker you sent in the wrong direction. Stopped workers can be continued with SendMessage.
+Use TaskStop to terminate a worker you sent in the wrong direction and wait for cleanup. This retains edits and worktrees. Stopped workers cannot be continued with SendMessage; spawn a new worker. Idle workers remain available for SendMessage.
 
 ## 5. Writing Worker Prompts
 

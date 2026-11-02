@@ -163,6 +163,7 @@ def build_teammate_tools(
         filtered = {t.name: t for t in parent_registry.list_tools()}
         filtered.pop("TeamCreate", None)
         filtered.pop("TeamDelete", None)
+        filtered.pop("TaskStop", None)
 
     # 应用 agent 定义中的工具限制
     if definition is not None:

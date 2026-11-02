@@ -27,3 +27,11 @@ pane 后端使用单一 `build_worker_argv` 和 `mewcode --teammate` 解析器�
 父进程最多等待 10 秒就绪，初始化退出或超时返回错误；不会自动改换后端。失败时确认回收本次 pane，撤销本次成员、名字与 trace，仅自动删除本次新建且无改动的 worktree。失败前已有的同名注册、已有/有改动的 worktree 保留；无法回收时明确报错并保留可追踪记录。tmux pane 的进程 ID 用于避免误关被复用的 pane ID。团队删除也保留有改动、有新提交或基线未知的 worktree。
 
 验证入口：`tests/test_pane_worker.py` 覆盖真实 CLI、离线 SDK/子进程、错误初始化与失败资源清理。Linux 可用 `MEWCODE_TMUX_TEST=1` 在隔离环境运行真 tmux；本轮 Docker 的 network=none，HTTP 模型替身只在容器本机响应。iTerm2 仅测参数/脚本调用契约，未执行 macOS 实窗；PTY/pane 验证不替代原终端待办 1 的人工验收。
+
+## TaskStop（A2）
+
+TeamCreate 在配置 `enable_coordinator_mode=true` 且环境 `MEWCODE_COORDINATOR_MODE=1` 同时满足时，实际注册 TaskStop 与团队 lead 的 SendMessage。TaskStop 不加入普通模式的完整注册表，也从普通子代理和两类队友工具集中剔除。它只控制当前 lead 拥有的团队，参数 `agent_id` 接受成员名或成员 ID，可选 `team_name` 消除重名；未知、跨团队或歧义目标返回可操作成员列表。
+
+TaskStop 是终止操作：运行中和 idle 成员都可停止，重复调用幂等。TaskManager 的真实 launch 句柄会取消并等待收尾；pane 先发送 shutdown，运行时独立检查控制消息、取消并等待当前轮，超时才关闭拥有的 pane，再确认它已退出。无法确认收尾返回错误，不提前宣称 stopped。停止通知与任务状态使用 stopped；普通取消仍是 cancelled。
+
+停止保留团队、worktree 和编辑；它不回滚副作用。停止后的 SendMessage 返回离线错误，需要显式创建新 worker。正常 idle 成员仍可继续派工。验证入口：`tests/test_task_stop.py` 和 `tests/test_pane_worker.py` 的运行中真 tmux TaskStop 集成；所有模型使用离线脚本或本机 HTTP 替身。

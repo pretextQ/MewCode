@@ -99,10 +99,16 @@ class TeamCreateTool(Tool[TeamCreateParams]):
         from mewcode.teams.coordinator import is_coordinator_mode
         if is_coordinator_mode(self._enable_coordinator_mode):
             from mewcode.agents.tool_filter import apply_coordinator_filter
+            from mewcode.tools.send_message import SendMessageTool
+            from mewcode.tools.task_stop import TaskStopTool
             self._parent_agent.coordinator_mode = True
             self._parent_agent._team_manager = self._team_manager
-            self._parent_agent._full_registry = self._parent_agent.registry
-            self._parent_agent.registry = apply_coordinator_filter(self._parent_agent.registry)
+            full = self._parent_agent._full_registry or self._parent_agent.registry
+            self._parent_agent._full_registry = full
+            scoped = apply_coordinator_filter(full)
+            scoped.register(TaskStopTool(self._team_manager, self._parent_agent.agent_id))
+            scoped.register(SendMessageTool(self._team_manager, team.name, self._parent_agent.agent_id, "lead"))
+            self._parent_agent.registry = scoped
             coordinator_note = "\nCoordinator Mode activated: tools narrowed to dispatch-only."
 
         return ToolResult(
