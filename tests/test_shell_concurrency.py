@@ -184,9 +184,12 @@ async def test_parallel_pre_rejection_post_hooks_and_supervision(tmp_path, monke
     first, second = native_read('one.txt'), native_read('two.txt')
     for name in ['one.txt', 'two.txt']:
         (tmp_path / name).write_text(name)
-    logger, log = tmp_path / 'hook.py', tmp_path / 'hooks.jsonl'
+    logger, log = tmp_path / 'hook.py', tmp_path / 'hook-records'
+    log.mkdir()
     logger.write_text('import sys, json\nfrom pathlib import Path\ndata=json.load(sys.stdin)\n'
-                      f'with Path({str(log)!r}).open("a") as f: f.write(json.dumps(data) + "\\n")\n'
+                      f'path=Path({str(log)!r}) / ("one.jsonl" if data["args"]["command"] == {first!r} else "two.jsonl")\n'
+                      'with path.open("a") as f: f.write(json.dumps(data) + "\\n")\n'
+                      'print("hook recorded")\n'
                       f'sys.exit(1 if data["event"] == "pre_tool_use" and data["args"]["command"] == {first!r} else 0)\n')
     action = Action(type='command', command=shell_command([sys.executable, str(logger)]))
     hooks = HookEngine([
@@ -210,12 +213,16 @@ async def test_parallel_pre_rejection_post_hooks_and_supervision(tmp_path, monke
         original(event, name)
     monkeypatch.setattr(agent.supervision, 'observe', observe)
     conv, _ = await run(agent, mode)
-    rows = [json.loads(row) for row in log.read_text().splitlines()]
+    # Per-target files: simultaneous Windows CRT append writes to one shared
+    # file can overwrite each other, which would fabricate a missing hook.
+    rows = [json.loads(row) for path in log.glob('*.jsonl') for row in path.read_text().splitlines()]
     assert [(r['event'], r['args']['command']) for r in rows].count(('pre_tool_use', first)) == 1
     assert [(r['event'], r['args']['command']) for r in rows].count(('pre_tool_use', second)) == 1
     assert [(r['event'], r['args']['command']) for r in rows if r['event'] == 'post_tool_use'] == [('post_tool_use', second)]
     assert executed == [second] and observed.count(('tool_success', 'Bash')) == 1
-    assert [r.is_error for message in conv.history for r in message.tool_results] == [True, False]
+    results = [r for message in conv.history for r in message.tool_results]
+    assert [r.is_error for r in results] == [True, False]
+    assert 'hook recorded' in results[0].content
 
 
 @pytest.mark.parametrize('command,code,nonerror', [
