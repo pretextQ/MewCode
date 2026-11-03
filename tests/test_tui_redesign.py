@@ -193,19 +193,27 @@ async def test_permission_escape_precedes_cancel_and_never_executes(tmp_path):
 
         app.agent.run = run
         task = asyncio.create_task(app._send_message("go"))
-        for _ in range(100):
-            await pilot.pause(0.01)
-            if app.query("#perm-inline"):
-                break
-        await pilot.pause()
-        assert app.focused.id == "perm-inline"
-        assert app.query_one("#perm-inline").region in app.query_one("#chat-area").content_region
-        assert "等待权限" in status(app)
-        await pilot.press("escape")
-        await task
-        assert normalize_reply(future.result()).response == PermissionResponse.DENY
-        assert not executed and status(app) == "本次运行结束"
-        assert app.focused is app.query_one(ChatInput)
+        try:
+            for _ in range(100):
+                await pilot.pause(0.01)
+                if app.query("#perm-inline"):
+                    break
+            # Focus may schedule an animated scroll after the widget is mounted.
+            # CPU idle alone does not mean its final screen coordinates are ready.
+            await pilot.wait_for_scheduled_animations()
+            assert app.focused.id == "perm-inline"
+            assert app.query_one("#perm-inline").region in app.query_one("#chat-area").content_region
+            assert "等待权限" in status(app)
+            await pilot.press("escape")
+            await task
+            assert normalize_reply(future.result()).response == PermissionResponse.DENY
+            assert not executed and status(app) == "本次运行结束"
+            assert app.focused is app.query_one(ChatInput)
+        finally:
+            # Finish the run while its controls still exist, even on assertion failure.
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
 
 @pytest.mark.asyncio
