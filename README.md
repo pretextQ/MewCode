@@ -4,278 +4,215 @@
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 [![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/pretextQ/badge.svg)](https://hub.xerj.org/contributors/pretextQ)
 
-**MewCode 是一个 AI Coding Agent，也是一套告警驱动的自动化开发服务**：同一个 agent 内核，既能作为交互式 CLI 帮你写代码，也能以无头服务的形式常驻——线上告警自动触发，agent 在 OS 级沙箱里定位 bug、写修复、跑测试（含自起 docker-compose 依赖环境的集成验证），以 PR 形式交给人工 review。**人审 PR 是唯一必经的人工点，服务没有任何 merge 权限。**服务暴露 Prometheus 指标与逐单复盘报告，评估集回放让每次提示词/内核改动都能量化对比。
+**MewCode 是一个共享 Agent 内核的 AI 编程助手与告警驱动修复服务。**你可以在终端中阅读、修改和验证代码，也可以将告警转成可追溯任务，在独立 worktree 和 Docker 容器中尝试修复，再生成 PR 交给人工审查。服务不执行远端合并。
 
+```text
+交互式 TUI / 单次命令 ───────────────────▶ Agent 内核 → 工具、权限与上下文
+                                              ▲
+Alertmanager / 手动触发 → 去重与任务队列 → 独立 worktree / Docker
+                                              │
+                                      修复与验证 → PR → CI → 人工审查
 ```
-告警(Alertmanager) ─▶ 服务层 ─▶ 每 job 隔离单元 ─▶ PR + CI 门禁 ─▶ 人工 review
-                     webhook      沙箱容器/          结构化证据链      唯一上线门禁
-                     job 状态机   git worktree       （告警摘要/根因/
-                     重试与去重   agent 内核          测试前后对比/集成验证）
-```
 
-MewCode 已收录于 [XERJ Corpus Hub](https://hub.xerj.org/corpus/pretextq--mewcode)，可供 AI 编程代理检索，作为代码实现参考。
+[快速开始](#快速开始) · [服务模式](#告警驱动服务) · [安全与验证边界](#安全与验证边界) · [完整文档](docs/README.md)
 
-## 它解决什么问题
+## 能做什么
 
-有线上服务就有告警，值班处理的问题里大量是模式化的（配置错、空指针、依赖超时）。MewCode 把"收到告警 → 定位 → 修复 → 验证 → 提交 review"这条链路自动化：
+| 场景 | 当前能力 | 说明 |
+| --- | --- | --- |
+| 终端开发 | 文件读写与编辑 diff、Shell、Glob/Grep、上下文压缩、会话恢复、子代理与任务管理 | CLI、TUI 与服务共享执行内核 |
+| TUI 工作台 | 黑色主题、流式与历史消息、F2 开发详情、按需 Git 状态/diff、取消与退出清理 | [交互与快捷键](guides/tui.md) |
+| 权限与项目约束 | 分层权限、配置/技能文件写保护、拒绝授权时附反馈、目录链项目指令 | [权限语义](guides/permission-semantics.md)、[项目指令](guides/project-instructions.md) |
+| 工具扩展 | 内置/项目 Skills、stdio/Streamable HTTP MCP、legacy/eager/dispatch/auto 加载 | [MCP 加载与分发](guides/mcp-loading.md)，默认 legacy |
+| 告警修复 | Alertmanager/手动接入、SQLite 原子去重、有界队列、独立 worktree、修复验证、PR 与 CI 观察 | [架构与生命周期](guides/architecture.md) |
+| 服务交接 | 通知 Outbox、策略快照与重验证、execution 记录、人工 decision、重启恢复 | [服务可靠性](guides/service-reliability.md) |
+| 可选审查与监督 | 固定提交独立审查、循环预算预警、dead-end、self-verify、intent anchor | 默认关闭；[独立审查](guides/independent-review.md)、[监督指南](guides/supervision.md) |
+| 诊断与复盘 | 追加/轮转日志、进程异常堆栈、Prometheus 指标、逐任务报告及 token 统计 | [进程诊断](guides/diagnostics.md) |
 
-- **告警进来，PR 出去，全程无人干预**——真实 demo 仓库（[pretextQ/mewcode-alert-demo](https://github.com/pretextQ/mewcode-alert-demo)）里保留着历次无人值守运行的 PR，每份 PR body 都是结构化证据链：告警摘要、根因分析、修复说明、测试前后对比、集成验证结果、规范自查。可从 [PR #5](https://github.com/pretextQ/mewcode-alert-demo/pull/5) 看起。
-- **修不好就诚实升级**：重试次数有上限，超限进入 escalate 并附上已尝试的分析，绝不产生垃圾 PR；验证不过的修复不会被发布。
-- **运营可量化**：评估集回放实测（三类真机 bug × 前后两轮，6 单全部无人值守跑通）——修复 PR 成功率 100%，告警→PR 中位 25–26 秒（p90 29–43 秒），单 job token 7.7k–10.8k；给代码规范加一条"可追溯注释"规则后，PR diff 的规则命中从 0/3 变 3/3 而成功率与成本不变（详见[评估集回放](#运营化指标复盘与评估集回放)）。
+## 快速开始
 
-## 核心特性
+需要 Python 3.11+、Git 和 [uv](https://docs.astral.sh/uv/)。Docker 用于服务的默认隔离执行；普通 TUI/单次命令在当前宿主运行。
 
-**执行内核（CLI / TUI）**
-- 工具集：文件读写编辑、Bash、Glob/Grep、子代理、任务管理；权限分层管线（危险命令检测 → 路径沙箱与配置/技能写保护 → 规则引擎 → 模式判定），deny 优先于白名单；拒绝授权时可附带短反馈（见[权限语义](guides/permission-semantics.md)）
-- Skill 机制（内置 incident-triage / org-code-style 等，仓库级 `.mewcode/skills/` 可覆盖普通 skill；服务的 org-code-style 自查清单固定取内置版本）与 MCP 接入（stdio / Streamable HTTP）
-- [项目指令](guides/project-instructions.md)：加载全局与仓库根到运行目录的 MEWCODE.md / AGENTS.md，支持有范围和预算限制的 include
-- [进程诊断](guides/diagnostics.md)：跨启动追加/轮转日志、独立进程堆栈及异常记录，继续支持 `MEWCODE_LOG_FILE`
-- 上下文压缩、任务状态机、hook 引擎；Windows 是一等公民平台（见[平台说明](#平台说明)）
-
-**服务化（headless）**
-- Alertmanager webhook / 手动 JSON 触发，SQLite JobStore + 显式状态机 + 指纹去重，优雅退出与重启恢复
-- 每 job 独立 git worktree；修复-验证循环有界（默认最多 3 次，超限 escalate）
-- **多仓库策略**：`<repo>/.mewcode/policy.yaml` 声明触发严重度路由 / 目标分支 / 本仓 token 预算 / 通知渠道；保存脱敏生效快照，执行与发布前重验证，已有任务的分支变化升级人工
-- **可靠交接**：关键通知与状态同事务登记，后台独立发送和重试，重启补发不重跑 Agent；每次派工记录起因、状态与已落库 token，关联修复证据（见[服务可靠性](guides/service-reliability.md)）
-- PR body 由服务层结构化拼装，review 者不看 agent 日志也能做判断
-- **运营端点**：`/metrics`（Prometheus 文本：状态/仓库计数、alert→PR 直方图、token 成本）、`/jobs/{id}/report`（单 job JSON 复盘）、`/costs`（按仓库聚合 token，只报数量不换算金额）
-
-**无人值守的信任层**
-- **Docker 沙箱**：agent 在容器内执行（非 root、`--cap-drop=ALL`、`no-new-privileges`、只读根文件系统、CPU/内存/PID 限额、硬超时强杀）；依赖按锁文件钉版构建，镜像 tag 内容寻址
-- **内部工具链只读**：内置两个 MCP server——生产日志查询（Loki）与 CI 状态（GitHub），整条取数路径只有 GET；未声明 `readOnlyHint` 的工具在服务模式一律不挂
-- **自起测试环境**：仓库带 `docker-compose.yml` 时，服务自动 `up -d --wait` 起依赖，在沙箱容器内（加入 compose 网络、按服务名寻址）跑集成测试，无论成败 `down -v` 清理；无容器运行时则如实记录"未执行"，不用假验证充数
-
-参考库能力借鉴 U1–U7 已按计划逐项实现：编辑成功后的有界 diff、[MCP eager/dispatch](guides/mcp-loading.md)（legacy 默认）、[按参数判断的只读 Shell 并发与退出码](guides/permission-semantics.md)均已接入实际入口。各项最终产品 SHA、对应 push CI、历史失败及验证边界见[交付台账](docs/acceptance/stage-2026-11-02-borrowing.md)；不把离线协议接线等同于真实模型效果或缓存收益。
-
-## 快速开始（CLI / TUI）
-
-要求：Python 3.11+、[uv](https://docs.astral.sh/uv/)。
+### 1. 获取项目
 
 ```bash
 git clone https://github.com/pretextQ/MewCode.git
 cd MewCode
-uv sync
-uv run mewcode        # 交互式 TUI
+uv sync --locked
 ```
 
-TUI 用 `›` 区分用户消息、`✦ MewCode` 标识助手；F2 打开开发详情，Ctrl+End 返回最新消息。输入、停止、Git diff 与执行记录的数据口径见 [TUI 指南](guides/tui.md)。
+### 2. 配置模型
 
-### 配置 LLM 提供商
-
-编辑 `.mewcode/config.yaml`：
+在项目内创建 `.mewcode/config.yaml`，先填写与你的模型端点相符的 `protocol`、`base_url` 和 `model`：
 
 ```yaml
 providers:
-  - name: deepseek-anthropic
-    protocol: anthropic                          # 支持 anthropic / openai / openai-compat
-    base_url: https://your-api-provider.com/api/anthropic
-    # api_key 建议留空，走环境变量（anthropic -> ANTHROPIC_API_KEY，
-    # openai/openai-compat -> OPENAI_API_KEY）；也支持 ${VAR} 形式引用
-    model: claude-sonnet-4-6
-    thinking: true                               # extended thinking
+  - name: my-provider
+    protocol: anthropic
+    base_url: https://your-provider.example/anthropic
+    model: your-model-name
+    api_key: "${MEWCODE_MODEL_API_KEY}"
 
-mcp_servers:
-  # stdio 模式（transport 缺省为 stdio）
-  - name: context7
-    command: npx
-    args: ["-y", "@upstash/context7-mcp"]
-  # Streamable HTTP 模式
-  # - name: my-http-mcp
-  #   url: https://example.com/mcp
-  #   transport: http
-  #   headers:
-  #     Authorization: "Bearer ${MY_TOKEN}"
+permission_mode: default
+mcp_loading: legacy
+mcp_servers: []
+enable_supervision: false
 ```
 
-说明：`api_key` 填写字面量会遮蔽环境变量；stdio 用 `command`/`args`，HTTP 用 `url` + `transport: http`（可带 `headers`），二者不可混用。
+上面的地址和模型名是占位符，需要替换。协议由实际端点决定：
 
-### 非交互 / headless 调用
+| `protocol` | 本项目使用的接口 | `api_key` 留空时读取 |
+| --- | --- | --- |
+| `anthropic` | Messages | `ANTHROPIC_API_KEY` |
+| `openai` | Responses | `OPENAI_API_KEY` |
+| `openai-compat` | Chat Completions | `OPENAI_API_KEY` |
+
+`${MEWCODE_MODEL_API_KEY}` 使用自定义环境变量；例如在当前终端设置：
+
+```powershell
+# PowerShell
+$env:MEWCODE_MODEL_API_KEY = "填入你的密钥"
+```
 
 ```bash
-uv run mewcode -p "fix the failing test in calc.py" --mode dontAsk --output-format json
+# Bash
+export MEWCODE_MODEL_API_KEY="填入你的密钥"
 ```
 
-`--output-format json` 输出机器可读摘要（result / usage / toolCalls），供上层系统消费。
+配置发现顺序为 `~/.mewcode/config.yaml` → 当前目录 `.mewcode/config.yaml` → `.mewcode/config.local.yaml`，后层按字段合并；也可用 `--config <path>` 显式指定单份配置。`api_key` 字面量优先于环境变量。更多字段见[配置示例](.mewcode/config.example.yaml)，真实配置与凭据不要提交到仓库。
 
-## 告警驱动的服务模式
+### 3. 启动 TUI
 
-### 1. 配置 `service:` 段
+```bash
+uv run mewcode
+```
+
+Windows 从项目根目录使用带父终端恢复的启动器：
+
+```powershell
+powershell -NoLogo -NoProfile -File .\scripts\run_tui.ps1
+```
+
+| 操作 | 按键 |
+| --- | --- |
+| 发送 / 换行 | Enter / Shift+Enter 或 Ctrl+J |
+| 开关开发详情 | F2 |
+| 返回最新消息 | Ctrl+End |
+| 展开/收起工具输出 | Ctrl+O |
+| 停止 / 空闲退出 | 运行中 Ctrl+C 请求停止；空闲时 Ctrl+C 退出 |
+
+停止会等待工具收尾，已经完成的文件修改会保留。Git 状态和 diff 按需读取，不会随流式输出反复刷新；详情可能包含启动前已有改动。完整交互与平台边界见[TUI 指南](guides/tui.md)。
+
+### 单次命令与权限模式
+
+```bash
+uv run mewcode -p "概括这个项目的结构与主要入口" --output-format json
+```
+
+JSON 包含 `result`、`usage`、`toolCalls`、MCP 使用信息和 `sessionId`；启用监督时附加监督报告。它是运行摘要，不能单凭返回文本判断修复或测试成功。
+
+无人值守修复可显式选择 `dontAsk`：
+
+```bash
+uv run mewcode -p "修复 calc.py 的失败测试并运行相关验证" --mode dontAsk --output-format json
+```
+
+`default` 对常规写入与命令请求确认；`acceptEdits` 自动接受常规文件编辑；`dontAsk` 在模式兜底时允许常规读、写与命令，仍保留显式 deny、危险命令检测、路径约束和文件写保护。非交互入口无法完成 UI 确认时会拒绝对应操作。权限模式提供应用层门禁，OS 隔离由服务容器承担；完整模式与判定顺序见[权限指南](guides/permission-semantics.md)。
+
+## 告警驱动服务
+
+服务面向已配置的仓库、模型和 GitHub 远端。先准备仓库 checkout、可用的容器运行时、推送/建 PR 所需凭据，以及仓库自己的测试命令。
+
+### 配置与启动
+
+在模型配置同一文件中增加 `service:`，替换仓库路径和远端：
 
 ```yaml
 service:
-  port: 9300                   # 默认 8321；Windows 保留了部分端口段，不可绑定时换端口
-  token_budget: 500000         # 单 job token 预算熔断（0 = 不限）
+  host: 127.0.0.1
+  port: 9300
+  webhook_token: "${MEWCODE_WEBHOOK_TOKEN}"
+  token_budget: 500000
   vcs:
     provider: github
+    token: "${GITHUB_TOKEN}"
     base_branch: main
   repos:
     demo:
-      path: /path/to/your/repo                  # 本地 checkout（服务在其上建 worktree）
-      url: https://github.com/you/your-repo.git
+      path: /absolute/path/to/demo-repo  # Windows 可用 D:/projects/demo-repo
+      url: https://github.com/you/demo-repo.git
       base_branch: main
-      test_command: python test_app.py          # 验证命令（worktree 内执行）
-      # 仓库带 docker-compose.yml 时可选：起依赖后跑集成测试
-      integration_test_command: python test_integration.py
+      test_command: python test_app.py
+      # 仓库配置了受支持的 Compose 依赖时可启用：
+      # integration_test_command: python test_integration.py
   sandbox:
-    enabled: true               # 无 Docker 时拒绝执行并 escalate
-    allow_host_fallback: false   # 显式 true 才允许宿主降级（无 OS 隔离）
-  mcp_servers:                  # 内部工具链（服务模式只挂只读工具）
-    - name: logs
-      command: python
-      args: ["-m", "mewcode.mcp.servers.logs"]
-      description: "Query production application logs (Loki, read-only)."
-      env:
-        MEWCODE_LOKI_URL: "${MEWCODE_LOKI_URL}"
+    enabled: true
+    allow_host_fallback: false
+  mcp_loading: legacy
 ```
 
-### 2. 启动服务并发送告警
+`test_command` 需替换为该仓库中可执行的验证命令，模型与 GitHub 凭据分别用于各自调用。设置示例中的环境变量后启动：
 
 ```bash
 uv run mewcode serve --port 9300
-
-# 用 demo 脚本模拟 Alertmanager webhook（payload 与真实告警同构）
-uv run python scripts/m1_demo.py init --path ./demo-repo --bug null_deref
-uv run python scripts/m1_demo.py alert --port 9300 --repo demo --bug null_deref
 ```
 
-之后只需观察：job 依次经过 `received → triaging → reproducing → fixing → verifying → pr_opened → ci_gate → human_review`，PR 出现在仓库里，CI 结论自动写回审计。每次状态转移都落库（SQLite），既是状态机也是审计日志。
+正常交付路径为 `received → triaging → reproducing → fixing → verifying → pr_opened → ci_gate → human_review`。验证或 CI 失败按预算有界重试，默认最多三次修复尝试；无法完成时升级人工，无改动可收敛为 `cant_repro`。等待人审的任务不会因服务重启自动重跑。
 
-人工审查后，使用已配置的 `service.webhook_token` 调用 `POST /jobs/{id}/decision`，
-JSON 为 `{"decision": "merged", "reason": "人工确认已合并"}`。可选结论为
-`merged`、`changes_requested`、`escalate`；修改请求会携带原因重新入队，此端点不会操作远端合并。
-等待人工审查且已有 PR 的任务跨去重窗口继续合并重复告警。
+仓库测试命令与远端 CI 均按配置执行；未配置、不可用或跳过的验证必须单独记录。PR 生成和 `human_review` 状态表示交付人工评审，不表示已经合并、上线或生产恢复。
 
-失败路径同样是设计的一部分：信息不足的告警在 triaging 即 escalate（不硬修）、agent 无改动收敛为 `cant_repro`、验证/CI 失败带输出重试至上限、重复告警在窗口内去重合并、服务重启后未完结 job 自动恢复（等人工的 job 不会被重复重跑）。
+### 接入、人工决策与观测
 
-### 3. 多仓库策略（可选）
+| 端点 | 用途 |
+| --- | --- |
+| `POST /webhook/alert` | Alertmanager 告警接入 |
+| `POST /webhook/manual` | 手动 JSON 触发 |
+| `GET /jobs`、`GET /jobs/{id}/report` | 任务查询、执行记录、策略、通知与验证证据 |
+| `POST /jobs/{id}/decision` | 记录 `merged`、`changes_requested` 或 `escalate` |
+| `GET /metrics` | Prometheus 状态、仓库计数与 alert→PR 耗时指标 |
+| `GET /costs?repo=demo` | 聚合 provider 原始 token 数量，不换算费用 |
+| `GET /healthz` | 最小健康检查 |
 
-每个仓库可以在自己的 checkout 里放一份 `<repo>/.mewcode/policy.yaml`，声明与全服务默认不同的行为（仓库级 > 服务配置 > 默认）。新任务保存生效快照；已有任务在执行、Agent 调用和发布入口重验证：仓库路径或分支选择变化、严重度不再允许时升级人工，预算取创建时和当前值中更严格的限制。策略损坏时 intake 拒收、执行链升级；通知独立保留待办，不静默换渠道。细则见[服务可靠性](guides/service-reliability.md)。
+配置 `service.webhook_token` 后，除最小健康探针外的端点均要求 `X-MewCode-Token` 或 `Authorization: Bearer`。匿名 `/healthz` 只返回 `status`；带有效 token 才返回详细状态。未配置 token 时只允许回环监听。
 
-```yaml
-# <repo>/.mewcode/policy.yaml
-triggers:
-  severities: [critical]   # 触发路由：清单外的严重度在 intake 拒收（422 + 原因）
-target_branch: develop     # worktree 基线与 PR base 同时走它
-token_budget: 50000        # 本仓预算（直跑中途熔断 + 沙箱事后门禁）
-notify:
-  type: slack              # 本仓通知渠道（覆盖服务级）
-  webhook_url: ${SLACK_WEBHOOK}
-```
+人工决策 JSON 示例为 `{"decision":"changes_requested","reason":"请补充边界测试"}`；修改请求重新入队，`merged` 记录人工结论，端点不调用远端合并。关键通知与状态同事务登记，Outbox 独立重试；重启补发通知不会重跑 Agent。
 
-## 运营化：指标、复盘与评估集回放
+仓库可通过 `<repo>/.mewcode/policy.yaml` 覆盖严重度路由、目标分支、预算和通知。任务保存脱敏策略快照，执行与发布前重验证；详情见[服务交接与恢复](guides/service-reliability.md)。服务只挂载声明只读的 MCP 工具，内置 Loki/GitHub 查询服务使用 GET；第三方声明仍需独立判断。
 
-服务暴露三个只读端点。配置 `service.webhook_token` 后，webhook、jobs、复盘、metrics 和 costs 均要求
-`X-MewCode-Token` 或 `Authorization: Bearer` 鉴权。只有 `/healthz` 可匿名访问，匿名响应仅含
-`status`，带有效 token 才附带队列、在途任务及状态计数。未配置 token 时仅允许回环监听。
-Prometheus 抓取需配置相同 Bearer 凭证；demo/回放脚本通过 `--token` 传入凭证，勿把真实值写进仓库。
+### 演示与回放
 
-| 端点 | 内容 |
-|---|---|
-| `GET /metrics` | Prometheus 文本格式：jobs 总量（按状态/仓库）、`mewcode_alert_to_pr_seconds` 直方图（MTTR 核心）、merged/escalate 计数、按仓库的 token 成本 |
-| `GET /jobs/{id}/report` | 单 job JSON 复盘：状态轨迹、执行记录、策略快照、通知回执、逐 attempt token、工具统计与验证证据 |
-| `GET /costs?repo=` | 按仓库聚合的 token 成本（诚实口径：只报 provider 原始数量，不换算金额） |
+专用演示仓可使用 [m1_demo.py](scripts/m1_demo.py) 初始化测试场景和发送模拟告警；[m3_replay.py](scripts/m3_replay.py) 批量回放并生成 JSON/Markdown 对照报告。这些脚本会修改演示仓库，回放还可能推送远端；只在专用可丢弃仓库上运行，并另行设置模型预算。
 
-**评估集回放**——改了提示词 / skill / 内核之后跑一轮，就能拿到成功率 / MTTR / 成本的前后对比：
+[历史演示 PR](https://github.com/pretextQ/mewcode-alert-demo/pull/5)保留了结构化交付示例。2026-10-05 两轮各三个样本均到达人审，追溯标记从 0/3 变为 3/3；样本及指标见[历史回放摘要](docs/history/replay-2026-10-05.md)。该回放使用 direct 路径、集成验证跳过，不与其他 Docker 真机测试合并表述；小样本没有证明生产成功率、成本或延迟改善。alert→PR 也不等于完整故障 MTTR。
+
+## 安全与验证边界
+
+- 默认服务 Docker 沙箱采用非 root、capability 丢弃、禁止提权、只读根、资源限额和硬超时。Docker 不可用时默认拒绝执行；显式关闭沙箱或开启宿主回退会改变隔离边界。普通 CLI/TUI 的 Shell 在宿主运行。
+- 容器网络提供 `bridge` / `none`，未内置细粒度域名出口白名单。Compose 仅支持经过验证的安全子集，不能将任意仓库 Compose 文件直接视为可信环境。
+- MCP legacy 保持默认；eager、dispatch 与显式 auto 已实现，native/tool_reference 和真实缓存收益仍待独立验证。MCP 分发继续执行真实目标权限、角色、hooks 和参数验证。
+- 独立审查与监督默认关闭。已有执行循环预算预警，token 预警、GitHub 评论/rework 闭环、PR 发布队列持久化和 observe 仍为候选；功能送达或工具成功不证明模型采纳和修复效果。
+- Windows/Linux 是当前验收目标。真实 PTY 自动测试不替代 GUI 终端人工验收，Linux tree-service 偶发回收失败根因仍未确认；其他维护事项见[维护待办](docs/backlog.md)。
+
+工程检查、真实容器测试、模型评估与人工验收分别记录，不用某一类结果替代其他类。U1–U7、A1–A5 已交付，具体提交、失败过程与 CI 以[验收档案](docs/acceptance/README.md)为准；本页不复制容易过期的测试总数。
+
+## 开发与文档
 
 ```bash
-uv run mewcode serve --port 9300
-
-# 基线：三类真机 bug 用例（config_error / null_deref / unhandled_timeout）批量回放
-uv run python scripts/m3_replay.py --label baseline --fingerprint-prefix replay-1 \
-    --repo-path /path/to/demo-repo --out .mewcode/replay/baseline.json
-
-# 改一处 skill 规则后重跑：必须换 fingerprint 前缀（服务端 1800s 去重窗口），带 --compare 出 A/B 对比
-uv run python scripts/m3_replay.py --label after --fingerprint-prefix replay-2 \
-    --repo-path /path/to/demo-repo --compare .mewcode/replay/baseline.json --out .mewcode/replay/after.json
+uv run --locked pytest -q --maxfail=10 --timeout=120
+uv run --locked ruff check .
+uv run --locked python scripts/engineering_guards.py
 ```
 
-脚本在每单告警发送前先把 demo 仓重置到该 bug 的现场并推 main（保证 PR diff 恰好是"bug→修复"），轮询 job 到 `human_review`/终态，再拉取 PR diff 统计规范标记（默认找 `# fix(...)` 追溯注释，可换正则），输出 JSON+Markdown 报告。
+默认测试使用模型与外部服务替身，并在临时目录中验证真实文件、worktree 和子进程。真实 Docker 专项需显式启用 `MEWCODE_DOCKER_TESTS=1`，真实模型调用需独立配置和预算；隔离约束、完整检查与复现入口见[开发指南](guides/development.md)。
 
-2026-10-05 真机实测（3 用例 × 前后两轮，证据为 [PR #12–#17](https://github.com/pretextQ/mewcode-alert-demo/pulls)，CI 全绿）：
+| 文档 | 内容 |
+| --- | --- |
+| [指南索引](guides/README.md) | TUI、权限、项目指令、MCP、hooks、监督、诊断与平台约定 |
+| [当前状态与文档结构](docs/README.md) | 已交付能力、维护入口和文档组织规则 |
+| [维护待办](docs/backlog.md) | 未解决问题、人工验收与尚未授权的候选方向 |
+| [设计与演进](docs/evolution/README.md) | 已交付方案和后续提案 |
+| [验收与历史](docs/acceptance/README.md) | 各期测试、提交、CI、模型评估与验证边界 |
 
-| 指标 | 基线 | org-code-style 加"可追溯注释"规则后 |
-|---|---|---|
-| 修复 PR 成功率 | 3/3 | 3/3 |
-| alert→PR 中位 / p90 | 25s / 29s | 26s / 43s |
-| token 总量（3 单） | 27,159 | 27,257 |
-| 规范标记命中（PR diff） | 0/3 | **3/3** |
+主要目录：`mewcode/` 为运行内核、工具与服务，`tests/` 为回归测试，`scripts/` 为检查和演示入口，`guides/` 为行为契约，`docs/` 为状态、设计、验收和历史。贡献前先读 [MEWCODE.md](MEWCODE.md) 与适用的 AGENTS.md。
 
-诚实口径：每轮 n=3；p90 波动来自单样本（19s→43s），不解读为趋势；token 为 provider 原始计数。
-
-## 信任模型（无人值守为什么可信）
-
-| 层 | 机制 |
-|---|---|
-| 应用层 | 权限管线：危险命令检测 → 路径沙箱 → 规则引擎（含仓库级 `permissions.yaml`）；headless 模式 `dontAsk`——"要问人"的动作一律拒绝而非放行 |
-| OS 层 | 每 job 容器：非 root、全部能力丢弃、禁止提权、只读根 + tmpfs、CPU/内存/PID 限额、硬超时强杀；只挂载该 job 的 worktree，宿主配置与密钥不进容器（LLM key 只经环境变量白名单注入） |
-| 外部系统 | 内部工具链只读（`readOnlyHint` 过滤 + 只 GET）；服务无 merge 权限，PR 是唯一出口，人是唯一门禁 |
-| 证据 | 全程事件落库；PR body 携带告警摘要 / 根因 / 修复 / 测试前后对比 / 集成验证 / 审计时间线 |
-
-已知边界：沙箱网络当前提供 `bridge`（可出网，agent 需访问 LLM API）与 `none`（完全隔离）两档；"只放行 LLM API 与 git 远端"的细粒度 egress 白名单需要宿主侧防火墙规则（Linux 环境），尚未内置——生产部署需自行在网络层收紧。
-
-## 项目结构
-
-```
-mewcode/
-├── agent.py            # agent 主循环（工具调度 / 上下文管理 / 事件）
-├── tools/              # 内置工具集（读写编辑/Bash/Glob/Grep/子代理…）
-├── permissions/        # 权限管线（危险命令 / 路径沙箱 / 规则引擎 / 模式）
-├── mcp/                # MCP 客户端与内置 server（logs 接 Loki / ci 接 GitHub）
-├── skills/             # Skill 加载与内置规范包
-├── memory/             # 长期记忆、会话记录与恢复
-├── context/            # 压缩、工具结果预算与落盘
-├── hooks/              # hook 配置、执行与生命周期
-├── worktree/           # git worktree 管理（创建 / 快速恢复 / 陈旧清理）
-├── teams/ agents/      # 多 agent 协作（子代理 / 团队）
-└── service/            # 无头服务层
-    ├── api.py          #   webhook / healthz / jobs 查询
-    ├── triggers/       #   Alertmanager / 手动触发适配
-    ├── runtime.py      #   接入、周期维护与启停编排
-    ├── sop.py          #   告警排查提示词与规范注入
-    ├── jobs.py         #   SQLite JobStore + 状态机 + 去重
-    ├── worker.py       #   有界并发消费池（超时收敛 / 优雅退出 / 恢复）
-    ├── execution.py    #   执行链（worktree → agent → 验证 → 发布）
-    ├── sandbox.py      #   Docker 沙箱执行器
-    ├── compose.py      #   自起测试环境（compose 依赖 + 容器内集成测试）
-    ├── publisher.py    #   PR 证据链拼装 + CI 门禁
-    ├── vcs.py          #   GitHub REST（branch / push / PR / checks）
-    ├── notify.py       #   钉钉 / 企微 / Slack webhook 通知
-    ├── outbox.py       #   通知后台发送、独立重试与恢复
-    ├── journal.py      #   通知回执、策略快照与执行记录
-    ├── job_schema.py   #   SQLite 表结构与增量迁移
-    ├── metrics.py      #   /metrics + /jobs/{id}/report + /costs（M3）
-    ├── policy.py       #   仓库级策略文件解析与四生效点（M3）
-    └── ...
-scripts/
-├── m1_demo.py          # demo 仓库构建 + 模拟告警发送
-├── m1_github_setup.py  # demo 仓库一键建仓
-├── verify_subagent.py  # 无真实模型调用的子代理组件验证
-├── mewtest.sh          # tmux 交互式冒烟测试（需本地配置）
-└── m3_replay.py        # 评估集回放：批量告警 → 报告（成功率/MTTR/token）+ A/B 对比
-```
-
-## 测试
-
-完整使用与运行契约见[指南索引](guides/README.md)，开发隔离和检查流程见[开发与维护](guides/development.md)。当前交付、待办和验收档案统一从[文档索引](docs/README.md)进入。
-
-```bash
-uv run pytest                                          # 全量套件（用例数以 pytest --collect-only -q 为准）
-MEWCODE_DOCKER_TESTS=1 uv run pytest tests/test_sandbox_live.py   # 真机容器测试（需 Docker）
-```
-
-- 默认套件完全脱网：agent 用测试替身（假 LLM / 假后端），执行链用真实 git worktree + 真实子进程
-- 真机套件验证的是隔离本身：非 root、只读根、宿主文件不可见、断网生效、限额生效、容器无残留、容器内完整 agent 路径（含 MCP）、compose 起停与清理
-
-## 平台说明
-
-Windows 是一等公民运行平台，已知边界（GBK 编码读取、行尾保持、进程树清理等）
-架构与服务生命周期见 [guides/architecture.md](guides/architecture.md)。
-见 [guides/windows-platform-notes.md](guides/windows-platform-notes.md)。
-权限分层语义见 [guides/permission-semantics.md](guides/permission-semantics.md)，
-hook stdin JSON 契约见 [guides/hook-contract.md](guides/hook-contract.md)。
-项目指令顺序及 include 预算见[项目指令指南](guides/project-instructions.md)，日志路径与保留限制见[进程诊断指南](guides/diagnostics.md)。
-
-本轮审查修复、提交映射与验证边界见 [维护交接](guides/maintenance.md)。
-
-默认关闭的监督内核及执行循环预算预警见[监督指南](guides/supervision.md)；当前进度与最新验收从[文档入口](docs/README.md)查看。
-默认关闭的独立修复审查、覆盖记录与离线评估入口见 [独立审查指南](guides/independent-review.md)。
+许可证：[MIT](LICENSE)。
