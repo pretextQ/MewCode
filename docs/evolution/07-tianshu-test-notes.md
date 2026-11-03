@@ -1,12 +1,12 @@
 # 借鉴 Tianshu Harness 的测试体系与实施边界
 
-2026-11-01 最新增量：intent anchor 已增加真实交互/headless 循环、TUI 原文/通知来源、steer、冷却/容量/裁掉/过期、重试/取消/恢复、压缩与服务 attempt 隔离的脱网验证，并补充容器内实际 Agent 接线。模型均使用替身，检查实际请求与送达状态；没有防漂移效果或生产收益结论。见[本轮验收](../stage-2026-11-01-intent-anchor.md)。未扩大本文件后续工程治理范围。
+2026-11-01 最新增量：intent anchor 已增加真实交互/headless 循环、TUI 原文/通知来源、steer、冷却/容量/裁掉/过期、重试/取消/恢复、压缩与服务 attempt 隔离的脱网验证，并补充容器内实际 Agent 接线。模型均使用替身，检查实际请求与送达状态；没有防漂移效果或生产收益结论。见[本轮验收](../acceptance/stage-2026-11-01-intent-anchor.md)。未扩大本文件后续工程治理范围。
 
-2026-11-01 增量：self-verify 首期已用真实交互/headless 循环、实际临时 Python 仓库验证子进程、权限/hooks 拒绝、服务直跑与独立 Docker 接线验证；模型使用替身。见[本轮验收](../stage-2026-11-01-self-verify.md)。这是新 detector 行为验收，不扩展本文件后续注入面治理或缺陷回植范围，也不证明验证覆盖或生产收益。
+2026-11-01 增量：self-verify 首期已用真实交互/headless 循环、实际临时 Python 仓库验证子进程、权限/hooks 拒绝、服务直跑与独立 Docker 接线验证；模型使用替身。见[本轮验收](../acceptance/stage-2026-11-01-self-verify.md)。这是新 detector 行为验收，不扩展本文件后续注入面治理或缺陷回植范围，也不证明验证覆盖或生产收益。
 
-> 2026-10-30 状态：最小架构/规模守卫和四项缺陷回植已实施并再次验收通过；其余注入面治理、更多回植等仍属提案。当前结果见[验收报告](../acceptance-2026-10-30.md)。下面的“待立项”和规模数字仅对应原始调研范围与日期。
+> 2026-10-30 状态：最小架构/规模守卫和四项缺陷回植已实施并再次验收通过；其余注入面治理、更多回植等仍属提案。当前结果见[验收报告](../acceptance/acceptance-2026-10-30.md)。下面的“待立项”和规模数字仅对应原始调研范围与日期。
 
-本期监督基础的实际循环/容器验证另见[新增验收](../next-stage-2026-10-30.md)；并未扩展为全仓注入面治理或更多缺陷回植。
+本期监督基础的实际循环/容器验证另见[新增验收](../acceptance/next-stage-2026-10-30.md)；并未扩展为全仓注入面治理或更多缺陷回植。
 
 记录日期：2026-10-27。
 状态：2026-10-27 已对照 GitHub 源码完成静态审阅并修订，待立项。本文件是调研记录，不代表已实施；
@@ -75,7 +75,7 @@ Tianshu 实现：`scripts/verify-obstacle-restored-defects.mjs` 及 20+ 同族�
 （字符串替换，不改共享文件），断言对应测试此刻**确实变红**。
 修复的回归保护从"声称有覆盖"升级为"被证明能咬住旧行为"。
 
-MewCode 适配：素材完备——`REVIEW_FIXES.md` 与 `fixes/` 中 R1–R5、
+MewCode 适配：素材完备——[R01–R09 修复档案](../history/review-2026-10-15.md#fixes)与本地 `fixes/` 中 R1–R5、
 N01–N41 共 41+ 已修复项。挑选其中高危的 10–15 条
 （权限绕过、沙箱逃逸、误带文件提交、凭据处理类）各写一条回植用例：
 monkeypatch/字符串替换恢复旧行为 → 断言现有安全测试失败。
@@ -137,7 +137,7 @@ MewCode 适配：项目尚小，现在建账本成本最低。对 `mewcode/` 源
 | --- | --- | --- | --- |
 | 1 | 架构守卫（含 POSIX 归一化） | 约半天 | 无 |
 | 2 | 行数棘轮 | 约半天 | 可与 1 同一测试文件 |
-| 3 | 缺陷回植（10–15 条高危） | 约两天 | 从 REVIEW_FIXES.md 选材 |
+| 3 | 缺陷回植（10–15 条高危） | 约两天 | 从 R01–R09 历史修复档案选材 |
 | 4 | 注入面申报表 | 约 2–3 天 | 需先盘点现有 prompt 构造点 |
 
 以上是初稿粗估，尚未包含全部接线、跨平台运行及变异验证成本，不作为交付承诺；
@@ -162,6 +162,6 @@ MewCode 适配：项目尚小，现在建账本成本最低。对 `mewcode/` 源
 - 固定基线源码：[架构守卫](https://github.com/huiliyi37/Tianshu-harness/blob/23afee4733fdce04abf82e1e3fcc46d6246b9f45/src/__tests__/architecture-guards.test.ts)、[缺陷回植](https://github.com/huiliyi37/Tianshu-harness/blob/23afee4733fdce04abf82e1e3fcc46d6246b9f45/scripts/verify-obstacle-restored-defects.mjs)、[注入面申报表](https://github.com/huiliyi37/Tianshu-harness/blob/23afee4733fdce04abf82e1e3fcc46d6246b9f45/src/prompt/injection-surfaces.ts)、[校验器](https://github.com/huiliyi37/Tianshu-harness/blob/23afee4733fdce04abf82e1e3fcc46d6246b9f45/scripts/verify-injection-surfaces.ts)、[变异测试](https://github.com/huiliyi37/Tianshu-harness/blob/23afee4733fdce04abf82e1e3fcc46d6246b9f45/scripts/__tests__/injection-surfaces.test.ts)、[行数校验](https://github.com/huiliyi37/Tianshu-harness/blob/23afee4733fdce04abf82e1e3fcc46d6246b9f45/scripts/verify-source-budgets.ts)。
 - 本仓：[06 号监督闭环笔记](06-tianshu-supervision-notes.md)、
   [05 号 PR 审查改进计划](05-pr-review-improvements.md)、
-  `REVIEW_FIXES.md`、`fixes/`（回植选材来源）
+  [R01–R09 修复档案](../history/review-2026-10-15.md#fixes)、本地 `fixes/`（回植选材来源）
 - 本文所有阈值（文件行数红线、棘轮 ceiling 等）为拟议值，
   实施时按本项目文件现状标定，不照抄上游数字。

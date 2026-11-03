@@ -78,7 +78,7 @@ Agent 的 `max_iterations` 是执行循环硬上限，不等同于总线的真�
 
 请求内部重试、上下文溢出恢复不额外产生 detector 发布，不增加外层循环额度；预警不追加“收尾请求”，原硬上限和失败/取消语义保持。它不是 token 预算预警，不能替代服务 token 熔断。交互、headless、服务直跑及容器 Agent 共用同一实现；子代理继承开关，各自按自己的循环上限判断。
 
-token 预算预警仍未实现，intent anchor 的本仓实现见下节。基础内核历史验收见[2026-10-30 报告](../docs/next-stage-2026-10-30.md)，循环预警验收见[2026-10-31 报告](../docs/stage-2026-10-31.md)。
+token 预算预警仍未实现，intent anchor 的本仓实现见下节。基础内核历史验收见[2026-10-30 报告](../docs/acceptance/next-stage-2026-10-30.md)，循环预警验收见[2026-10-31 报告](../docs/acceptance/stage-2026-10-31.md)。
 
 ## Intent anchor 首期（2026-11-01）
 
@@ -92,7 +92,7 @@ key 为 `builtin:intent-anchor:1` 至 `:3`，reminder 通道、priority=40、TTL
 
 `supervision.steer(text)` 替换目标、更新用户输入轮并使旧 pending/waiting 提醒 superseded；空白/省略文本清除目标，防止旧目标继续提示。响应轮门槛与用户静默门槛仍须满足；旧在途请求可能物理送达，但不恢复旧目标。公共 run、服务新 attempt、取消/失败后的恢复重派重新初始化目标、计时与次数，不从磁盘/历史恢复，不补发未完成请求。请求内部重试与上下文溢出恢复使用已保存的明确来源，pending 条目在 TTL 内可重选，不重武装同一 key、不增加请求额度。
 
-完整 Agent report / CLI JSON / 容器回读增加有界 `intent_anchor` 元数据：source、excerpt_chars、truncated、published、last_published_turn；事件 `intent_anchor_suggested` 仅说明成功发布，实际送达仍看 delivered。元数据及事件不重复保存任务正文；完整 entries 中已发布提醒含转义摘录，与其他提醒的审计相同。服务落库继续只留原有紧凑总线摘要/状态计数，不持久化摘录或 detector 元数据；关闭时原输出不变。真实行为验收见[本轮报告](../docs/stage-2026-11-01-intent-anchor.md)，不含真实模型效果或生产收益结论。
+完整 Agent report / CLI JSON / 容器回读增加有界 `intent_anchor` 元数据：source、excerpt_chars、truncated、published、last_published_turn；事件 `intent_anchor_suggested` 仅说明成功发布，实际送达仍看 delivered。元数据及事件不重复保存任务正文；完整 entries 中已发布提醒含转义摘录，与其他提醒的审计相同。服务落库继续只留原有紧凑总线摘要/状态计数，不持久化摘录或 detector 元数据；关闭时原输出不变。真实行为验收见[本轮报告](../docs/acceptance/stage-2026-11-01-intent-anchor.md)，不含真实模型效果或生产收益结论。
 
 ## Self-verify 首期（2026-11-01）
 
@@ -110,7 +110,7 @@ key 为 `builtin:intent-anchor:1` 至 `:3`，reminder 通道、priority=40、TTL
 
 steer 暂停旧编辑义务并 supersede 原 pending/waiting 提醒；后续新编辑才恢复观察。在途旧工具结果不能恢复旧义务；在途请求仍可能确认已发生的物理送达，不恢复核销。取消/失败不补发或提前核销；新公共 run、服务新 attempt、恢复/重派均清空观察，不从旧历史或磁盘恢复计数。停止或硬杀后无法保证取得最后摘要，也不伪称验证成功。
 
-完整 Agent report / CLI JSON / 容器回读报告中新增有界 `self_verify`：revision、attempted_revision、successful_revision、suspended、coverage；事件仍在最多 256 项环中，不另存源码、路径、命令或原始测试输出。服务落库仍只保存现有紧凑摘要（含总线状态计数），不持久化完整 detector 事件或 revision。关闭时保持原输出和执行行为。验收见[本轮报告](../docs/stage-2026-11-01-self-verify.md)，没有真实模型效果或生产收益结论。
+完整 Agent report / CLI JSON / 容器回读报告中新增有界 `self_verify`：revision、attempted_revision、successful_revision、suspended、coverage；事件仍在最多 256 项环中，不另存源码、路径、命令或原始测试输出。服务落库仍只保存现有紧凑摘要（含总线状态计数），不持久化完整 detector 事件或 revision。关闭时保持原输出和执行行为。验收见[本轮报告](../docs/acceptance/stage-2026-11-01-self-verify.md)，没有真实模型效果或生产收益结论。
 
 ## 服务 dead-end 反馈（2026-11-01）
 
@@ -128,4 +128,4 @@ worktree 相对 HEAD 的改动清单包含 `tests/`、`test_*.py`、`*_test.py`�
 
 `/jobs/{id}/report` 的 `verification.feedback` 展示 `verification_feedback` 和 `dead_end_reminder`，携带 event_seq、execution_id、attempt、分类、指纹、关系、连续数、possible_tdd 与最多 400 字符的 normalized_excerpt（附截断标记）。`raw_event_seq` 指向原 `verify_tests`：仍遵循原有最多尾部 2000 字符、整条摘要最多 4000 字符约定，未新增原始输出全量落盘。哈希使用截取前完整输出；证据同时标注输出长度与原始保留是否截断。测试、集成和 CI 报告条目也展示原事件序号与 execution ID。
 
-提醒事件的 `prepared` 仅表示已组装进下一次服务反馈，不表示真实 provider 已接收、模型已采纳或重新诊断成功。这里没有总线 expect 核销，也不借用内核 delivered 指标。取消后重派、重启恢复、人工返工各建新比较器，旧证据继续保留在旧 execution 下，不重放旧提醒或连续数；原 attempts 和预算累计语义保留。验收见[本轮报告](../docs/stage-2026-11-01-dead-end.md)，目前只有行为验证，没有生产收益或模型质量提升结论。
+提醒事件的 `prepared` 仅表示已组装进下一次服务反馈，不表示真实 provider 已接收、模型已采纳或重新诊断成功。这里没有总线 expect 核销，也不借用内核 delivered 指标。取消后重派、重启恢复、人工返工各建新比较器，旧证据继续保留在旧 execution 下，不重放旧提醒或连续数；原 attempts 和预算累计语义保留。验收见[本轮报告](../docs/acceptance/stage-2026-11-01-dead-end.md)，目前只有行为验证，没有生产收益或模型质量提升结论。

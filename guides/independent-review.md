@@ -120,7 +120,7 @@ uv run --locked python scripts/evaluate_reviews.py --predictions candidate.json
 预测 JSON 以 case ID 为键，值使用对应 `ReviewResult` 结构。
 评估器报告问题存在性的 precision/recall、漏检、不完整项、token 与耗时；不完整正例未发现问题仍算遗漏，
 不完整负例不能冒充正确的无问题结论。finding 正确性仍需人工逐条裁定，小样本不能推断生产准确率。
-2026-10-30 同契约真实基线/候选五例对比已运行，未证明效果提升；详见 [新增验收](../docs/next-stage-2026-10-30.md)。生产校准未运行。
+2026-10-30 同契约真实基线/候选五例对比已运行，未证明效果提升；详见 [新增验收](../docs/acceptance/next-stage-2026-10-30.md)。生产校准未运行。
 
 ## 局部范围与语义复核更新
 

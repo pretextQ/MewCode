@@ -49,4 +49,4 @@ MCPCall 只是协议入口，不能自行直调目标。Agent 在执行前按当
 | 5 | 404→2234 | 2234→2234 | 799→799 |
 | 250 | 404→91904 | 91904→91904 | 799→799 |
 
-该样本只含 ToolSearch 与合成 MCP 工具，用紧凑 JSON 序列化。真实三客户端 SDK 捕获、本地 stdio、离线 TUI/headless/service 与容器完整链路见[交付台账](../docs/stage-2026-11-02-borrowing.md)。没有真实模型调用、缓存命中、费用或模型遵循效果结论。
+该样本只含 ToolSearch 与合成 MCP 工具，用紧凑 JSON 序列化。真实三客户端 SDK 捕获、本地 stdio、离线 TUI/headless/service 与容器完整链路见[交付台账](../docs/acceptance/stage-2026-11-02-borrowing.md)。没有真实模型调用、缓存命中、费用或模型遵循效果结论。

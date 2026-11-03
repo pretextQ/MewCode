@@ -1,6 +1,6 @@
 # 参考库能力借鉴逐项交付台账
 
-日期：2026-11-02。执行规范与完整验收：[11 号开发计划](evolution/11-upstream-borrowing-plan.md)。原始能力比较：[对照报告](review/review-2026-11-02-current-borrowing.md)。
+日期：2026-11-02。执行规范与完整验收：[11 号开发计划](../evolution/11-upstream-borrowing-plan.md)。原始能力比较：[对照报告](../review/review-2026-11-02-current-borrowing.md)。
 
 2026-11-03：用户明确恢复 U5–U7，连续实施与逐项 CI 门禁生效；下方暂停文字为历史。预检本地/实时 origin/master 同为 `7a08ec06db5d8689bf66cc4243666598659eb575`，暂存区为空，仅保留 docs/README.md 原有用户入口；未发现适用 AGENTS.md。该文档提交 push CI [41459756578](https://github.com/pretextQ/MewCode/actions/runs/41459756578) 已通过公开 Actions API 核实 SHA/event 与五作业全部 success（连接器网络失败，gh 不在 PATH，未将查询失败当成功）。配置未恢复等历史事实继续保留。
 
@@ -50,12 +50,12 @@
 - Windows/Python 3.14.4：指令/记忆专项 59 passed / 1 skipped；实际入口+真实 worker SDK 子进程 22 passed / 3 skipped；补充恢复目录与目录预算后指令专项 11 passed / 1 skipped。真实 TUI/headless/service/子代理脚本 LLM 请求、worker 本地 HTTP SDK 载荷均看到指令且后续轮次不重复。symlink 本机跳过，junction 越界实测拦截；tmux 集成未本地执行。
 - 初次专项 1 failed（临时 home 与项目重合造成全局文件优先且去重，旧优先级用例因此失效），已改为默认独立 home；Ruff 的未使用导入问题已修正。工程检查通过（mypy 两平台各 190 文件），全量与远端最终结果已记在下段和表首。U1 远端 SHA 与本地一致，五作业成功后才开始 U2 产品改动。
 
-- 首次全量 2 failed / 1868 passed / 25 skipped（298.87 秒）：默认隔离 home 位于临时沙箱，旧 `~/.ssh` 越界断言不再成立；创建空 home 目录影响原子写入的目录清理断言。改为不预建 home，越界用例显式使用无凭据的虚拟根目录路径。受影响专项最终 90 passed / 2 skipped；最终全量 `uv run --locked pytest -q --maxfail=10 --timeout=120`，1871 passed / 25 skipped（299.31 秒）。Ruff、双平台 mypy、工程守卫、锁文件、diff 检查均通过，未提高预算。指南：[项目指令](../guides/project-instructions.md)。
+- 首次全量 2 failed / 1868 passed / 25 skipped（298.87 秒）：默认隔离 home 位于临时沙箱，旧 `~/.ssh` 越界断言不再成立；创建空 home 目录影响原子写入的目录清理断言。改为不预建 home，越界用例显式使用无凭据的虚拟根目录路径。受影响专项最终 90 passed / 2 skipped；最终全量 `uv run --locked pytest -q --maxfail=10 --timeout=120`，1871 passed / 25 skipped（299.31 秒）。Ruff、双平台 mypy、工程守卫、锁文件、diff 检查均通过，未提高预算。指南：[项目指令](../../guides/project-instructions.md)。
 
 ## U3 实施记录
 
 - 普通日志追加/轮转，独立 PID+会话诊断组保存 start/exit/异常堆栈。CLI wrapper 保留退出码，接入 service/headless/worker asyncio 异常处理、线程、Textual 及 TUI 消息异常入口；旧处理器继续执行，同异常对象去重。
-- faulthandler 单独稳定描述符，安全 dump_traceback 在轮转前后实测；退出时 fault 尾部约 1 MiB，活动进程内不轮转、硬终止可能留未裁剪文件，详见[诊断指南](../guides/diagnostics.md)。保留最近 20 组并用真实文件锁跳过活动组，清理验证绝对边界，不跟随链接删除。日志全部跟随 MEWCODE_LOG_FILE，目录不可用时降级。常见凭据清理、单条日志上限，不主动记录请求/配置/会话。
+- faulthandler 单独稳定描述符，安全 dump_traceback 在轮转前后实测；退出时 fault 尾部约 1 MiB，活动进程内不轮转、硬终止可能留未裁剪文件，详见[诊断指南](../../guides/diagnostics.md)。保留最近 20 组并用真实文件锁跳过活动组，清理验证绝对边界，不跟随链接删除。日志全部跟随 MEWCODE_LOG_FILE，目录不可用时降级。常见凭据清理、单条日志上限，不主动记录请求/配置/会话。
 - Windows/Python 3.14.4：诊断/CLI/service/worker/TUI 专项 48 passed / 3 skipped（38.91 秒）；补充真实线程入口后诊断专项 8 passed / 1 skipped（8.62 秒）。两次真实 CLI 启动保留历史，异常 exit 1/7 不变，异常不重复，重定向不产生 worktree 日志，模拟路径不可用不改变 exit；本地未进行 POSIX chmod，留给 Linux CI。线程、Textual、异步入口均实测。
 - 初轮工程检查的 import 顺序、win32 目标 fcntl 类型错误已修正，平台分支改为 sys.platform；Ruff、两平台 mypy 各 192 文件、守卫和锁文件通过。U2 对应五作业成功后才实施 U3，全量结果见下段，本项最终修正与成功 CI 见表首及最终交付节。
 
@@ -103,7 +103,7 @@
 
 ## U6 实施记录（2026-11-03）
 
-- 保留 legacy 默认与各入口原有可见性；初次连接后选择 eager/dispatch/显式 auto（紧凑 UTF-8 schema 字节/4 向上取整，阈值 min(8192, context_window/10)，超过选 dispatch）。顶层与 service 独立配置，服务直跑/容器仍过滤非 readOnlyHint；配置可显式覆盖回 legacy。公开契约：[MCP 加载指南](../guides/mcp-loading.md)。
+- 保留 legacy 默认与各入口原有可见性；初次连接后选择 eager/dispatch/显式 auto（紧凑 UTF-8 schema 字节/4 向上取整，阈值 min(8192, context_window/10)，超过选 dispatch）。顶层与 service 独立配置，服务直跑/容器仍过滤非 readOnlyHint；配置可显式覆盖回 legacy。公开契约：[MCP 加载指南](../../guides/mcp-loading.md)。
 - MCPCall 在 Agent 既有执行门禁之前解析真实 MCP 身份，同一管线处理权限/反馈、启停、hooks、完整参数验证与监督；只保留外层 ID，不重复执行事实。未知/禁用/过滤/非 MCP/递归目标拒绝，碰撞封锁歧义身份。注册表复制重绑 ToolSearch/MCPCall 并继承禁用状态。dispatch 入口和目标保守串行；没有 native/beta header。
 - 实施前合成 0/5/250 工具基线：legacy tools 紧凑 UTF-8 字节 404→404 / 404→2234 / 404→91904。新模式同样样本：eager 404/2234/91904 搜索前后不变，dispatch 404/799/799 不变；schema 总字节 2/1831/91501。三客户端 SDK 请求捕获验证实际请求集合与配对，不声称真实缓存/费用收益。
 - Windows/Python 3.14.4：初始既有 MCP/服务/子代理/配对回归 143 passed（19.48 秒）；扩展 `tests/test_mcp_loading.py tests/test_tool_search.py tests/test_mcp.py tests/test_mcp_concurrency.py tests/test_service_mcp.py tests/test_subagent.py tests/test_permission_security.py tests/test_permission_feedback.py tests/test_request_pairing.py tests/test_service_sandbox.py` 344 passed（55.18 秒）。全量参数保留调整后 MCP 新专项+既有 MCP/并发 94 passed（18.56 秒）；最后连接代际/旧栈收尾补充后的 loading+并发专项 59 passed（19.01 秒）。实际入口六组合（TUI/headless/service × legacy/dispatch）、真实 stdio 成功/失败/超时取消/重连/回收、真实目标 hooks 一次性与监督、严格嵌套 schema/null/额外字段及 SDK ID 均覆盖。
@@ -119,7 +119,7 @@
 ## U7 实施记录（2026-11-03）
 
 - Tool 增加按参数判断接口，默认仅兼容真实 bool True，不把方法对象真值当放行。共享分批与拥有任务收尾接入 interactive/headless/service 使用的实际 Agent 路径；相邻查询并发，WriteFile/EditFile/普通命令为屏障，结果与回调按原提交顺序和 ID 归位，MCPCall 与 dispatch 目标继续串行。pre hook 拒绝不再进入 parallel post hook，与串行一致；每次权限、hooks、监督、work_dir 及请求未知结果修复保留。
-- 首期白名单限 POSIX pwd/单相对文件 cat、Windows 无参数 cd/单相对文件 type，以及受控 git status 选项。严格 ASCII 词法/参数检测，未知语法和 Shell 组合/展开等均串行；未改权限自动放行规则。Git status 真实 argv 路径复用 TUI 的 filter 校验：只枚举键名、限制规模与预检耗时，禁 filter/fsmonitor/pager/外部 diff/optional locks，忽略子模块内部状态，检查失败不退回普通 Shell。公开范围见[权限语义](../guides/permission-semantics.md)和[Agent 契约](../guides/agent-runtime.md)。
+- 首期白名单限 POSIX pwd/单相对文件 cat、Windows 无参数 cd/单相对文件 type，以及受控 git status 选项。严格 ASCII 词法/参数检测，未知语法和 Shell 组合/展开等均串行；未改权限自动放行规则。Git status 真实 argv 路径复用 TUI 的 filter 校验：只枚举键名、限制规模与预检耗时，禁 filter/fsmonitor/pager/外部 diff/optional locks，忽略子模块内部状态，检查失败不退回普通 Shell。公开范围见[权限语义](../../guides/permission-semantics.md)和[Agent 契约](../../guides/agent-runtime.md)。
 - 正常 Shell 结果在开头明确数值 Exit code；退出 1 仅对严格单条 rg/grep 无匹配、diff 有差异作为非错误，其余非零与测试失败仍错误。超时保留实际回收状态并标明 termination，预检/启动失败无法取得退出码时明确 unavailable，不伪造 0；原 600 秒、2 MiB 合计捕获、编码回退与进程树清理不放宽。
 - Windows/Python 3.14.4：初始 Agent/权限/回收/TUI/MCP 回归 212 passed（47.08 秒）。最终新专项 `uv run --locked pytest tests/test_shell_concurrency.py -q --maxfail=3 --timeout=120` 78 passed / 2 skipped（14.00 秒），rg 真实执行通过，缺 grep/diff 而跳过。受控事件记录 actual Agent 两个查询同时在途、写入与普通命令屏障、保序结果及临时 work_dir 的真实 Shell 输出；不是仅比较墙钟，不提供提速百分比。并行 ask/deny/反馈、真实 pre/post hook 与监督、双次取消及三个 SDK 的未知结果配对均覆盖。取消用例的进程工厂将固定查询替换为真实测试进程树，仅验证拥有/取消；普通 Shell 语义另以真实 COMSPEC 验证。
 - 隔离 Linux/Python 3.13.16、Git 2.47.3：`tests/test_shell_concurrency.py tests/test_process_cleanup.py tests/test_mcp_loading.py tests/test_permission_feedback.py tests/test_request_pairing.py` 182 passed（45.29 秒），包含真实 /bin/sh、rg/grep/diff、恶意 Git filter/fsmonitor/pager 禁用与索引字节不变、MCP 与取消收尾；未将此平台冒称为本地 Linux 3.11/3.13.18。新临时快照 `C:/Users/32519/AppData/Local/Temp/mewcode-u7-linux313-xbcf30gh`，复用本轮 U6 缓存卷，容器已 --rm 退出。

@@ -10,7 +10,7 @@
   只读根文件系统 + /tmp tmpfs、CPU/内存/PID 限额、硬超时后强制杀容器。
 - **网络**：``bridge``（agent 必须能访问 LLM API）或 ``none``（完全隔离，用于
   纯验证类执行）。细粒度 egress 白名单（只放行 LLM API 与 git 远端）需要
-  宿主侧 iptables/DOCKER-USER 规则或代理，见 docs/fixes/backlog.md。
+  宿主侧 iptables/DOCKER-USER 规则或代理，见 docs/backlog.md。
 - **内部工具链也在容器里**（M2 W3）：MCP server 配置随最小配置进容器，
   stdio server 由容器内的 agent 进程自己拉起——宿主上不需要装那些工具，
   容器退出即全部消失。server 需要的凭据只经环境变量白名单进容器。

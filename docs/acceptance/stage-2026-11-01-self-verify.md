@@ -14,7 +14,7 @@
 
 新增 `mewcode/supervision/self_verify.py`，在实际工具执行与最终请求副本选择处接线；原 Agent 三条工具执行路径共用观察包装，关闭时直接执行原工具。总线增加 `verification_attempt` expect 和有界 self_verify 摘要，沿用既有送达确认与事件环，不改变 dead-end 的 prepared 语义。没有新增依赖、配置字段、状态机、容器协议或 ceiling。
 
-命令识别仅支持直接 pytest/mypy/ruff check、python -m 形式，以及不带包装选项的字面 uv run；帮助、版本、收集/列举、shell 组合/变量和 ruff 自动修复回退 unknown。详情见[监督指南](../guides/supervision.md)。验证开始关联当时的编辑 revision，失败仍算尝试，结果只记录工具 is_error；不解析测试结果、不验证 cwd/目标范围，覆盖一直 unknown。一次无关目标的测试也可能抑制当前催促，不能将此当作质量门禁或“充分验证”。
+命令识别仅支持直接 pytest/mypy/ruff check、python -m 形式，以及不带包装选项的字面 uv run；帮助、版本、收集/列举、shell 组合/变量和 ruff 自动修复回退 unknown。详情见[监督指南](../../guides/supervision.md)。验证开始关联当时的编辑 revision，失败仍算尝试，结果只记录工具 is_error；不解析测试结果、不验证 cwd/目标范围，覆盖一直 unknown。一次无关目标的测试也可能抑制当前催促，不能将此当作质量门禁或“充分验证”。
 
 只读/问答/纯文档及其他语言编辑不触发；Python 无适用检查时由建议要求解释替代证据和限制，不强制测试。Bash、自定义工具、子代理的编辑，以及旧 dirty worktree、失败写入后的部分改动不盘点。相同内容的成功写入也可能触发；最后一轮才编辑不会追加请求。每 run 一次建议意味着提醒后再次编辑只记录差距，不再次催促。steer 暂停旧义务，旧在途工具结果不重建它；新编辑恢复观察但已使用 key 不重武装。服务保留现有紧凑落库摘要，不持久化完整 detector 事件或 revision；公共报告和 CLI/容器回读可查看完整有界报告。
 

@@ -36,7 +36,7 @@
 
 ## B：最小监督内核
 
-已实现，默认关闭，纯 Python，无默认 detector、提醒或自动外部动作。[监督指南](../guides/supervision.md)与 `.mewcode/config.example.yaml` 给出开关和精确语义。
+已实现，默认关闭，纯 Python，无默认 detector、提醒或自动外部动作。[监督指南](../../guides/supervision.md)与 `.mewcode/config.example.yaml` 给出开关和精确语义。
 
 每个 Agent 持有隔离总线；公共循环调用对应 run，模型决策请求首响应计 turn，provider 重试有独立 request ID。支持跨通道 key 去重、优先级/分类、TTL、逐通道数量及渲染 UTF-8 字节预算、容量限制和有界事件环。system/reminder/status 默认预算分别为 2/2048、3/4096、8/2048，没有分类豁免；状态只供 report，不发模型。
 

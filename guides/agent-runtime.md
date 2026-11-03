@@ -59,7 +59,7 @@ TUI 召回按当前请求实际已注入或首次即将完整注入的扁平条�
 - **U3 诊断**：CLI/headless/service/worker 和 Textual 异常入口记录进程线索，普通日志追加轮转、faulthandler 使用独立稳定句柄；日志故障不改变应用原退出码。缺少退出标记不能直接证明崩溃原因，详见[进程诊断](diagnostics.md)。
 - **U4 拒绝反馈**：共享规范化兼容旧 PermissionResponse 与新 PermissionReply；只保留 DENY 的反馈，其他选择丢草稿。反馈只进入该次拒绝的错误 tool_result，随原有下一请求送达，不新增用户轮次或模型请求。原请求身份绑定防止迟到回复回答下一次授权；无人值守不虚构反馈，详见[权限语义](permission-semantics.md)与[TUI 指南](tui.md)。
 
-四项均已交付。2026-11-03 已按用户授权恢复 U5–U7，U5 编辑后有界 diff 见 [TUI 指南](tui.md)，U6 加载策略与真实目标门禁见 [MCP 加载指南](mcp-loading.md)；逐项提交、对应 CI、失败及验证状态见[台账](../docs/stage-2026-11-02-borrowing.md)。没有真实模型效果或缓存收益结论。
+四项均已交付。2026-11-03 已按用户授权恢复 U5–U7，U5 编辑后有界 diff 见 [TUI 指南](tui.md)，U6 加载策略与真实目标门禁见 [MCP 加载指南](mcp-loading.md)；逐项提交、对应 CI、失败及验证状态见[台账](../docs/acceptance/stage-2026-11-02-borrowing.md)。没有真实模型效果或缓存收益结论。
 
 U7 的交互/无人值守入口共享参数感知分批：相邻安全查询可重叠，写入和普通命令为顺序屏障；
 保留逐调用权限、hooks、监督、work_dir 和原 ID，结果按提交顺序归位。取消会等待所拥有任务及

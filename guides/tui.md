@@ -46,9 +46,9 @@ Git 查询异步执行，每个子命令超时 3 秒、输出最多 48,000 字�
 
 `uv run python -m tests.helpers.tui_capture` 用临时目录和替身 Agent 驱动真实 Textual 控件，将 SVG 和布局边界保存到忽略的 `docs/evidence/tui-2026-11-01/`，不启动模型、MCP、服务或真实会话。专项为 `uv run pytest tests/test_tui_redesign.py tests/test_tui_details.py tests/test_tui_hardening.py -q --timeout=60`。
 
-headless 控件测试与 SVG 不代替真实 Windows Terminal/Linux 终端的重绘、缩放、滚动和退出恢复人工烟测。实际验收范围与环境限制见[本轮记录](../docs/stage-2026-11-01-tui.md)。
+headless 控件测试与 SVG 不代替真实 Windows Terminal/Linux 终端的重绘、缩放、滚动和退出恢复人工烟测。实际验收范围与环境限制见[本轮记录](../docs/acceptance/stage-2026-11-01-tui.md)。
 
-新增 `scripts/verify_terminal_smoke.py` 可用真实 Windows ConPTY 或 Linux POSIX PTY 运行正式 OS 驱动，检查鼠标滚轮协议、尺寸变化、中英输入、权限、流式取消和退出后的终端模式恢复；`--crash` 在 Windows 检查离线子进程异常退出后的父启动器清理。可选依赖仅验收进程需要，不加入产品依赖。复跑命令和无需模型的实窗人工入口见[终端验收记录](../docs/stage-2026-11-02-terminal.md)；PTY 证据不等于字体、拖选和 GUI 重绘已人工验收。
+新增 `scripts/verify_terminal_smoke.py` 可用真实 Windows ConPTY 或 Linux POSIX PTY 运行正式 OS 驱动，检查鼠标滚轮协议、尺寸变化、中英输入、权限、流式取消和退出后的终端模式恢复；`--crash` 在 Windows 检查离线子进程异常退出后的父启动器清理。可选依赖仅验收进程需要，不加入产品依赖。复跑命令和无需模型的实窗人工入口见[终端验收记录](../docs/acceptance/stage-2026-11-02-terminal.md)；PTY 证据不等于字体、拖选和 GUI 重绘已人工验收。
 
 ## Windows 终端启动和恢复
 
