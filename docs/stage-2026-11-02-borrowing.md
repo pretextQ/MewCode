@@ -6,7 +6,7 @@
 
 用户已授权按 U1 → U2 → U3 → U4 → U5 → U6 → U7 逐项交付。U4 后曾因额度暂停，2026-11-03 明确恢复并继续完成 U5–U7；上一项五作业 CI 成功后才开始下一项，当前结果与边界见表首和下方最新记录，历史暂停说明保留追溯。
 
-| ID | 项目 | 状态 | 最终提交 / 远端 SHA | 对应 CI | 本轮验收 |
+| ID | 项目 | 状态 | 最终产品/验收提交（均已推送核对） | 对应 CI | 本轮验收 |
 | --- | --- | --- | --- | --- | --- |
 | U1 | 受保护配置/技能禁写 | 已推送，五作业成功 | `c81aeb60fc0d4557c7318b1addc96f50cdd553a8` | [41424253094](https://github.com/pretextQ/MewCode/actions/runs/41424253094) | 全量 1823/24；保护专项 60/1 |
 | U2 | AGENTS.md/目录链/include | 已推送，五作业成功 | `981619f139a47f619826be6ea88dcda1893ffafd` | [41427433417](https://github.com/pretextQ/MewCode/actions/runs/41427433417) | 全量 1871/25；指令专项 11/1 |
@@ -14,7 +14,7 @@
 | U4 | 拒绝授权附带反馈 | 已推送，五作业成功 | `f2ac5e192fe72dc9dcccda4d451f618743b2f9d5` | [41456722525](https://github.com/pretextQ/MewCode/actions/runs/41456722525) | 全量 1900/26；反馈专项 18；三平台补充专项通过 |
 | U5 | 编辑后有界 diff | 已推送，五作业成功 | `d456498e6bd7bda9951e229edce128b5a0fd6681` | [41560096587](https://github.com/pretextQ/MewCode/actions/runs/41560096587) | 全量 1916/26；最终展示专项 59 |
 | U6 | MCP eager/dispatch | 已推送，五作业成功（attempt 2） | `61290369531dbb06e1297efd08dca14ea0cb7b1d` | [41565098297](https://github.com/pretextQ/MewCode/actions/runs/41565098297) | 全量 1970/27；扩展专项 344；Docker 2 |
-| U7 | 只读 Shell 并发/退出码 | 本地完成，提交后等待五作业 CI | 本项提交 | 待核验 | 全量 2048/29；Windows 新专项 78/2；Linux 专项 182 |
+| U7 | 只读 Shell 并发/退出码 | 已推送，五作业成功 | `51c38c78aa3c565a8ff1bee45242772356aea08a` | [41570476588](https://github.com/pretextQ/MewCode/actions/runs/41570476588) | 全量 2048/29；Windows 新专项 78/2；Linux 专项 182 |
 
 ## 每项追加记录格式
 
@@ -127,3 +127,10 @@
 - 最终本地全量 `uv run --locked pytest -q --maxfail=10 --timeout=120`：2048 passed / 29 skipped（344.11 秒）。Ruff、win32/linux 目标 mypy 各 199 文件、工程守卫、锁文件与 diff、四项缺陷回植绿→红检验通过。`uv build --no-sources` 成功，wheel 含 U5–U7 全部 6 个新增模块。未提高 ceiling（Agent 1513/1575，App 1774/2100）；没有真实模型调用、真实用户 TUI 或真实配置/记忆读取。
 - U7 首次推送 `8524860b5b9db06f3409e6bd2592ebe57774aeb3`，远端核对一致；push CI [41569156313](https://github.com/pretextQ/MewCode/actions/runs/41569156313)：Linux 3.11/3.13、Windows 3.13 和 security 成功，仅 Windows 3.11 的新 headless hooks 日志计数失败（2051 passed / 25 skipped / 1 failed）。两个并发 hook 原来共享单一追加日志，CI 记录少了 first/pre，而 second/pre/post 存在；未本地复现，不据此认定产品漏调。验收日志改为每目标独立文件，避免 Windows 共享追加竞争，并增加脚本完成标记；次数断言保留，产品代码未为此变更。3.14 最终新专项 78/2（15.36 秒），3.11/3.13 隔离验收与修正 SHA 的 CI 继续核验，不能用原四个绿灯替代。
 - 追加修正仅测试记录与本段文档：隔离 Windows 3.11.9 / 3.13.13，新专项各 78 passed / 2 skipped（55.21 / 54.92 秒），固定依赖且项目主环境仍为 3.14.4。原完整产品全量与工程检查沿用，Ruff/diff 再通过；修正提交的五作业 CI 负责最终累计测试集。未在本地复现旧共享日志丢项，不将消除该测试竞争描述为已证明的产品 hooks 缺陷修复。
+- 最终验收提交 `51c38c78aa3c565a8ff1bee45242772356aea08a` 已推送并核对 origin/master 一致；其 push CI [41570476588](https://github.com/pretextQ/MewCode/actions/runs/41570476588) attempt 1 的 Windows/Linux × Python 3.11/3.13 及 security 五作业全部 success，run 的 head_sha/event/conclusion 逐一核实。早期 `8524860` 红灯保留，不以其他 SHA 绿灯代替。
+
+## U5–U7 最终交付与文档收尾
+
+三项按 U5→U6→U7 独立提交推送，前项最终五作业成功后才开始后项产品修改；全部最终产品/验收 SHA 与对应 CI 见表首。基线文档 `7a08ec0` 的 CI 41459756578 也已核实成功，U1–U4 与 A1–A5 未重做。本段纯文档收尾不替代各项产品 SHA/CI，其自身远端和自动 CI 在最终交付答复核实，避免无限追加自引用提交。
+
+保留 docs/README.md 原有旧本地审查入口，只有本轮状态 hunk 被暂存；其他用户改动不 reset/stash、不强推。没有真实模型调用、用户 TUI 会话、native/tool_reference 或 beta header；没有读取真实 MewCode 配置/记忆，U1 旧配置事故仍无已知备份、未恢复。Windows 缺 grep/diff 的两项 skip、真实终端人工待验与旧 Linux 回收失败原因未确认均保留。验收临时目录/新缓存卷保留，测试进程与 --rm 容器已退出；未触碰 U4 遗留产物，不扩展任何后续能力。

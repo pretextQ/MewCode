@@ -1,6 +1,6 @@
 # MewCode 当前状态与文档入口
 
-2026-11-03 当前交付：参考库借鉴 **U1–U7 已逐项实现**，U5 编辑 diff、U6 MCP eager/dispatch、U7 只读 Shell 并发/退出码均接入实际入口。U1–U6 已核实各项五作业 CI 成功；U7 最终提交的核验结果以[逐项台账](stage-2026-11-02-borrowing.md)和交付答复为准。设计见[11 号计划](evolution/11-upstream-borrowing-plan.md)，历史暂停、失败修正、平台结果及未解决事项继续保留。
+2026-11-03 当前交付：参考库借鉴 **U1–U7 已逐项实现并推送，各项对应五作业 CI 成功**。U5 编辑 diff、U6 MCP eager/dispatch（legacy 默认）、U7 只读 Shell 并发/退出码均接入实际入口。完整产品/验收 SHA 与 CI 见[逐项台账](stage-2026-11-02-borrowing.md)，设计见[11 号计划](evolution/11-upstream-borrowing-plan.md)；历史暂停、失败修正、平台结果及未解决事项继续保留。
 
 公开行为见[权限语义](../guides/permission-semantics.md)、[Agent 契约](../guides/agent-runtime.md)、[MCP 加载](../guides/mcp-loading.md)、[项目指令](../guides/project-instructions.md)、[进程诊断](../guides/diagnostics.md)和[TUI 指南](../guides/tui.md)。本轮与历史全量数字分列于台账；原配置未恢复、Linux 回收用例未复现的失败及临时环境保留均如实记录，不将离线接线或 CI 成功等同于真实模型效果。
 

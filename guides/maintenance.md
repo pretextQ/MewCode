@@ -222,3 +222,17 @@ SDK 仅使用测试 key 离线构造，未调用真实模型，未向演示仓�
 各 CI 均为对应 push 的 Windows/Linux × Python 3.11/3.13 及 security 五作业成功。U3/U4 表中为含必要修正的最终产品 SHA，不使用早期红灯代替。Windows 主全量 1900 passed / 26 skipped；最终 UI 修正另有平台专项和完整 CI。Linux 快照的环境失败与重测、原配置未恢复及临时环境保留见[台账](../docs/stage-2026-11-02-borrowing.md)，不删改失败事实。
 
 U5–U7 未实施，必须等待用户明确恢复。本次文档同步不修改代码、不开真实 TUI、不调用模型，沿用所属产品提交的验收结果。
+
+## 参考库借鉴恢复交付（2026-11-03）
+
+| 单元 | 最终产品/验收提交 | 对应成功 push CI |
+| --- | --- | --- |
+| U5 编辑后有界 diff | `d456498e6bd7bda9951e229edce128b5a0fd6681` | [41560096587](https://github.com/pretextQ/MewCode/actions/runs/41560096587) |
+| U6 MCP eager/dispatch（legacy 默认） | `61290369531dbb06e1297efd08dca14ea0cb7b1d` | [41565098297 attempt 2](https://github.com/pretextQ/MewCode/actions/runs/41565098297) |
+| U7 参数感知只读 Shell 并发/退出码 | `51c38c78aa3c565a8ff1bee45242772356aea08a` | [41570476588](https://github.com/pretextQ/MewCode/actions/runs/41570476588) |
+
+各 SHA 已正常推送并核对远端，Windows/Linux × Python 3.11/3.13 与 security 五作业全部 success，
+前项通过后才开始后项。最终本地 Windows 全量 2048/29、隔离 Linux 182 项、工程检查与打包通过。
+U6 首次 CI 的旧 Linux 回收失败未复现，同 SHA 有界重跑成功；U7 首次 CI 的并发 hooks 测试日志丢项
+改为每目标独立记录后，新 SHA 的完整 CI 通过。未放宽原进程树断言，也不声称旧回收根因已修复。
+配置未恢复、历史失败及临时环境保留均见[台账](../docs/stage-2026-11-02-borrowing.md)；没有真实模型预算使用或用户 TUI 启动。

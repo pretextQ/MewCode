@@ -1,8 +1,8 @@
 # 下次工作入口
 
-## 2026-11-03：已明确恢复 U5–U7
+## 2026-11-03：U5–U7 已交付完成
 
-用户已明确恢复并按 [11 号计划](evolution/11-upstream-borrowing-plan.md) 实施 U5→U6→U7；U1–U4 不重做。U5 `d456498e6bd7bda9951e229edce128b5a0fd6681` / [CI 41560096587](https://github.com/pretextQ/MewCode/actions/runs/41560096587)，U6 `61290369531dbb06e1297efd08dca14ea0cb7b1d` / [CI 41565098297 attempt 2](https://github.com/pretextQ/MewCode/actions/runs/41565098297) 均核实五作业成功后才推进下一项。U7 已实现，本地全量 2048/29、Linux 182 项及工程检查/构建通过，最终提交的 CI 结果见[台账](stage-2026-11-02-borrowing.md)和交付核验。协议与配置见 [MCP 指南](../guides/mcp-loading.md)，legacy 默认；Shell 范围见[权限语义](../guides/permission-semantics.md)。
+用户已明确恢复并按 [11 号计划](evolution/11-upstream-borrowing-plan.md) 完成 U5→U6→U7；U1–U4 未重做。U5 `d456498e6bd7bda9951e229edce128b5a0fd6681` / [CI 41560096587](https://github.com/pretextQ/MewCode/actions/runs/41560096587)，U6 `61290369531dbb06e1297efd08dca14ea0cb7b1d` / [CI 41565098297 attempt 2](https://github.com/pretextQ/MewCode/actions/runs/41565098297)，U7 `51c38c78aa3c565a8ff1bee45242772356aea08a` / [CI 41570476588](https://github.com/pretextQ/MewCode/actions/runs/41570476588) 均已推送、核对远端并确认各自五作业成功；前项通过后才推进后项。最终本地全量 2048/29、Linux 182 项、Windows 3.11/3.13/3.14 新专项各 78/2 及工程检查/构建通过。完整结果见[台账](stage-2026-11-02-borrowing.md)。协议与配置见 [MCP 指南](../guides/mcp-loading.md)，legacy 默认；Shell 范围见[权限语义](../guides/permission-semantics.md)。
 本轮收尾后不自动扩展自定义命令、安装器、后台记忆、浏览器 UI、native/tool_reference 或其他后续能力。Linux 旧回收用例曾失败但独立复查未复现，保留历史及增强失败诊断，不把 CI 有界重跑写成已修复根因。
 基线文档 `7a08ec0` 的 push CI 41459756578 已核实五作业全部成功。保留 docs/README.md 用户改动、配置事故与未恢复记录；不读取真实配置/记忆、不启动用户 TUI、不调用真实模型、不扩展后续能力。
 
