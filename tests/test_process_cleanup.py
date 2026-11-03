@@ -77,8 +77,23 @@ async def assert_reaped(root):
     deadline = time.monotonic() + 2
     while any(is_running(pid) for pid in pids) and time.monotonic() < deadline:
         await asyncio.sleep(0.02)
-    assert not any(is_running(pid) for pid in pids)
+    assert not any(is_running(pid) for pid in pids), process_states(pids)
     assert not (root / "late-marker").exists()
+
+
+def process_states(pids):
+    """Failure-only evidence: PID/state/parent/group/session, never argv or env."""
+    states = {}
+    for pid in pids:
+        if os.name == 'nt':
+            states[pid] = {'running': is_running(pid)}
+        else:
+            try:
+                fields = Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()
+                states[pid] = dict(zip(('state', 'parent', 'group', 'session'), fields[:4], strict=True))
+            except (FileNotFoundError, ProcessLookupError):
+                states[pid] = {'state': 'gone'}
+    return states
 
 
 async def cleanup(root, task):

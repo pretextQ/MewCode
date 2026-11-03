@@ -40,6 +40,8 @@ from mewcode.prompts import build_environment_context, build_plan_mode_reminder,
 from mewcode.supervision import AdvisoryBus
 from mewcode.supervision.detectors import warn_iteration_budget
 from mewcode.supervision.runtime import execute_observed_tool, supervised_stream, supervision_run
+from mewcode.tool_batches import ToolBatch as ToolBatch
+from mewcode.tool_batches import gather_tool_calls, noninteractive_batches, partition_tool_calls
 from mewcode.tools import ToolRegistry
 from mewcode.tools.base import (
     MAX_OUTPUT_CHARS,
@@ -213,32 +215,6 @@ class StreamCollector:
                 self.response.output_tokens = event.output_tokens
                 self.response.cache_read = event.cache_read
                 self.response.cache_creation = event.cache_creation
-
-
-# ---------------------------------------------------------------------------
-# tool 批量执行
-# ---------------------------------------------------------------------------
-
-@dataclass
-class ToolBatch:
-    concurrent: bool
-    calls: list[ToolCallComplete]
-
-
-def partition_tool_calls(
-    tool_calls: list[ToolCallComplete],
-    registry: ToolRegistry,
-) -> list[ToolBatch]:
-    batches: list[ToolBatch] = []
-    for tc in tool_calls:
-        tool = registry.get(tc.tool_name)
-        safe = tool is not None and tool.is_concurrency_safe and registry.is_enabled(tc.tool_name)
-
-        if safe and batches and batches[-1].concurrent:
-            batches[-1].calls.append(tc)
-        else:
-            batches.append(ToolBatch(concurrent=safe, calls=[tc]))
-    return batches
 
 
 # ---------------------------------------------------------------------------
@@ -982,6 +958,7 @@ class Agent:
         结果按 tool_use 在 assistant 消息中的顺序归位。
         """
         terminal: dict[int, _ToolExecResult] = {}
+        pre_rejected: set[int] = set()
         interactive: list[int] = []
         runnable: list[tuple[int, ToolCallComplete]] = []
 
@@ -990,6 +967,7 @@ class Agent:
             for he in hook_events:
                 yield he
             if rejection is not None:
+                pre_rejected.add(i)
                 terminal[i] = _ToolExecResult(
                     tool_id=tc.tool_id,
                     tool_name=tc.tool_name,
@@ -1016,10 +994,7 @@ class Agent:
 
         results: dict[int, _ToolExecResult] = {}
         if runnable:
-            gathered = await asyncio.gather(
-                *(self._execute_raw_tool(tc) for _, tc in runnable),
-                return_exceptions=True,
-            )
+            gathered = await gather_tool_calls(self._execute_raw_tool(tc) for _, tc in runnable)
             for (i, tc), r in zip(runnable, gathered, strict=True):
                 if isinstance(r, BaseException):
                     results[i] = _ToolExecResult(
@@ -1059,8 +1034,9 @@ class Agent:
             br = terminal.get(i) or results.get(i)
             if br is None:
                 continue
-            async for he in self._run_post_tool_hooks(calls[i]):
-                yield he
+            if i not in pre_rejected:
+                async for he in self._run_post_tool_hooks(calls[i]):
+                    yield he
             yield br
 
     async def _execute_tool(
@@ -1428,15 +1404,9 @@ class Agent:
             )
 
             tool_results: list[ToolResultBlock] = []
-            for tc in response.tool_calls:
-                tc = self.registry.resolve_tool_call(tc)
-                if event_callback:
-                    event_callback({
-                        "type": "tool_use",
-                        "toolName": tc.tool_name,
-                        "args": tc.arguments,
-                    })
-                result = await self._execute_tool_noninteractive(tc)
+            async for tc, result in noninteractive_batches(
+                response.tool_calls, self.registry, self._execute_tool_noninteractive, event_callback,
+            ):
                 content = self._maybe_persist_or_truncate(tc.tool_id, result.output)
                 tool_results.append(
                     ToolResultBlock(

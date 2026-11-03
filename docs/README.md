@@ -1,8 +1,8 @@
 # MewCode 当前状态与文档入口
 
-2026-11-02 当前交付：参考库借鉴 **U1–U4 已实施、独立提交推送，各项对应五作业 CI 成功**；U4 最终产品提交 `f2ac5e192fe72dc9dcccda4d451f618743b2f9d5`，[对应 push CI](https://github.com/pretextQ/MewCode/actions/runs/41456722525) 已完成。用户要求 U4 后暂停，**U5–U7 尚未实施，等待明确恢复**。设计见[11 号计划](evolution/11-upstream-borrowing-plan.md)，完整 SHA、失败修正、平台结果及未解决事项见[逐项台账](stage-2026-11-02-borrowing.md)。
+2026-11-03 当前交付：参考库借鉴 **U1–U7 已逐项实现**，U5 编辑 diff、U6 MCP eager/dispatch、U7 只读 Shell 并发/退出码均接入实际入口。U1–U6 已核实各项五作业 CI 成功；U7 最终提交的核验结果以[逐项台账](stage-2026-11-02-borrowing.md)和交付答复为准。设计见[11 号计划](evolution/11-upstream-borrowing-plan.md)，历史暂停、失败修正、平台结果及未解决事项继续保留。
 
-已交付：配置/技能写保护、AGENTS.md 与目录链/include、进程诊断与日志保留、拒绝授权附带反馈。公开行为见[权限语义](../guides/permission-semantics.md)、[项目指令](../guides/project-instructions.md)、[进程诊断](../guides/diagnostics.md)和[TUI 指南](../guides/tui.md)。本地 Windows 主全量 1900 passed / 26 skipped；最终修正又经各平台专项及上述完整 CI 验证。隔离 Linux 快照的一次环境失败、原配置未恢复及临时环境保留均在台账如实记录，不将离线接线或 CI 成功等同于真实模型效果。
+公开行为见[权限语义](../guides/permission-semantics.md)、[Agent 契约](../guides/agent-runtime.md)、[MCP 加载](../guides/mcp-loading.md)、[项目指令](../guides/project-instructions.md)、[进程诊断](../guides/diagnostics.md)和[TUI 指南](../guides/tui.md)。本轮与历史全量数字分列于台账；原配置未恢复、Linux 回收用例未复现的失败及临时环境保留均如实记录，不将离线接线或 CI 成功等同于真实模型效果。
 
 平台适用范围：按用户确认，项目以 Windows/Linux 的实际需求验收；不在 macOS 使用，macOS/iTerm2 不列为待办或交付缺口。
 

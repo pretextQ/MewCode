@@ -125,6 +125,9 @@ class Tool(ABC, Generic[ParamsT]):
     def for_registry(self, registry: ToolRegistry) -> Tool:
         return self
 
+    def can_run_concurrently(self, arguments: dict[str, Any]) -> bool:
+        return self.is_concurrency_safe is True
+
     @property
     def is_read_only(self) -> bool:
         return self.category == "read"

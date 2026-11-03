@@ -4,7 +4,7 @@
 
 2026-11-03：用户明确恢复 U5–U7，连续实施与逐项 CI 门禁生效；下方暂停文字为历史。预检本地/实时 origin/master 同为 `7a08ec06db5d8689bf66cc4243666598659eb575`，暂存区为空，仅保留 docs/README.md 原有用户入口；未发现适用 AGENTS.md。该文档提交 push CI [41459756578](https://github.com/pretextQ/MewCode/actions/runs/41459756578) 已通过公开 Actions API 核实 SHA/event 与五作业全部 success（连接器网络失败，gh 不在 PATH，未将查询失败当成功）。配置未恢复等历史事实继续保留。
 
-用户已授权新会话按 U1 → U2 → U3 → U4 → U5 → U6 → U7 连续实施，每项完成即单独提交推送，确认对应 CI 成功后再开始下一项。用户后续要求 U4 完成后暂停（额度不足）；U5–U7 等待明确恢复。每项结果与边界见下方记录。
+用户已授权按 U1 → U2 → U3 → U4 → U5 → U6 → U7 逐项交付。U4 后曾因额度暂停，2026-11-03 明确恢复并继续完成 U5–U7；上一项五作业 CI 成功后才开始下一项，当前结果与边界见表首和下方最新记录，历史暂停说明保留追溯。
 
 | ID | 项目 | 状态 | 最终提交 / 远端 SHA | 对应 CI | 本轮验收 |
 | --- | --- | --- | --- | --- | --- |
@@ -13,8 +13,8 @@
 | U3 | 崩溃日志/保留诊断 | 已推送，五作业成功 | `a51c67aaa98eeef75be47402d178a697495e67e7` | [41430601257](https://github.com/pretextQ/MewCode/actions/runs/41430601257) | 全量 1879/26；最终诊断专项 11/1 |
 | U4 | 拒绝授权附带反馈 | 已推送，五作业成功 | `f2ac5e192fe72dc9dcccda4d451f618743b2f9d5` | [41456722525](https://github.com/pretextQ/MewCode/actions/runs/41456722525) | 全量 1900/26；反馈专项 18；三平台补充专项通过 |
 | U5 | 编辑后有界 diff | 已推送，五作业成功 | `d456498e6bd7bda9951e229edce128b5a0fd6681` | [41560096587](https://github.com/pretextQ/MewCode/actions/runs/41560096587) | 全量 1916/26；最终展示专项 59 |
-| U6 | MCP eager/dispatch | 本地完成，提交后等待五作业 CI | 本项提交 | 待核验 | 全量 1970/27；扩展专项 344；Docker 2 |
-| U7 | 只读 Shell 并发/退出码 | 待 U6 五作业 CI 成功后实施 | — | — | — |
+| U6 | MCP eager/dispatch | 已推送，五作业成功（attempt 2） | `61290369531dbb06e1297efd08dca14ea0cb7b1d` | [41565098297](https://github.com/pretextQ/MewCode/actions/runs/41565098297) | 全量 1970/27；扩展专项 344；Docker 2 |
+| U7 | 只读 Shell 并发/退出码 | 本地完成，提交后等待五作业 CI | 本项提交 | 待核验 | 全量 2048/29；Windows 新专项 78/2；Linux 专项 182 |
 
 ## 每项追加记录格式
 
@@ -30,7 +30,7 @@
 - `docs/README.md` 原有一条本地旧审查入口改动继续留工作区，不夹带。
 - 自定义命令、技能安装器、后台记忆整理、浏览器 UI 为后续方向。
 
-以下实施记录按发生顺序保留；中途失败、补充验证与修正不能替代表首最终 SHA/CI。当前已交付 U1–U4，并在 U4 后暂停。
+以下实施记录按发生顺序保留；中途失败、补充验证与修正不能替代表首最终 SHA/CI。历史 U4 后暂停不覆盖本次明确恢复，当前状态以表首与最新交付记录为准。
 
 ## U1 实施记录
 
@@ -112,3 +112,16 @@
 - 首次全量 4 failed / 1966 passed / 27 skipped（349.42 秒），均为旧 MCP 角色测试使用仅含 name 的 SimpleNamespace，不具备新增注册表重绑 hook；注册入口保留旧替身兼容，真实 ToolSearch/MCPCall 仍必须重绑。随后角色/MCP/监督/自验证修正专项 198 passed（34.97 秒），补齐 tool_call 也按真实目标监督、不记录外层两次。
 - 最终本地全量 `uv run --locked pytest -q --maxfail=10 --timeout=120`：1970 passed / 27 skipped（333.63 秒）。全量启动后的 MCP 状态数量/名称展示修正以 `tests/test_mcp_loading.py tests/test_commands.py` 补验，95 passed（18.48 秒）；状态只数真实启用目标，不把 dispatcher 当服务工具，也不混淆含下划线的 server。最终 real_stdio 补充检查重连前后两个 PID 都退出，并将所有断言放进 finally 收尾范围。Ruff、win32/linux 目标 mypy 各 196 文件、工程守卫、锁文件、diff、四项缺陷回植绿→红检验通过，源码预算未提高。
 - 提交前 Schannel 查询三次握手失败；单次命令使用 OpenSSL 后端后成功核对 origin/master 仍为 U5 SHA，未修改持久配置、远端 URL 或关闭证书校验；一次公开 API EOF 也未当通过。推送与对应最终 SHA 的五作业 CI 待实际核验。
+- U6 最终 `61290369531dbb06e1297efd08dca14ea0cb7b1d` 正常推送 origin/master，首次 OpenSSL 推送也遇 TLS EOF，单次 OpenSSL+HTTP/1.1 重试后成功并核对远端。push CI [41565098297](https://github.com/pretextQ/MewCode/actions/runs/41565098297) attempt 1：四作业 success，仅 Linux 3.13 的旧 `test_timeout_reaps_descendants[tree-service]` 在 2 秒检查后检测存活 PID（1952 passed / 44 skipped / 1 failed）。新增 MCP 测试均通过，未修改或放宽进程树实现/断言。
+- 冻结 SHA 独立 Linux/Python 3.13.16（CI 为 3.13.18）进程回收套件 21 passed（25.36 秒），原失败用例连续五次各 1 passed（4.99/4.94/4.88/5.86/4.86 秒），没有复现。对原失败作业请求一次有界重跑后，attempt 2 最新五作业全部 success，run 的 event=push / head_sha / conclusion 已再次核实；只在此后开始 U7。不能将未复现写成已定位并修复，保留原因未确认的瞬态记录。
+- 新建隔离快照 `C:/Users/32519/AppData/Local/Temp/mewcode-u6-linux313-3k6r1y4p` 与缓存卷 `mewcode-u6-linux313-cache` 用于本轮，未触碰 U4 遗留目录/卷。测试 --rm 容器已退出，没有清理未经核实的用户产物。
+
+## U7 实施记录（2026-11-03）
+
+- Tool 增加按参数判断接口，默认仅兼容真实 bool True，不把方法对象真值当放行。共享分批与拥有任务收尾接入 interactive/headless/service 使用的实际 Agent 路径；相邻查询并发，WriteFile/EditFile/普通命令为屏障，结果与回调按原提交顺序和 ID 归位，MCPCall 与 dispatch 目标继续串行。pre hook 拒绝不再进入 parallel post hook，与串行一致；每次权限、hooks、监督、work_dir 及请求未知结果修复保留。
+- 首期白名单限 POSIX pwd/单相对文件 cat、Windows 无参数 cd/单相对文件 type，以及受控 git status 选项。严格 ASCII 词法/参数检测，未知语法和 Shell 组合/展开等均串行；未改权限自动放行规则。Git status 真实 argv 路径复用 TUI 的 filter 校验：只枚举键名、限制规模与预检耗时，禁 filter/fsmonitor/pager/外部 diff/optional locks，忽略子模块内部状态，检查失败不退回普通 Shell。公开范围见[权限语义](../guides/permission-semantics.md)和[Agent 契约](../guides/agent-runtime.md)。
+- 正常 Shell 结果在开头明确数值 Exit code；退出 1 仅对严格单条 rg/grep 无匹配、diff 有差异作为非错误，其余非零与测试失败仍错误。超时保留实际回收状态并标明 termination，预检/启动失败无法取得退出码时明确 unavailable，不伪造 0；原 600 秒、2 MiB 合计捕获、编码回退与进程树清理不放宽。
+- Windows/Python 3.14.4：初始 Agent/权限/回收/TUI/MCP 回归 212 passed（47.08 秒）。最终新专项 `uv run --locked pytest tests/test_shell_concurrency.py -q --maxfail=3 --timeout=120` 78 passed / 2 skipped（14.00 秒），rg 真实执行通过，缺 grep/diff 而跳过。受控事件记录 actual Agent 两个查询同时在途、写入与普通命令屏障、保序结果及临时 work_dir 的真实 Shell 输出；不是仅比较墙钟，不提供提速百分比。并行 ask/deny/反馈、真实 pre/post hook 与监督、双次取消及三个 SDK 的未知结果配对均覆盖。取消用例的进程工厂将固定查询替换为真实测试进程树，仅验证拥有/取消；普通 Shell 语义另以真实 COMSPEC 验证。
+- 隔离 Linux/Python 3.13.16、Git 2.47.3：`tests/test_shell_concurrency.py tests/test_process_cleanup.py tests/test_mcp_loading.py tests/test_permission_feedback.py tests/test_request_pairing.py` 182 passed（45.29 秒），包含真实 /bin/sh、rg/grep/diff、恶意 Git filter/fsmonitor/pager 禁用与索引字节不变、MCP 与取消收尾；未将此平台冒称为本地 Linux 3.11/3.13.18。新临时快照 `C:/Users/32519/AppData/Local/Temp/mewcode-u7-linux313-xbcf30gh`，复用本轮 U6 缓存卷，容器已 --rm 退出。
+- 失败事实：首次专项将不支持的 ask 写入规则、并误认为 reject hook 依脚本退出码条件拒绝；Windows 初始扩展专项 2 failed / 403 passed / 2 skipped（72.64 秒），首次全量 2 failed / 2046 passed / 29 skipped（350.50 秒）。改为仅对指定查询替换安全命令探针以触发真实 Checker 的 DEFAULT ask，hook 用真实匹配条件分流；产品权限不放宽。Linux 首轮因同样测试设置 3 failed / 56 passed；设置修正后又有新 headless 取消立即检查与旧 tree-service 取消的回收断言失败（2 failed / 180 passed）。新取消测试改用现有套件相同 2 秒退出宽限；旧回收断言和实现保持，仅加入失败时 PID/状态/父进程/组/会话诊断，不读取 argv/env。最终 182 项通过，旧用例未复现的原因仍未确认，不声称修复旧根因。
+- 最终本地全量 `uv run --locked pytest -q --maxfail=10 --timeout=120`：2048 passed / 29 skipped（344.11 秒）。Ruff、win32/linux 目标 mypy 各 199 文件、工程守卫、锁文件与 diff、四项缺陷回植绿→红检验通过。`uv build --no-sources` 成功，wheel 含 U5–U7 全部 6 个新增模块。未提高 ceiling（Agent 1513/1575，App 1774/2100）；没有真实模型调用、真实用户 TUI 或真实配置/记忆读取。

@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import asyncio
 import os
-import re
 import unicodedata
 from dataclasses import dataclass
 from pathlib import PurePosixPath
+
+from mewcode.git_safety import FILTER_QUERY, filter_overrides
 
 GIT_TIMEOUT = 3.0
 GIT_OUTPUT_LIMIT = 48000
@@ -49,30 +50,8 @@ async def _read_git(work_dir: str, args: list[str], limit: int, input_data: byte
     if args[0] in {"status", "diff"}:
         # Working-tree reads can run clean/process filters even with --no-textconv.
         # Discover names only (never commands/secrets) and neutralize all drivers.
-        filters = await _read_git(work_dir, [
-            "config", "--null", "--name-only", "--get-regexp", r"^filter\..*\.(clean|process|required)$",
-        ], 16000, None)
-        if filters.truncated or filters.code not in (0, 1):
-            raise OSError("Unable to safely inspect Git filter configuration")
-        try:
-            keys = filters.data.decode("utf-8").split("\0")
-        except UnicodeError as exc:
-            raise OSError("Unsupported Git filter configuration encoding") from exc
-        names = set()
-        for key in keys:
-            if not key:
-                continue
-            match = re.fullmatch(r"filter\.(.+)\.(clean|process|required)", key)
-            if match is None:
-                raise OSError("Unsupported Git filter name")
-            names.add(match[1])
-        for name in sorted(names):
-            overrides.extend([
-                "-c", f"filter.{name}.clean=", "-c", f"filter.{name}.process=",
-                "-c", f"filter.{name}.required=false",
-            ])
-        if len(names) > 32 or sum(map(len, overrides)) > 12000:
-            raise OSError("Git filter configuration exceeds the preview budget")
+        filters = await _read_git(work_dir, FILTER_QUERY, 16000, None)
+        overrides = filter_overrides(filters.data, filters.code, filters.truncated)
 
     creation = asyncio.create_task(asyncio.create_subprocess_exec(
         "git", "--no-pager", *(["--literal-pathspecs"] if args[0] == "diff" else []),
