@@ -93,6 +93,15 @@ Windows 从项目根目录使用带父终端恢复的启动器：
 powershell -NoLogo -NoProfile -File .\scripts\run_tui.ps1
 ```
 
+也可以在 MewCode 根目录使用短命令，打开自身或指定文件夹：
+
+```powershell
+.\mew
+.\mew "D:\projects\你的项目"
+```
+
+指定文件夹时默认使用 MewCode 仓库的 `.mewcode/config.yaml`；可用 `-Config "配置文件路径"` 指定其他配置。目标路径支持空格和中文。
+
 | 操作 | 按键 |
 | --- | --- |
 | 发送 / 换行 | Enter / Shift+Enter 或 Ctrl+J |

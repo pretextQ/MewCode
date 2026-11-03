@@ -1,5 +1,30 @@
 # Keep terminal cleanup in the parent shell, even if the TUI child is terminated.
+param(
+    [Parameter(Position = 0)]
+    [string]$WorkDir,
+    [string]$Config
+)
+
 $ErrorActionPreference = 'Stop'
+
+$projectPath = Split-Path -Parent $PSScriptRoot
+$hasWorkDir = -not [string]::IsNullOrWhiteSpace($WorkDir)
+if (-not $hasWorkDir) { $WorkDir = $projectPath }
+$workPath = (Resolve-Path -LiteralPath $WorkDir).ProviderPath
+if (-not (Test-Path -LiteralPath $workPath -PathType Container)) {
+    throw "WorkDir must be a directory: $WorkDir"
+}
+if (-not [string]::IsNullOrWhiteSpace($Config)) {
+    $Config = (Resolve-Path -LiteralPath $Config).ProviderPath
+}
+elseif ($hasWorkDir) {
+    # Reuse this checkout's model config when opening another directory.
+    $Config = Join-Path $projectPath '.mewcode/config.yaml'
+    if (-not (Test-Path -LiteralPath $Config -PathType Leaf)) {
+        # Let normal user/project discovery handle installations without this file.
+        $Config = $null
+    }
+}
 
 if (-not ('MewCode.TerminalModes' -as [type])) {
     Add-Type -TypeDefinition @'
@@ -23,13 +48,14 @@ $hasInputMode = [MewCode.TerminalModes]::GetConsoleMode($inputHandle, [ref]$inpu
 $hasOutputMode = [MewCode.TerminalModes]::GetConsoleMode($outputHandle, [ref]$outputMode)
 $previousNoColor = $env:NO_COLOR
 $previousTerm = $env:TERM
-$projectPath = Split-Path -Parent $PSScriptRoot
 
-Push-Location -LiteralPath $projectPath
+Push-Location -LiteralPath $workPath
 try {
     $env:NO_COLOR = $null
     $env:TERM = 'xterm-256color'
-    & uv run mewcode
+    $launchArgs = @('run', '--project', $projectPath, 'mewcode')
+    if (-not [string]::IsNullOrWhiteSpace($Config)) { $launchArgs += @('--config', $Config) }
+    & uv @launchArgs
 }
 finally {
     try {

@@ -54,6 +54,8 @@ headless 控件测试与 SVG 不代替真实 Windows Terminal/Linux 终端的重
 
 Windows 建议从仓库使用 `powershell -NoLogo -NoProfile -File .\scripts\run_tui.ps1` 启动。它在父 PowerShell 外层保存控制台输入/输出模式，子进程返回后复位鼠标、焦点、粘贴、键盘协议和光标，并恢复环境。通常在空闲 TUI 中 Ctrl+C 正常退出；执行中第一次 Ctrl+C 请求停止。
 
+仓库根目录的短命令 `.\mew` 使用同一个启动器；`.\mew "D:\projects\你的项目"` 将目标文件夹作为工作目录，并默认使用 MewCode 仓库的 `.mewcode/config.yaml`。可追加 `-Config "配置文件路径"` 显式指定配置（相对路径以调用时的目录为准）。未指定文件夹时保留原来的仓库目录及分层配置发现行为；指定文件夹但仓库无该配置文件时，在目标目录进行正常配置发现。也可以直接调用 `scripts/run_tui.ps1 -WorkDir "目标路径"`。
+
 强制终止 TUI 会跳过进程内清理，可能留下鼠标上报，表现为移动鼠标时 PowerShell 出现 `[...;...M`。外层启动器在父 shell 存活时提供异常收尾。已产生的旧字符可以 Ctrl+L 清屏；文件和会话不受清屏影响。
 
 ## 授权拒绝反馈
