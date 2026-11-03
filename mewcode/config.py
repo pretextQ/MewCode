@@ -266,6 +266,7 @@ class ServiceConfig:
     #: 内部工具链（M2 W3）：只读 MCP server。直跑时在服务进程内连接；沙箱
     #: 模式下随最小配置写进容器、在容器内连接（见 service/sandbox.py）。
     mcp_servers: list[MCPServerConfig] = field(default_factory=list)
+    mcp_loading: str = "legacy"
     review: ReviewConfig = field(default_factory=ReviewConfig)
     enable_supervision: bool = False
 
@@ -275,6 +276,7 @@ class AppConfig:
     providers: list[ProviderConfig]
     permission_mode: str = "default"
     mcp_servers: list[MCPServerConfig] = field(default_factory=list)
+    mcp_loading: str = "legacy"
     raw_hooks: list[dict] = field(default_factory=list)
     enable_fork: bool = False
     enable_verification_agent: bool = False
@@ -285,6 +287,8 @@ class AppConfig:
     service: ServiceConfig = field(default_factory=ServiceConfig)
     _supervision_configured: bool = field(default=False, repr=False, compare=False)
     _service_supervision_configured: bool = field(default=False, repr=False, compare=False)
+    _mcp_loading_configured: bool = field(default=False, repr=False, compare=False)
+    _service_mcp_loading_configured: bool = field(default=False, repr=False, compare=False)
 
 
 def _load_single_file(path: Path) -> AppConfig:
@@ -334,6 +338,7 @@ def _load_single_file(path: Path) -> AppConfig:
     sbx = svc["sandbox"]
     service_cfg = ServiceConfig(
         host=svc["host"],
+        mcp_loading=svc["mcp_loading"],
         port=svc["port"],
         concurrency=svc["concurrency"],
         job_timeout_seconds=svc["job_timeout_seconds"],
@@ -410,6 +415,7 @@ def _load_single_file(path: Path) -> AppConfig:
         providers=providers,
         permission_mode=validated["permission_mode"],
         mcp_servers=mcp_servers,
+        mcp_loading=validated["mcp_loading"],
         raw_hooks=validated["hooks"],
         enable_fork=validated["enable_fork"],
         enable_verification_agent=validated["enable_verification_agent"],
@@ -419,6 +425,8 @@ def _load_single_file(path: Path) -> AppConfig:
         enable_supervision=validated["enable_supervision"],
         service=service_cfg,
         _supervision_configured="enable_supervision" in raw,
+        _mcp_loading_configured="mcp_loading" in raw,
+        _service_mcp_loading_configured="mcp_loading" in (raw.get("service") or {}),
         _service_supervision_configured="enable_supervision" in (raw.get("service") or {}),
     )
 
@@ -439,6 +447,8 @@ def _merge_config(base: AppConfig, override: AppConfig) -> AppConfig:
                 by_name[s.name] = len(base.mcp_servers) - 1
 
     base.raw_hooks.extend(override.raw_hooks)
+    if override._mcp_loading_configured:
+        base.mcp_loading = override.mcp_loading
     if override.enable_fork:
         base.enable_fork = True
     if override.enable_verification_agent:
@@ -455,6 +465,8 @@ def _merge_config(base: AppConfig, override: AppConfig) -> AppConfig:
         base.service = override.service
     elif override._service_supervision_configured:
         base.service.enable_supervision = override.service.enable_supervision
+    if override._service_mcp_loading_configured:
+        base.service.mcp_loading = override.service.mcp_loading
     return base
 
 

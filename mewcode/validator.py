@@ -118,6 +118,12 @@ def validate_permission_mode(mode: str) -> str:
 VALID_MCP_TRANSPORTS = ("stdio", "http")
 
 
+def validate_mcp_loading(mode: object) -> str:
+    if not isinstance(mode, str) or mode not in {'legacy', 'eager', 'dispatch', 'auto'}:
+        raise ConfigError('mcp_loading must be legacy, eager, dispatch or auto')
+    return mode
+
+
 def validate_mcp_servers(raw_mcp: list | None) -> list[dict]:
     """校验 mcp_servers 配置段，返回清洗后的 server 配置字典列表。"""
     if raw_mcp is None:
@@ -353,6 +359,7 @@ def validate_service(raw_service: dict | None) -> dict:
         "review": validate_review(None),
         "enable_supervision": False,
         "mcp_servers": [],
+        "mcp_loading": "legacy",
         "notify": {"type": "none", "webhook_url": "", "timeout_seconds": 10},
         # 沙箱默认值同样走校验器：两条返回路径（有/无 service 段）必须给出同一份默认值
         "sandbox": _validate_sandbox(None),
@@ -471,6 +478,7 @@ def validate_service(raw_service: dict | None) -> dict:
             raw_service.get("enable_supervision", False), "service.enable_supervision"
         ),
         "mcp_servers": validate_mcp_servers(raw_service.get("mcp_servers")),
+        "mcp_loading": validate_mcp_loading(raw_service.get("mcp_loading", "legacy")),
         "notify": notify,
         "vcs": vcs,
         "repos": repos,
@@ -493,6 +501,7 @@ def validate_config_structure(raw: object) -> dict:
         "providers": validate_providers(raw["providers"]),
         "permission_mode": validate_permission_mode(raw.get("permission_mode", "default")),
         "mcp_servers": validate_mcp_servers(raw.get("mcp_servers")),
+        "mcp_loading": validate_mcp_loading(raw.get("mcp_loading", "legacy")),
         "hooks": validate_hooks(raw.get("hooks")),
         "enable_fork": validate_bool_field(raw.get("enable_fork", False), "enable_fork"),
         "enable_verification_agent": validate_bool_field(

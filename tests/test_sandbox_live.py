@@ -233,8 +233,9 @@ async def test_ci_mcp_server_works_inside_the_container(sandbox: DockerSandbox, 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('mode', ['legacy', 'dispatch'])
 async def test_agent_runs_in_container_with_mcp_tools(
-    sandbox: DockerSandbox, worktree: Path, monkeypatch
+    sandbox: DockerSandbox, worktree: Path, monkeypatch, mode: str,
 ):
     """**完整 agent 路径**在容器里跑通：`mewcode -p --output-format json --config ...`。
 
@@ -252,9 +253,16 @@ async def test_agent_runs_in_container_with_mcp_tools(
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")  # 容器里的 key 只走环境变量
 
+    arguments = {"query": '{app="checkout"}'}
+    calls = [{"tool_calls": [("mcp_logs_query_logs", json.dumps(arguments))]}]
+    if mode == 'dispatch':
+        calls = [
+            {"tool_calls": [("ToolSearch", json.dumps({'query': 'select:mcp_logs_query_logs'}))]},
+            {"tool_calls": [("MCPCall", json.dumps({'tool_name': 'mcp_logs_query_logs', 'arguments': arguments}))]},
+        ]
     llm = FakeLLM(
         script=[
-            {"tool_calls": [("mcp_logs_query_logs", json.dumps({"query": '{app="checkout"}'}))]},
+            *calls,
             {"text": "ROOT CAUSE: simulated\nFIX: none\nVERIFICATION: log query"},
         ],
         host="0.0.0.0",
@@ -286,6 +294,7 @@ async def test_agent_runs_in_container_with_mcp_tools(
             timeout=900,
             mcp_servers=mcp_servers,
             enable_supervision=True,
+            mcp_loading=mode,
             # Linux 上 host.docker.internal 需要显式映射；Docker Desktop 本就支持
             extra_args=["--add-host", "host.docker.internal:host-gateway"],
         )
@@ -295,8 +304,9 @@ async def test_agent_runs_in_container_with_mcp_tools(
 
     report = result.extra.get("supervision", {})
     assert report.get("enabled") is True, result.stdout
-    assert report["turn"] == 2 and report["entries"] == {}, report
-    assert report["attempts"] == 2 and report["closed"], report
+    rounds = 3 if mode == 'dispatch' else 2
+    assert report["turn"] == rounds and report["entries"] == {}, report
+    assert report["attempts"] == rounds and report["closed"], report
     assert result.exit_code == 0, f"agent run failed:\n{result.stdout[-3000:]}"
     assert "ROOT CAUSE" in result.result_text
     # 结构化摘要回报了内部工具的使用（服务层据此写审计与 PR body）
@@ -308,10 +318,13 @@ async def test_agent_runs_in_container_with_mcp_tools(
     bodies = llm.posted_bodies()
     assert len(bodies) >= 2, f"expected a tool round trip, got {len(bodies)} request(s)"
     # 容器里的 agent 真的把 MCP 工具挂进了工具表
-    assert "mcp_logs_query_logs" in json.dumps(bodies[0].get("tools"))
+    assert ("mcp_logs_query_logs" in json.dumps(bodies[0].get("tools"))) == (mode == 'legacy')
+    if mode == 'dispatch':
+        assert bodies[0]['tools'] == bodies[1]['tools'] == bodies[2]['tools']
+        assert 'MCPCall' in json.dumps(bodies[0]['tools'])
     # 工具结果真的回到了模型：第二轮请求里带着假 Loki 的日志内容
     # （ensure_ascii=False：日志里有非 ASCII 字符，默认转义会让子串断言失真）
-    assert DEFAULT_LOG_LINE in json.dumps(bodies[1], ensure_ascii=False)
+    assert DEFAULT_LOG_LINE in json.dumps(bodies[rounds - 1], ensure_ascii=False)
 
 
 # ---------------------------------------------------------------------------

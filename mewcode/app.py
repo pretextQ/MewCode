@@ -211,6 +211,7 @@ class MewCodeApp(App):
         enable_coordinator_mode: bool = False,
         driver_class: type | None = None,
         enable_supervision: bool = False,
+        mcp_loading: str = "legacy",
     ) -> None:
         super().__init__(driver_class=driver_class)
         self.register_theme(MEWCODE_THEME)
@@ -218,6 +219,7 @@ class MewCodeApp(App):
         self.providers = providers
         self._initial_permission_mode = permission_mode
         self._mcp_server_configs = mcp_servers or []
+        self._mcp_loading = mcp_loading
         self.hook_engine = hook_engine
         self._enable_supervision = enable_supervision
         self._enable_fork = enable_fork
@@ -1588,10 +1590,15 @@ class MewCodeApp(App):
         self._update_mode_label()
         manager = MCPManager()
         manager.load_configs(self._mcp_server_configs)
-        tools_before = len(self.registry.list_tools())
         self.mcp_manager = manager
         try:
             errors = await manager.register_all_tools(self.registry)
+            from mewcode.mcp.loading import configure_loading
+            provider = self._selected_provider or self.providers[0]
+            choice = configure_loading(self.registry, self._mcp_loading,
+                                       provider.get_context_window(), provider.protocol)
+            if self._mcp_loading != 'legacy':
+                self._show_system_message(f'MCP loading: {choice.selected} (schema {choice.schema_bytes} bytes)')
         except asyncio.CancelledError:
             self._mcp_server_info = "MCP 连接已停止 / 状态未知"
             raise
@@ -1603,8 +1610,9 @@ class MewCodeApp(App):
             self._update_mode_label()
         for err in errors:
             self._show_system_message(f"MCP warning: {err}")
-        tools_after = len(self.registry.list_tools())
-        mcp_tools = tools_after - tools_before
+        from mewcode.mcp.tool_wrapper import MCPToolWrapper
+        mcp_tools = sum(isinstance(t, MCPToolWrapper) and self.registry.is_enabled(t.name)
+                        for t in self.registry.list_tools())
         server_count = len(manager._clients)
         self._mcp_server_info = (
             f"MCP {'部分失败' if errors and server_count else '连接失败' if errors else '已连接'} · "
@@ -1617,7 +1625,8 @@ class MewCodeApp(App):
                 srv_name = cfg.name if hasattr(cfg, 'name') else str(cfg)
                 tool_names = [
                     t.name for t in self.registry.list_tools()
-                    if t.name.startswith(f"mcp__{srv_name}__")
+                    if isinstance(t, MCPToolWrapper) and t.mcp_server_name == srv_name
+                    and self.registry.is_enabled(t.name)
                 ]
                 section = f"## {srv_name}\n"
                 if tool_names:

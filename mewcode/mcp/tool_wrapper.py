@@ -3,27 +3,17 @@ from __future__ import annotations
 from typing import Any
 
 from mcp import types as mcp_types
-from pydantic import BaseModel, create_model
+from pydantic import BaseModel
 
 from mewcode.mcp.client import MCPClient
+from mewcode.mcp.schema import build_params_model
 from mewcode.tools.base import Tool, ToolResult
 
 
 def _build_params_model(
     tool_name: str, input_schema: dict[str, Any]
 ) -> type[BaseModel]:
-    properties = input_schema.get("properties", {})
-    required = set(input_schema.get("required", []))
-
-    field_definitions: dict[str, Any] = {}
-    for name, prop in properties.items():
-        py_type = _json_type_to_python(prop.get("type", "string"))
-        if name in required:
-            field_definitions[name] = (py_type, ...)
-        else:
-            field_definitions[name] = (py_type | None, None)
-
-    return create_model(f"{tool_name}Params", **field_definitions)
+    return build_params_model(tool_name, input_schema)
 
 
 def _json_type_to_python(json_type: str) -> type:
@@ -81,9 +71,21 @@ class MCPToolWrapper(Tool[BaseModel]):
         self.category = "read" if is_read_only_tool(tool_def) else "command"
         self.is_concurrency_safe = self.category == "read"
         self.should_defer = True
+        self.legacy_defer = True
+        self.dispatch_only = False
+        self._availability = {'available': True}
+        self._validated_generation = getattr(client, 'generation', 0)
         self.params_model = _build_params_model(
             tool_def.name, tool_def.inputSchema
         )
+
+    @property
+    def available(self) -> bool:
+        return self._availability['available']
+
+    @property
+    def mcp_server_name(self) -> str:
+        return self._server_name
 
     @property
     def mcp_tool_name(self) -> str:
@@ -99,7 +101,10 @@ class MCPToolWrapper(Tool[BaseModel]):
 
 
     async def execute(self, params: BaseModel) -> ToolResult:
-        if not self._client.is_alive:
+        if not self.available:
+            return ToolResult(output='MCP capabilities changed; restart the session.', is_error=True)
+        reconnect = not self._client.is_alive
+        if reconnect:
             try:
                 await self._client.connect()
             except Exception as e:
@@ -108,9 +113,20 @@ class MCPToolWrapper(Tool[BaseModel]):
                     is_error=True,
                 )
 
+        generation = getattr(self._client, 'generation', 0)
+        if reconnect or generation != self._validated_generation:
+            try:
+                current = await self._client.list_tools()
+            except Exception:
+                return ToolResult(output='MCP capability refresh failed; call rejected.', is_error=True)
+            if not any(t.model_dump() == self._tool_def.model_dump() for t in current):
+                self._availability['available'] = False
+                return ToolResult(output='MCP capabilities changed; restart the session.', is_error=True)
+            self._validated_generation = generation
+
         try:
             result = await self._client.call_tool(
-                self._tool_def.name, params.model_dump(exclude_none=True)
+                self._tool_def.name, params.model_dump(exclude_unset=True)
             )
         except Exception as e:
             self._client.mark_unhealthy()

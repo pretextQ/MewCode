@@ -20,6 +20,7 @@ import logging
 from dataclasses import dataclass, field
 
 from mewcode.config import MCPServerConfig
+from mewcode.mcp.loading import LoadingChoice, configure_loading
 from mewcode.mcp.manager import MCPManager
 from mewcode.tools import ToolRegistry
 
@@ -35,6 +36,7 @@ class MCPBootstrapResult:
     server_names: list[str] = field(default_factory=list)
     tool_names: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    loading: LoadingChoice | None = None
 
     @property
     def ready(self) -> bool:
@@ -57,6 +59,9 @@ async def register_mcp_tools(
     defer: bool = False,
     read_only_only: bool = True,
     connect_timeout: float | None = MCP_CONNECT_TIMEOUT,
+    loading_mode: str = 'legacy',
+    context_window: int = 200_000,
+    protocol: str = 'anthropic',
 ) -> MCPBootstrapResult:
     """连接配置的 MCP server 并注册其（只读）工具。永不向调用方抛异常。"""
     result = MCPBootstrapResult(server_names=[c.name for c in (configs or [])])
@@ -78,6 +83,10 @@ async def register_mcp_tools(
         log.warning("MCP bootstrap failed: %s", e)
         result.errors.append(f"MCP bootstrap failed: {type(e).__name__}: {e}")
     result.tool_names = sorted(t.name for t in registry.list_tools() if t.name not in before)
+    try:
+        result.loading = configure_loading(registry, loading_mode, context_window, protocol)
+    except ValueError as exc:
+        result.errors.append(f'MCP loading failed: {exc}')
     return result
 
 

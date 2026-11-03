@@ -79,7 +79,9 @@ class MCPManager:
                     wrapper = MCPToolWrapper(name, tool_def, client)
                     if not defer:
                         wrapper.should_defer = False
+                        wrapper.legacy_defer = False
                     if registry.get(wrapper.name) is not None:
+                        registry.reject_collision(wrapper.name)
                         raise ValueError(f"MCP tool name collision: {wrapper.name}")
                     registry.register(wrapper)
                     logger.info("Registered MCP tool: %s", wrapper.name)

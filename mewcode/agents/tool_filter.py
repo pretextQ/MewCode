@@ -36,6 +36,7 @@ ASYNC_AGENT_ALLOWED_TOOLS: frozenset[str] = frozenset({
     "LoadSkill",
     "SyntheticOutput",
     "ToolSearch",
+    "MCPCall",
     "EnterWorktree",
     "ExitWorktree",
 })
@@ -133,7 +134,7 @@ def resolve_agent_tools(
         filtered.register(tool)
     for tool in all_tools.values():
         filtered.register(tool)
-    return filtered
+    return filtered.inherit_state(parent_registry)
 
 
 def build_teammate_tools(
@@ -192,7 +193,7 @@ def build_teammate_tools(
     for tool in coordination_tools:
         registry.register(tool)
 
-    return registry
+    return registry.inherit_state(parent_registry)
 
 
 def apply_plan_readonly_filter(registry: ToolRegistry) -> ToolRegistry:
@@ -206,7 +207,7 @@ def apply_plan_readonly_filter(registry: ToolRegistry) -> ToolRegistry:
             continue
         if tool.is_read_only or tool.name in PLAN_READONLY_EXTRA_TOOLS:
             filtered.register(tool)
-    return filtered
+    return filtered.inherit_state(registry)
 
 
 def apply_coordinator_filter(registry: ToolRegistry) -> ToolRegistry:
@@ -215,4 +216,4 @@ def apply_coordinator_filter(registry: ToolRegistry) -> ToolRegistry:
     for name, tool in all_tools.items():
         if name in COORDINATOR_MODE_ALLOWED_TOOLS:
             filtered.register(tool)
-    return filtered
+    return filtered.inherit_state(registry)

@@ -46,6 +46,9 @@ class ToolSearchTool(Tool[ToolSearchParams]):
             "input_schema": schema,
         }
 
+    def for_registry(self, registry: ToolRegistry) -> ToolSearchTool:
+        return ToolSearchTool(registry, self._protocol)
+
 
     async def execute(self, params: ToolSearchParams) -> ToolResult:
         assert isinstance(params, ToolSearchParams)
@@ -73,9 +76,13 @@ class ToolSearchTool(Tool[ToolSearchParams]):
             if "name" in s:
                 self._registry.mark_discovered(s["name"])
 
+        notice = 'Their full schemas are now loaded:'
+        if any(getattr(self._registry.get(s.get('name', '')), 'dispatch_only', False) for s in schemas):
+            notice = ('Full schemas below. Use MCPCall with the exact registered tool_name and arguments. '
+                      'search does not add those MCP schemas to request tools:')
         return ToolResult(
             output=(
-                f"Found {len(schemas)} tool(s). Their full schemas are now loaded:\n\n"
+                f"Found {len(schemas)} tool(s). {notice}\n\n"
                 f"{json.dumps(schemas, indent=2, ensure_ascii=False)}"
             )
         )

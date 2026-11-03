@@ -5,9 +5,12 @@ import locale
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Generic, Literal, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar
 
 from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    from mewcode.tools import ToolRegistry
 
 SKIP_DIRS = {".git", ".venv", "node_modules", "__pycache__", ".tox", ".mypy_cache"}
 
@@ -118,6 +121,9 @@ class Tool(ABC, Generic[ParamsT]):
     is_system_tool: bool = False
     should_defer: bool = False
     _work_dir: str | None = None
+
+    def for_registry(self, registry: ToolRegistry) -> Tool:
+        return self
 
     @property
     def is_read_only(self) -> bool:

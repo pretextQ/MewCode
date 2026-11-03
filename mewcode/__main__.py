@@ -261,6 +261,7 @@ def _main() -> None:
         providers=config.providers,
         permission_mode=permission_mode,
         mcp_servers=config.mcp_servers,
+        mcp_loading=config.mcp_loading,
         hook_engine=hook_engine,
         enable_supervision=config.enable_supervision,
         enable_fork=config.enable_fork,
@@ -345,7 +346,8 @@ async def _run_prompt(config, permission_mode, hook_engine, prompt: str, output_
     # M2 W3：内部工具链（只读 MCP）。无头模式的语义与 TUI 不同：工具直接可见
     # （defer=False，无人值守不存在"先 ToolSearch"的余地）、只挂只读工具、
     # 连不上只记日志。沙箱容器内跑的就是这条路径（--config 带 mcp_servers）。
-    mcp_result = await register_mcp_tools(registry, config.mcp_servers)
+    mcp_result = await register_mcp_tools(registry, config.mcp_servers, loading_mode=config.mcp_loading,
+                                          context_window=provider.get_context_window(), protocol=provider.protocol)
     if mcp_result.server_names:
         _mcp_log = logging.getLogger("mewcode.mcp")
         _mcp_log.info("MCP bootstrap: %s", mcp_result.summary())

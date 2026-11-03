@@ -537,9 +537,7 @@ class Agent:
             if deferred_names:
                 conversation.set_system_reminder(
                     "deferred-tools",
-                    "The following deferred tools are available via ToolSearch. "
-                    "Their schemas are NOT loaded - use ToolSearch with "
-                    'query "select:<name>[,<name>...]" to load tool schemas before calling them:\n'
+                    self.registry.deferred_instructions()
                     + "\n".join(deferred_names)
                 )
             else:
@@ -696,6 +694,7 @@ class Agent:
                         )
                 else:
                     for tc in batch.calls:
+                        tc = self.registry.resolve_tool_call(tc)
                         result: ToolResult | None = None
                         elapsed = 0.0
                         is_unknown = False
@@ -1356,9 +1355,7 @@ class Agent:
             if deferred_names:
                 conversation.set_system_reminder(
                     "deferred-tools",
-                    "The following deferred tools are available via ToolSearch. "
-                    "Their schemas are NOT loaded - use ToolSearch with "
-                    'query "select:<name>[,<name>...]" to load tool schemas before calling them:\n'
+                    self.registry.deferred_instructions()
                     + "\n".join(deferred_names)
                 )
             else:
@@ -1432,6 +1429,7 @@ class Agent:
 
             tool_results: list[ToolResultBlock] = []
             for tc in response.tool_calls:
+                tc = self.registry.resolve_tool_call(tc)
                 if event_callback:
                     event_callback({
                         "type": "tool_use",

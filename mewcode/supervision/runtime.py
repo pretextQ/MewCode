@@ -51,7 +51,7 @@ async def supervised_stream(
                 bus.confirm(request_id, selected["system"] + selected["reminder"])
                 confirmed = True
             if isinstance(event, ToolCallComplete):
-                bus.observe("tool_call", event.tool_name)
+                bus.observe("tool_call", agent.registry.resolve_tool_call(event).tool_name)
             yield event
     except BaseException as exc:
         bus._event("request_failed", request_id=request_id, confirmed=confirmed, error=type(exc).__name__)

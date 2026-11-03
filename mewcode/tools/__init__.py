@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from mewcode.tools.base import Tool
+from mewcode.tools.base import Tool, ToolCallComplete
 
 if TYPE_CHECKING:
     from mewcode.cache import FileCache
@@ -14,11 +14,36 @@ class ToolRegistry:
         self._tools: dict[str, Tool] = {}
         self._disabled: set[str] = set()
         self._discovered: set[str] = set()
+        self._blocked: set[str] = set()
 
     def register(self, tool: Tool) -> None:
         if tool.name in self._tools and self._tools[tool.name] is not tool:
             logging.getLogger(__name__).warning("Replacing registered tool '%s'", tool.name)
-        self._tools[tool.name] = tool
+        binder = getattr(tool, 'for_registry', None)
+        self._tools[tool.name] = binder(self) if callable(binder) else tool
+
+    def inherit_state(self, parent: ToolRegistry) -> ToolRegistry:
+        self._disabled = parent._disabled & self._tools.keys()
+        self._discovered = parent._discovered & self._tools.keys()
+        self._blocked = parent._blocked & self._tools.keys()
+        return self
+
+    def reject_collision(self, name: str) -> None:
+        self._blocked.add(name)
+
+    def resolve_tool_call(self, call: ToolCallComplete) -> ToolCallComplete:
+        if call.tool_name != 'MCPCall':
+            return call
+        from mewcode.mcp.loading import resolve_dispatch
+        return resolve_dispatch(self, call)
+
+    def deferred_instructions(self) -> str:
+        if any(getattr(tool, 'dispatch_only', False) for tool in self._tools.values()):
+            return ('Use ToolSearch to inspect full schemas, then MCPCall with the exact MCP tool_name and arguments. '
+                    'MCP schemas remain outside request tools. Other deferred tools load normally:\n')
+        return ('The following deferred tools are available via ToolSearch. '
+                'Their schemas are NOT loaded - use ToolSearch with '
+                'query "select:<name>[,<name>...]" to load tool schemas before calling them:\n')
 
     def bind_work_dir(self, work_dir: str) -> ToolRegistry:
         """返回所有工具绑定 work_dir 的新注册表；原注册表不变。
@@ -26,18 +51,17 @@ class ToolRegistry:
         用于子代理运行在 worktree 等隔离目录时统一相对路径基准。
         """
         bound = ToolRegistry()
-        bound._disabled = set(self._disabled)
-        bound._discovered = set(self._discovered)
-        for name, tool in self._tools.items():
-            bound._tools[name] = tool.bind(work_dir)
-        return bound
+        for tool in self._tools.values():
+            bound.register(tool.bind(work_dir))
+        return bound.inherit_state(self)
 
     def get(self, name: str) -> Tool | None:
         return self._tools.get(name)
 
 
     def is_enabled(self, name: str) -> bool:
-        return name in self._tools and name not in self._disabled
+        return (name in self._tools and name not in self._disabled and name not in self._blocked
+                and getattr(self._tools[name], 'available', True))
 
     def enable(self, name: str) -> None:
         self._disabled.discard(name)
@@ -52,7 +76,8 @@ class ToolRegistry:
 
 
     def mark_discovered(self, name: str) -> None:
-        self._discovered.add(name)
+        if not getattr(self.get(name), 'dispatch_only', False):
+            self._discovered.add(name)
 
     def is_discovered(self, name: str) -> bool:
         return name in self._discovered
@@ -64,7 +89,7 @@ class ToolRegistry:
             for name, tool in self._tools.items()
             if getattr(tool, "should_defer", False)
             and name not in self._discovered
-            and name not in self._disabled
+            and self.is_enabled(name)
         ]
 
     def search_deferred(
@@ -75,7 +100,7 @@ class ToolRegistry:
         for name, tool in self._tools.items():
             if not getattr(tool, "should_defer", False):
                 continue
-            if name in self._disabled:
+            if not self.is_enabled(name):
                 continue
             score = 0
             name_lower = name.lower()
@@ -114,6 +139,8 @@ class ToolRegistry:
             tool = self._tools.get(name)
             if tool is None:
                 continue
+            if not self.is_enabled(name):
+                continue
             if not getattr(tool, "should_defer", False):
                 continue
             base = tool.get_schema()
@@ -135,7 +162,7 @@ class ToolRegistry:
     def get_all_schemas(self, protocol: str = "anthropic") -> list[dict[str, Any]]:
         schemas: list[dict[str, Any]] = []
         for name, tool in self._tools.items():
-            if name in self._disabled:
+            if not self.is_enabled(name) or getattr(tool, 'dispatch_only', False):
                 continue
             if getattr(tool, "should_defer", False) and name not in self._discovered:
                 continue

@@ -45,7 +45,7 @@ MewCode 已收录于 [XERJ Corpus Hub](https://hub.xerj.org/corpus/pretextq--mew
 - **内部工具链只读**：内置两个 MCP server——生产日志查询（Loki）与 CI 状态（GitHub），整条取数路径只有 GET；未声明 `readOnlyHint` 的工具在服务模式一律不挂
 - **自起测试环境**：仓库带 `docker-compose.yml` 时，服务自动 `up -d --wait` 起依赖，在沙箱容器内（加入 compose 网络、按服务名寻址）跑集成测试，无论成败 `down -v` 清理；无容器运行时则如实记录"未执行"，不用假验证充数
 
-参考库能力借鉴已交付 U1–U4，最终产品提交 `f2ac5e1` 的[五作业 CI](https://github.com/pretextQ/MewCode/actions/runs/41456722525) 全部通过。按用户要求，U5 编辑后 diff、U6 MCP 加载/分发、U7 只读 Shell 并发/退出码仍未实施并暂停；已有 Git diff 详情不等于 U5。进度和验证边界见[交付台账](docs/stage-2026-11-02-borrowing.md)。
+参考库能力借鉴已按 2026-11-03 授权恢复：U1–U5 已交付，U5 `d456498` 的[五作业 CI](https://github.com/pretextQ/MewCode/actions/runs/41560096587) 全部通过。U6 [MCP 加载/分发](guides/mcp-loading.md)本地实现验证中，legacy 保持默认；U7 只读 Shell 并发/退出码将在 U6 对应 CI 成功后实施。进度和验证边界见[交付台账](docs/stage-2026-11-02-borrowing.md)。
 
 ## 快速开始（CLI / TUI）
 

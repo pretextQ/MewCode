@@ -11,10 +11,10 @@
 | U1 | 受保护配置/技能禁写 | 已推送，五作业成功 | `c81aeb60fc0d4557c7318b1addc96f50cdd553a8` | [41424253094](https://github.com/pretextQ/MewCode/actions/runs/41424253094) | 全量 1823/24；保护专项 60/1 |
 | U2 | AGENTS.md/目录链/include | 已推送，五作业成功 | `981619f139a47f619826be6ea88dcda1893ffafd` | [41427433417](https://github.com/pretextQ/MewCode/actions/runs/41427433417) | 全量 1871/25；指令专项 11/1 |
 | U3 | 崩溃日志/保留诊断 | 已推送，五作业成功 | `a51c67aaa98eeef75be47402d178a697495e67e7` | [41430601257](https://github.com/pretextQ/MewCode/actions/runs/41430601257) | 全量 1879/26；最终诊断专项 11/1 |
-| U4 | 拒绝授权附带反馈 | 已推送，五作业成功；本轮已暂停 | `f2ac5e192fe72dc9dcccda4d451f618743b2f9d5` | [41456722525](https://github.com/pretextQ/MewCode/actions/runs/41456722525) | 全量 1900/26；反馈专项 18；三平台补充专项通过 |
-| U5 | 编辑后有界 diff | 本地完成，提交后等待五作业 CI | 本项提交 | 待核验 | 全量 1916/26；最终展示专项 59 |
-| U6 | MCP eager/dispatch | 未实施，按用户要求暂停 | — | — | — |
-| U7 | 只读 Shell 并发/退出码 | 未实施，按用户要求暂停 | — | — | — |
+| U4 | 拒绝授权附带反馈 | 已推送，五作业成功 | `f2ac5e192fe72dc9dcccda4d451f618743b2f9d5` | [41456722525](https://github.com/pretextQ/MewCode/actions/runs/41456722525) | 全量 1900/26；反馈专项 18；三平台补充专项通过 |
+| U5 | 编辑后有界 diff | 已推送，五作业成功 | `d456498e6bd7bda9951e229edce128b5a0fd6681` | [41560096587](https://github.com/pretextQ/MewCode/actions/runs/41560096587) | 全量 1916/26；最终展示专项 59 |
+| U6 | MCP eager/dispatch | 本地完成，提交后等待五作业 CI | 本项提交 | 待核验 | 全量 1970/27；扩展专项 344；Docker 2 |
+| U7 | 只读 Shell 并发/退出码 | 待 U6 五作业 CI 成功后实施 | — | — | — |
 
 ## 每项追加记录格式
 
@@ -99,3 +99,16 @@
 - Windows/Python 3.14.4：`uv run --locked pytest tests/test_edit_diff.py tests/test_filehistory.py tests/test_rewind_cache.py tests/test_self_verify.py tests/test_tui_details.py tests/test_review_oct24.py -q --maxfail=3 --timeout=120`：164 passed（25.24 秒）。补充实际 Agent interactive/headless 下一请求及最终 hunk 起点修正后新专项 `tests/test_edit_diff.py`：16 passed（4.16 秒）；覆盖混合换行、UTF-8 BOM、Unicode、删除到空文件的真实字节与 rewind、读门禁/缓存、长输出/计算预算、成功后预览异常、写入失败、历史与实时纯文本展示。现有自验证观察器继续工作；未启动用户 TUI。
 - 首轮测试曾因 pytest 自动生成超长参数 ID 触发 Windows 临时路径错误，另有错误引用不存在历史字段的断言；已用短 ID 和真实 snapshot/rewind 修正。首次 Ruff 行长与 helper 类型标注已修正，工程检查最终通过（Ruff、win32/linux mypy 各 194 文件、工程守卫、锁文件、diff）；不提高 ceiling，不读取配置/记忆。
 - 本地全量 `uv run --locked pytest -q --maxfail=10 --timeout=120`：1916 passed / 26 skipped（324.50 秒）。全量启动后的 hunk 零行起点和展示过滤微调以最终受影响专项补验：`tests/test_edit_diff.py tests/test_tui_details.py tests/test_tui_redesign.py tests/test_tui_hardening.py` 59 passed（15.94 秒），覆盖 C1/方向控制字符；Ruff、双平台 mypy、工程守卫、锁文件与 diff 再通过。最终 SHA 的完整跨平台 CI 仍须核实，不能以此本地 Windows 结果替代。
+- 最终 `d456498e6bd7bda9951e229edce128b5a0fd6681` 已推送并核对 origin/master 一致；push CI [41560096587](https://github.com/pretextQ/MewCode/actions/runs/41560096587) Windows/Linux × Python 3.11/3.13 和 security 五作业全部 success 后，才开始 U6 产品修改。
+
+## U6 实施记录（2026-11-03）
+
+- 保留 legacy 默认与各入口原有可见性；初次连接后选择 eager/dispatch/显式 auto（紧凑 UTF-8 schema 字节/4 向上取整，阈值 min(8192, context_window/10)，超过选 dispatch）。顶层与 service 独立配置，服务直跑/容器仍过滤非 readOnlyHint；配置可显式覆盖回 legacy。公开契约：[MCP 加载指南](../guides/mcp-loading.md)。
+- MCPCall 在 Agent 既有执行门禁之前解析真实 MCP 身份，同一管线处理权限/反馈、启停、hooks、完整参数验证与监督；只保留外层 ID，不重复执行事实。未知/禁用/过滤/非 MCP/递归目标拒绝，碰撞封锁歧义身份。注册表复制重绑 ToolSearch/MCPCall 并继承禁用状态。dispatch 入口和目标保守串行；没有 native/beta header。
+- 实施前合成 0/5/250 工具基线：legacy tools 紧凑 UTF-8 字节 404→404 / 404→2234 / 404→91904。新模式同样样本：eager 404/2234/91904 搜索前后不变，dispatch 404/799/799 不变；schema 总字节 2/1831/91501。三客户端 SDK 请求捕获验证实际请求集合与配对，不声称真实缓存/费用收益。
+- Windows/Python 3.14.4：初始既有 MCP/服务/子代理/配对回归 143 passed（19.48 秒）；扩展 `tests/test_mcp_loading.py tests/test_tool_search.py tests/test_mcp.py tests/test_mcp_concurrency.py tests/test_service_mcp.py tests/test_subagent.py tests/test_permission_security.py tests/test_permission_feedback.py tests/test_request_pairing.py tests/test_service_sandbox.py` 344 passed（55.18 秒）。全量参数保留调整后 MCP 新专项+既有 MCP/并发 94 passed（18.56 秒）；最后连接代际/旧栈收尾补充后的 loading+并发专项 59 passed（19.01 秒）。实际入口六组合（TUI/headless/service × legacy/dispatch）、真实 stdio 成功/失败/超时取消/重连/回收、真实目标 hooks 一次性与监督、严格嵌套 schema/null/额外字段及 SDK ID 均覆盖。
+- Docker daemon 起初未运行，后台启动 Docker Desktop 后可用。真实独立 Linux/Python 3.12 容器，`MEWCODE_DOCKER_TESTS=1 uv run --locked pytest tests/test_sandbox_live.py -k agent_runs_in_container_with_mcp_tools -q --maxfail=2 --timeout=900`：2 passed / 15 deselected（22.36 秒）；本地脚本 LLM + 假 Loki + 真实 MCP 与 CLI，dispatch 经搜索再调用、tools 稳定、真实目标计数准确，容器无残留。该轮在最后连接代际微调前运行，后续受影响专项及最终 CI 覆盖收尾；未调用真实端点。
+- 失败事实：新测试初期错误要求 eager 搜索返回已直接可见 schema、AgentDef 字段名称用错、临时配置缺 provider、ConfigError 误按 ValueError 捕获，均修正为实际 API 与行为；产品门禁未为测试放宽。首次离线锁解析改选旧版本，已立即恢复原锁定包与环境，仅保留 root 对已有 jsonschema 的两个依赖元数据条目，最终锁检查成功；没有升级/降级包版本交付。Ruff/import/类型及行长初轮问题均已修正。
+- 首次全量 4 failed / 1966 passed / 27 skipped（349.42 秒），均为旧 MCP 角色测试使用仅含 name 的 SimpleNamespace，不具备新增注册表重绑 hook；注册入口保留旧替身兼容，真实 ToolSearch/MCPCall 仍必须重绑。随后角色/MCP/监督/自验证修正专项 198 passed（34.97 秒），补齐 tool_call 也按真实目标监督、不记录外层两次。
+- 最终本地全量 `uv run --locked pytest -q --maxfail=10 --timeout=120`：1970 passed / 27 skipped（333.63 秒）。全量启动后的 MCP 状态数量/名称展示修正以 `tests/test_mcp_loading.py tests/test_commands.py` 补验，95 passed（18.48 秒）；状态只数真实启用目标，不把 dispatcher 当服务工具，也不混淆含下划线的 server。最终 real_stdio 补充检查重连前后两个 PID 都退出，并将所有断言放进 finally 收尾范围。Ruff、win32/linux 目标 mypy 各 196 文件、工程守卫、锁文件、diff、四项缺陷回植绿→红检验通过，源码预算未提高。
+- 提交前 Schannel 查询三次握手失败；单次命令使用 OpenSSL 后端后成功核对 origin/master 仍为 U5 SHA，未修改持久配置、远端 URL 或关闭证书校验；一次公开 API EOF 也未当通过。推送与对应最终 SHA 的五作业 CI 待实际核验。

@@ -417,7 +417,8 @@ class DockerSandbox:
         )
 
     def write_container_config(
-        self, path: Path, provider_config, mcp_servers: list | None = None, *, enable_supervision: bool = False
+        self, path: Path, provider_config, mcp_servers: list | None = None, *, enable_supervision: bool = False,
+        mcp_loading: str = 'legacy',
     ) -> Path:
         """写容器用的最小配置：不含任何密钥（key 只经环境变量注入）。
 
@@ -443,6 +444,9 @@ class DockerSandbox:
         }
         if enable_supervision:
             payload["enable_supervision"] = True
+        if mcp_loading != 'legacy':
+            payload['mcp_loading'] = mcp_loading
+            payload['providers'][0]['context_window'] = provider_config.get_context_window()
         if mcp_servers:
             payload["mcp_servers"] = [_mcp_config_payload(cfg) for cfg in mcp_servers]
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -491,6 +495,7 @@ class DockerSandbox:
         mcp_servers: list | None = None,
         extra_args: list[str] | None = None,
         enable_supervision: bool = False,
+        mcp_loading: str = 'legacy',
     ) -> SandboxRunResult:
         """在容器内跑一次 agent，返回结构化结果（超时则强制杀掉容器）。"""
         if not await self.available():
@@ -502,7 +507,8 @@ class DockerSandbox:
         prompt_path = run_dir / "prompt.txt"
         prompt_path.write_text(prompt, encoding="utf-8")
         config_path = self.write_container_config(
-            run_dir / "config.yaml", provider_config, mcp_servers=mcp_servers, enable_supervision=enable_supervision
+            run_dir / "config.yaml", provider_config, mcp_servers=mcp_servers, enable_supervision=enable_supervision,
+            mcp_loading=mcp_loading,
         )
 
         image = await self.ensure_image(repo_name, work_dir)

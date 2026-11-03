@@ -483,7 +483,10 @@ class HeadlessAgentRunner:
         agent = self._build_agent(work_dir)
         if not self.config.mcp_servers:
             return agent, MCPBootstrapResult()
-        result = await register_mcp_tools(agent.registry, self.config.mcp_servers)
+        result = await register_mcp_tools(agent.registry, self.config.mcp_servers,
+                                          loading_mode=self.config.mcp_loading,
+                                          context_window=self.provider.get_context_window(),
+                                          protocol=self.provider.protocol)
         kind = "mcp_ready" if result.ready else "mcp_error"
         on_event({"type": kind, "detail": f"direct: {result.summary()}"})
         return agent, result
@@ -533,6 +536,7 @@ class HeadlessAgentRunner:
                 job.id, work_dir, prompt, self.provider,
                 repo_name=job.repo, timeout=timeout, mcp_servers=mcp_servers,
                 **({"enable_supervision": True} if self.config.enable_supervision else {}),
+                **({"mcp_loading": self.config.mcp_loading} if self.config.mcp_loading != 'legacy' else {}),
             )
         except Exception as e:  # 沙箱自身故障：记事件并冒泡（执行链会 escalate）
             on_event({"type": "sandbox_error", "detail": f"{type(e).__name__}: {e}"})

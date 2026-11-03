@@ -23,6 +23,7 @@ class MCPClient:
         self._session: ClientSession | None = None
         self._stack: AsyncExitStack | None = None
         self._alive = False
+        self.generation = 0
         # Serializes connect/close: concurrent callers would each build an
         # AsyncExitStack and the loser's stdio child process would leak.
         self._lock = asyncio.Lock()
@@ -43,6 +44,8 @@ class MCPClient:
             if self._alive:
                 return
 
+            if self._stack is not None:
+                await self._cleanup_stack()
             self._stack = AsyncExitStack()
             await self._stack.__aenter__()
 
@@ -58,6 +61,7 @@ class MCPClient:
                 await session.initialize()
                 self._session = session
                 self._alive = True
+                self.generation += 1
                 logger.info("MCP server '%s' connected", self.name)
             except Exception:
                 await self._cleanup_stack()
