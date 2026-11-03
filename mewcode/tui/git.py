@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import unicodedata
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
@@ -116,7 +117,7 @@ async def _read_git(work_dir: str, args: list[str], limit: int, input_data: byte
 
 def display_text(value: str) -> str:
     """Keep control codes out of the terminal; preserve tabs/newlines in output."""
-    return "".join(c if c in "\n\t" or (ord(c) >= 32 and ord(c) != 127) else "�" for c in value)
+    return "".join(c if c in "\n\t" or unicodedata.category(c) not in {"Cc", "Cf"} else "�" for c in value)
 
 
 def safe_diff_path(path: str) -> bool:

@@ -92,4 +92,9 @@ class EditFile(Tool[Params]):
         except Exception as e:
             return ToolResult(output=f"Error writing file: {e}", is_error=True)
 
-        return ToolResult(output=f"Successfully edited {params.file_path}")
+        try:
+            from mewcode.tools.edit_diff import edit_summary
+            output = edit_summary(params.file_path, content, new_content)
+        except Exception:
+            output = f"Successfully edited {params.file_path[:500]}\nDiff preview unavailable; edit completed."
+        return ToolResult(output=output)

@@ -2,6 +2,8 @@
 
 日期：2026-11-02。执行规范与完整验收：[11 号开发计划](evolution/11-upstream-borrowing-plan.md)。原始能力比较：[对照报告](review/review-2026-11-02-current-borrowing.md)。
 
+2026-11-03：用户明确恢复 U5–U7，连续实施与逐项 CI 门禁生效；下方暂停文字为历史。预检本地/实时 origin/master 同为 `7a08ec06db5d8689bf66cc4243666598659eb575`，暂存区为空，仅保留 docs/README.md 原有用户入口；未发现适用 AGENTS.md。该文档提交 push CI [41459756578](https://github.com/pretextQ/MewCode/actions/runs/41459756578) 已通过公开 Actions API 核实 SHA/event 与五作业全部 success（连接器网络失败，gh 不在 PATH，未将查询失败当成功）。配置未恢复等历史事实继续保留。
+
 用户已授权新会话按 U1 → U2 → U3 → U4 → U5 → U6 → U7 连续实施，每项完成即单独提交推送，确认对应 CI 成功后再开始下一项。用户后续要求 U4 完成后暂停（额度不足）；U5–U7 等待明确恢复。每项结果与边界见下方记录。
 
 | ID | 项目 | 状态 | 最终提交 / 远端 SHA | 对应 CI | 本轮验收 |
@@ -10,7 +12,7 @@
 | U2 | AGENTS.md/目录链/include | 已推送，五作业成功 | `981619f139a47f619826be6ea88dcda1893ffafd` | [41427433417](https://github.com/pretextQ/MewCode/actions/runs/41427433417) | 全量 1871/25；指令专项 11/1 |
 | U3 | 崩溃日志/保留诊断 | 已推送，五作业成功 | `a51c67aaa98eeef75be47402d178a697495e67e7` | [41430601257](https://github.com/pretextQ/MewCode/actions/runs/41430601257) | 全量 1879/26；最终诊断专项 11/1 |
 | U4 | 拒绝授权附带反馈 | 已推送，五作业成功；本轮已暂停 | `f2ac5e192fe72dc9dcccda4d451f618743b2f9d5` | [41456722525](https://github.com/pretextQ/MewCode/actions/runs/41456722525) | 全量 1900/26；反馈专项 18；三平台补充专项通过 |
-| U5 | 编辑后有界 diff | 未实施，按用户要求暂停 | — | — | — |
+| U5 | 编辑后有界 diff | 本地完成，提交后等待五作业 CI | 本项提交 | 待核验 | 全量 1916/26；最终展示专项 59 |
 | U6 | MCP eager/dispatch | 未实施，按用户要求暂停 | — | — | — |
 | U7 | 只读 Shell 并发/退出码 | 未实施，按用户要求暂停 | — | — | — |
 
@@ -90,3 +92,10 @@
 ## 文档同步
 
 2026-11-02：按用户后续要求同步仓库 README、docs 总入口、演进索引、计划、交接、Agent/架构指南与维护映射，移除当前入口的“规划阶段/等待 U4 CI”过期状态。保留全部历史数字、失败事实、配置未恢复与清理被拒记录；U5–U7 继续暂停。本次仅改 Markdown，沿用上述产品验证与 CI，不重跑模型或真实 TUI。
+
+## U5 实施记录（2026-11-03 恢复）
+
+- EditFile 实际成功写入、历史/缓存更新后调用独立分组 diff helper。完整比较的增删统计与预览截断分离；三行上下文和标准 hunk 起点/行数，无末尾换行明确标记。总预览最多 200 行/12000 字符，比较限前后合计 100 万字符/2 万行且行数乘积不超过 200 万；预算外明确统计省略，避免重复行导致无界比较。预览异常返回编辑已完成，不伪报写入失败。
+- Windows/Python 3.14.4：`uv run --locked pytest tests/test_edit_diff.py tests/test_filehistory.py tests/test_rewind_cache.py tests/test_self_verify.py tests/test_tui_details.py tests/test_review_oct24.py -q --maxfail=3 --timeout=120`：164 passed（25.24 秒）。补充实际 Agent interactive/headless 下一请求及最终 hunk 起点修正后新专项 `tests/test_edit_diff.py`：16 passed（4.16 秒）；覆盖混合换行、UTF-8 BOM、Unicode、删除到空文件的真实字节与 rewind、读门禁/缓存、长输出/计算预算、成功后预览异常、写入失败、历史与实时纯文本展示。现有自验证观察器继续工作；未启动用户 TUI。
+- 首轮测试曾因 pytest 自动生成超长参数 ID 触发 Windows 临时路径错误，另有错误引用不存在历史字段的断言；已用短 ID 和真实 snapshot/rewind 修正。首次 Ruff 行长与 helper 类型标注已修正，工程检查最终通过（Ruff、win32/linux mypy 各 194 文件、工程守卫、锁文件、diff）；不提高 ceiling，不读取配置/记忆。
+- 本地全量 `uv run --locked pytest -q --maxfail=10 --timeout=120`：1916 passed / 26 skipped（324.50 秒）。全量启动后的 hunk 零行起点和展示过滤微调以最终受影响专项补验：`tests/test_edit_diff.py tests/test_tui_details.py tests/test_tui_redesign.py tests/test_tui_hardening.py` 59 passed（15.94 秒），覆盖 C1/方向控制字符；Ruff、双平台 mypy、工程守卫、锁文件与 diff 再通过。最终 SHA 的完整跨平台 CI 仍须核实，不能以此本地 Windows 结果替代。
