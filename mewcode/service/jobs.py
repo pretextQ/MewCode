@@ -24,6 +24,7 @@ from typing import TypeVar
 
 from .job_schema import initialize
 from .journal import ServiceJournal, active_execution, enqueue_notification, save_policy
+from .verification import REVISION_EVENT
 
 log = logging.getLogger(__name__)
 T = TypeVar("T")
@@ -357,6 +358,7 @@ class JobStore:
         last_error: str | None = None,
         result: str | None = None,
         expected_state: str | None = None,
+        accept_test_scope_sha: str = "",
     ) -> Job:
         """校验并落库一次状态转移；非法转移抛 :class:`InvalidTransition`。
 
@@ -379,6 +381,20 @@ class JobStore:
                 raise InvalidTransition(
                     f"{current.status} -> {to_state} is not allowed for {job_id}"
                 )
+            decision_reason = reason
+            if to_state == "merged":
+                evidence = conn.execute(
+                    "SELECT detail FROM job_events WHERE job_id=? AND kind=? ORDER BY seq DESC LIMIT 1",
+                    (job_id, REVISION_EVENT),
+                ).fetchone()
+                revision = json.loads(evidence["detail"]) if evidence else {}
+                if revision.get("status") == "published" and revision.get("scope_status") == "review_required":
+                    head = revision["head_sha"]
+                    if accept_test_scope_sha != head or not reason.strip():
+                        raise InvalidTransition(
+                            f"pytest scope review requires accept_test_scope_sha={head} and a reason"
+                        )
+                    decision_reason = f"pytest scope accepted for {head}: {reason}"
 
             attempts = current.attempts
             if to_state == "fixing":
@@ -422,13 +438,13 @@ class JobStore:
                 ),
             )
             detail = f"{current.status} -> {to_state}"
-            if reason:
-                detail += f": {reason}"
+            if decision_reason:
+                detail += f": {decision_reason}"
             event = conn.execute(
                 "INSERT INTO job_events (job_id, ts, kind, detail, execution_id) VALUES (?, ?, ?, ?, ?)",
                 (job_id, now, "transition", detail, active_execution(conn, job_id)),
             )
-            enqueue_notification(conn, updated, int(event.lastrowid or 0), reason)
+            enqueue_notification(conn, updated, int(event.lastrowid or 0), decision_reason)
             return updated
 
         job = await self.transact(_do)

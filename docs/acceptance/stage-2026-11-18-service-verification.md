@@ -13,3 +13,14 @@
 
 实现参考 [ZMAI CompletionState](https://github.com/lip20041219/zmai/blob/d18d1ae/src/zmai/swe/completion.py) 的验证失效规则。
 本地检查未覆盖真实 GitHub PR、Docker 集成依赖、真实模型或 Linux 运行时。
+
+## pytest 验证范围
+
+- 以相同 pytest 命令复验配置缩小范围、仅收集、删除测试、跳过和改写断言。原验收失败而候选命令退出为 0 时，PR 与报告仍要求核对范围差异。
+- 在既有文件追加回归用例保留 `preserved`，复合 shell 命令在报告中明确显示证据不可用。
+- 用人工返工复核原基线持久化，验证决定接口拒绝缺少 SHA 或 SHA 过期的确认，并在正确 SHA 与原因同时提供时记录合并决定。
+- 检查沙箱替身收到探针参数，runner 从测试输出剥离取证数据并清理临时模块。
+- `pytest -q --maxfail=10 --timeout=120` 运行服务、独立审查及新增范围套件，472 通过。`ruff check .`、Windows/Linux mypy、工程守卫、锁文件与 diff 检查通过。
+
+取证点参考 [ZMAI pytest 验收守卫](https://github.com/lip20041219/zmai/blob/d18d1ae/src/zmai/swe/acceptance_guard.py)。
+这轮覆盖原 pytest 进程的收集结果与运行报告；Docker 沙箱传输使用替身，分布式和集成测试范围未做前后对照。

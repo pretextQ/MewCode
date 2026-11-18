@@ -83,6 +83,23 @@ PR 显示发布提交及本地验证源码树。`GET /jobs/{id}/report` 的 `ver
 失效原因或已推送 SHA，并关联 execution 与 attempt。历史任务没有新增版本记录。未配置单测、集成验证不适用、跳过和失败分别记录。
 源码树检查覆盖按 Git 规则发布的内容及阶段边界。运行时依赖、Git 忽略的输入和阶段内改后恢复的文件变化不属于该检查的覆盖范围。
 
+### pytest 验证范围
+
+对于 `test_command` 中直接调用的 `pytest`、`python -m pytest` 和可识别的 `uv run [--locked]` 形式，服务在原测试进程内记录
+收集筛选后的节点 ID、已运行/跳过的用例及 pytest 配置。宿主和沙箱 runner 沿用原隔离及超时策略。首次取证的基线随 Job 保存，返工继续与它对照。
+
+PR 与 `verification.pytest_scope` 展示基线树、候选树、用例数量和差异。既有用例减少、新跳过或预期失败、仅收集而未执行、
+删除或改写既有测试、pytest 配置或 `conftest.py` 变化都会提示人工核对。在新文件或旧文件中单纯增加测试可保留 `preserved` 状态。
+证据不可用时给出原因。命令包装器、分布式收集、集成验证的前后范围以及未收集的测试不在这一检查内。检查也无法判断任意依赖变化对断言的影响。
+
+出现 `review_required` 时，通过现有决定接口提交 `changes_requested` 可安排返工。人工核对并实际合并后，记录决定时提交发布 SHA 和理由：
+
+```json
+{"decision":"merged","accept_test_scope_sha":"<PR 发布 SHA>","reason":"已核对验收用例的调整及替代覆盖"}
+```
+
+服务会核对 SHA 是否为当前发布版本，并将确认记录写入状态审计。决定接口负责记录人工决定，GitHub 的评审与合并仍由人工操作。
+
 开启 `service.enable_supervision` 时，修复后验证另存 pytest 失败指纹、分类与连续比较证据，并关联当前 execution/attempt。相同证据只向获准的下一次重试追加重新诊断建议；基线、取消重派、重启恢复、人工返工不沿用旧连续计数。关闭时保留原反馈。pytest 契约、可能 TDD/环境/超时豁免、原始输出截断和 `prepared` 边界见[监督指南](supervision.md#服务-dead-end-反馈2026-11-01)。
 
 ## 迁移与范围

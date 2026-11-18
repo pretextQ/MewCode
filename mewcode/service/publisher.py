@@ -20,7 +20,7 @@ from .execution import ExecutionContext, PublishResult
 from .jobs import Job, JobStore
 from .review import ReviewService
 from .review_models import ReviewResult
-from .review_render import render_review
+from .review_render import plain, render_review
 from .sop import extract_logs, render_alert_context
 from .vcs import CheckStatus, VCSError, VCSProvider
 from .verification import COMMIT_EXCLUDES, REVISION_EVENT, SourceRevision, VerificationSourceError
@@ -187,6 +187,20 @@ def build_pr_body(
         lines += ["", "- 本地测试结果尚未关联到发布提交。"]
     if verification:
         lines += ["", f"agent 自述的验证过程：{verification}"]
+    if scope := context.pytest_scope:
+        states = {"preserved": "已收集范围保持", "review_required": "范围变化，需人工确认", "unavailable": "证据不可用"}
+        lines += [
+            "", "### pytest 范围", "", f"- {states[scope.status]}（用例数 {scope.before_count} → {scope.after_count}）",
+            f"- 基线树 `{scope.baseline_tree or 'unknown'}` / 候选树 `{scope.tree}`",
+        ]
+        for reason in scope.reasons:
+            lines.append(f"- {plain(reason)}")
+        for kind, change in scope.changes.items():
+            sample = ", ".join(plain(item) for item in change["sample"][:5])
+            lines.append(f"- `{kind}` ({change['count']}) {sample}")
+        if scope.status == "review_required":
+            lines += ["", "请核对差异。可请求返工，或在实际合并后用决定接口提交原因及 `accept_test_scope_sha`。"]
+        lines += ["", f"更多证据见任务报告 `/jobs/{job.id}/report` 的 `verification.pytest_scope`。"]
 
     self_check = report.get("SELF-CHECK")
     if self_check:

@@ -9,8 +9,10 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from .jobs import JobEvent
+if TYPE_CHECKING:
+    from .jobs import JobEvent
 
 IGNORED_DIRS = (".mewcode", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache")
 COMMIT_EXCLUDES = tuple(
@@ -29,7 +31,7 @@ def is_ignored_path(path: str) -> bool:
     return any(part in IGNORED_DIRS for part in path.replace("\\", "/").split("/"))
 
 
-def _git(work_dir: str, *args: str, index: Path | None = None) -> str:
+def git_bytes(work_dir: str, *args: str, index: Path | None = None) -> bytes:
     env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": ""}
     if index is not None:
         env["GIT_INDEX_FILE"] = str(index)
@@ -42,7 +44,11 @@ def _git(work_dir: str, *args: str, index: Path | None = None) -> str:
     if result.returncode != 0:
         detail = result.stderr.decode("utf-8", errors="replace").strip()[-500:]
         raise VerificationSourceError(f"git {args[0]} failed: {detail}")
-    return result.stdout.decode("utf-8", errors="replace").rstrip("\n\r")
+    return result.stdout
+
+
+def _git(work_dir: str, *args: str, index: Path | None = None) -> str:
+    return git_bytes(work_dir, *args, index=index).decode("utf-8", errors="replace").rstrip("\n\r")
 
 
 def collect_diff(work_dir: str) -> tuple[list[str], str]:
@@ -90,12 +96,12 @@ class SourceRevision:
 
 def revision_detail(
     source: SourceRevision | None, attempt: int, status: str, *, unit: str, integration: str,
-    head_sha: str = "", reason: str = "",
+    head_sha: str = "", reason: str = "", scope_status: str = "",
 ) -> str:
     return json.dumps({
         "attempt": attempt, "status": status, "base_sha": source.base_sha if source else "",
         "tree": source.tree if source else "", "head_sha": head_sha, "reason": reason,
-        "unit": unit, "integration": integration,
+        "unit": unit, "integration": integration, "scope_status": scope_status,
     })
 
 

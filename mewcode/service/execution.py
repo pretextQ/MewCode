@@ -22,22 +22,21 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
-import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
 from mewcode.config import RepoConfig, ServiceConfig
-from mewcode.processes import create_shell_process, kill_process_tree, release_process
 
 from . import sop
 from .failure_feedback import FailureFeedback
 from .jobs import InvalidTransition, Job, JobStore
 from .policy import PolicyError, RepoPolicy, RepoPolicyLoader, effective_policy, stricter_budget
+from .pytest_scope import SCOPE_EVENT, PytestScope, ScopeBaseline, ScopeComparison
 from .review_models import ReviewResult
 from .sandbox import SandboxUnavailable
+from .test_runner import SandboxTestRunner, TestOutcome, TestRunner
 from .verification import COMMIT_EXCLUDES as COMMIT_EXCLUDES
 from .verification import REVISION_EVENT, SourceRevision, VerificationSourceError, collect_diff, revision_detail
 from .verification import is_ignored_path as is_ignored_path
@@ -69,23 +68,6 @@ class TokenBudgetExceeded(Exception):
         super().__init__(message)
         self.input_tokens = input_tokens
         self.output_tokens = output_tokens
-
-
-@dataclass
-class TestOutcome:
-    command: str
-    exit_code: int
-    output: str
-    timed_out: bool = False
-
-    @property
-    def passed(self) -> bool:
-        return self.exit_code == 0 and not self.timed_out
-
-    def summary(self) -> str:
-        if self.timed_out:
-            return f"`{self.command}` → TIMEOUT"
-        return f"`{self.command}` → exit {self.exit_code}"
 
 
 @dataclass
@@ -210,12 +192,14 @@ class ExecutionContext:
     review: ReviewResult | None = None
     source: SourceRevision | None = None
     published_sha: str = ""
+    pytest_scope: ScopeComparison | None = None
 
     def revision_detail(self, status: str, *, reason: str = "") -> str:
         return revision_detail(
             self.source, self.attempts, status,
             unit=test_status(self.verify_test), integration=integration_status(self.integration),
             head_sha=self.published_sha, reason=reason,
+            scope_status=self.pytest_scope.status if self.pytest_scope is not None else "",
         )
 
     def diff_stat(self) -> str:
@@ -249,10 +233,6 @@ def integration_status(outcome: IntegrationOutcome | None) -> str:
 # ---------------------------------------------------------------------------
 # 测试命令执行
 # ---------------------------------------------------------------------------
-
-
-async def _terminate_process_tree(proc: asyncio.subprocess.Process) -> None:
-    await kill_process_tree(proc)
 
 
 def _absorb_cancellation(exc: BaseException) -> str:
@@ -290,90 +270,6 @@ async def shutdown_agent_resources(agent: Any, mcp_result: Any) -> list[str]:
     except asyncio.CancelledError as e:  # pragma: no cover - close_mcp 已吞过一层
         absorbed.append(_absorb_cancellation(e))
     return absorbed
-
-
-class TestRunner:
-    """在 worktree 内执行仓库测试命令，返回结构化结果。
-
-    子进程环境固定 ``PYTHONDONTWRITEBYTECODE=1``：.pyc 头里存的是**秒级**
-    mtime，同一秒内等长的改动（如 ``a - b`` → ``a + b``）会被判定为"缓存有效"，
-    于是验证阶段跑的是基线阶段的旧字节码——修复被测试误判为无效。
-    这是执行链的真问题（agent 快速改一行就会踩到），不是测试环境的怪癖。
-    """
-
-    async def run(self, work_dir: str, command: str, timeout: float) -> TestOutcome:
-        if not command:
-            raise ValueError("empty test command")
-        env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
-        proc = await create_shell_process(
-            command,
-            cwd=work_dir,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            env=env,
-        )
-        try:
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-            output = (stdout or b"").decode("utf-8", errors="replace")
-            return TestOutcome(command=command, exit_code=proc.returncode or 0, output=output)
-        except TimeoutError:
-            await _terminate_process_tree(proc)
-            return TestOutcome(
-                command=command,
-                exit_code=-1,
-                output=f"(timed out after {timeout:.0f}s)",
-                timed_out=True,
-            )
-        except asyncio.CancelledError:
-            await _terminate_process_tree(proc)
-            raise
-        finally:
-            release_process(proc)
-
-
-class SandboxTestRunner:
-    """在容器里跑仓库测试命令（M2：验证阶段也隔离——它执行的是仓库代码）。
-
-    容器不可用时默认拒绝执行；只有显式允许时才能回退宿主。
-    """
-
-    def __init__(
-        self, sandbox: Any, *, repo_name: str = "job", fallback: TestRunner | None = None,
-        allow_host_fallback: bool = False,
-    ) -> None:
-        self.sandbox = sandbox
-        self.repo_name = repo_name
-        self.fallback = fallback or TestRunner()
-        self.allow_host_fallback = allow_host_fallback
-
-    async def run(
-        self, work_dir: str, command: str, timeout: float, *, job_id: str = "", repo_name: str = ""
-    ) -> TestOutcome:
-        if not command:
-            raise ValueError("empty test command")
-        try:
-            available = await self.sandbox.available()
-        except Exception as e:  # pragma: no cover - 探测异常按不可用处理
-            log.warning("sandbox probe failed: %s", e)
-            available = False
-        if not available:
-            if not self.allow_host_fallback:
-                raise SandboxUnavailable("sandbox runtime unavailable; refusing host test execution")
-            log.warning("sandbox unavailable; running `%s` on the host", command)
-            outcome = await self.fallback.run(work_dir, command, timeout)
-            outcome.output = "(host fallback explicitly enabled; no OS sandbox)\n" + outcome.output
-            return outcome
-
-        result = await self.sandbox.run_command(
-            job_id or f"test-{uuid.uuid4().hex}", work_dir, command,
-            repo_name=repo_name or self.repo_name, timeout=timeout
-        )
-        return TestOutcome(
-            command=command,
-            exit_code=result.exit_code,
-            output=result.stdout,
-            timed_out=result.timed_out,
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -807,7 +703,8 @@ class ExecutionChain:
         if (job.status != "changes_requested"
                 and await self._transition(job.id, "reproducing", reason=f"isolated worktree at {work_dir}") is None):
             return
-        baseline = await self._run_tests(job, repo, work_dir, phase="baseline")
+        scope_baseline = await ScopeBaseline.load(self.store, job.id, repo.test_command)
+        baseline = await self._run_baseline(job, repo, work_dir, scope_baseline)
         failure_feedback = FailureFeedback(self.store, job.id, self.config.enable_supervision, work_dir)
 
         # --- 修复 → 验证 → 发布 → CI 门禁 ---
@@ -816,7 +713,7 @@ class ExecutionChain:
         feedback = job.last_error if job.status == "changes_requested" else ""
         while True:
             context = await self._fix_and_verify(
-                job, repo, worktree, baseline, feedback, target_branch, failure_feedback
+                job, repo, worktree, baseline, feedback, target_branch, failure_feedback, scope_baseline,
             )
             if context is None:
                 return
@@ -842,6 +739,7 @@ class ExecutionChain:
         feedback: str,
         target_branch: str,
         failure_feedback: FailureFeedback,
+        scope_baseline: ScopeBaseline | None,
     ) -> ExecutionContext | None:
         """有界修复-验证循环。返回证据上下文；任何失败路径都返回 None（已收尾）。"""
         work_dir = worktree.path
@@ -933,6 +831,12 @@ class ExecutionChain:
             verify = await self._run_tests(job, repo, work_dir, phase="verify")
             await self._record_source(job, work_dir, source, attempt, verify, "not_run")
             await failure_feedback.observe(verify, attempt, changed_files)
+            scope = None
+            if scope_baseline is not None:
+                scope = await scope_baseline.compare(
+                    work_dir, source, repo.test_command, verify.pytest_scope if verify else None,
+                )
+                await self.store.add_event(job.id, SCOPE_EVENT, scope.detail(attempt))
             if verify is not None and baseline is not None:
                 await self._event(
                     job.id, "test_delta", f"before: {baseline.summary()} / after: {verify.summary()}"
@@ -982,6 +886,7 @@ class ExecutionChain:
                     integration=integration,
                     target_branch=target_branch,
                     source=source,
+                    pytest_scope=scope,
                 )
 
             # 单测失败：记录后重试（是否允许重试由状态机的 attempts 上限决定）
@@ -1186,6 +1091,25 @@ class ExecutionChain:
         tasks = self._event_tasks.pop(job_id, [])
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _run_baseline(
+        self, job: Job, repo: RepoConfig, work_dir: str, scope: ScopeBaseline | None,
+    ) -> TestOutcome | None:
+        if scope is None or scope.recorded:
+            return await self._run_tests(job, repo, work_dir, phase="baseline")
+        source = await self._scope_source(work_dir)
+        baseline = await self._run_tests(job, repo, work_dir, phase="baseline")
+        evidence = baseline.pytest_scope if baseline is not None else None
+        if source is None or await self._scope_source(work_dir) != source:
+            evidence = PytestScope(reason="baseline_source_unavailable_or_changed")
+        await scope.record(self.store, job.id, evidence, source.tree if source else "")
+        return baseline
+
+    async def _scope_source(self, work_dir: str) -> SourceRevision | None:
+        try:
+            return await SourceRevision.capture(work_dir)
+        except VerificationSourceError:
+            return None
 
     async def _run_tests(
         self, job: Job, repo: RepoConfig, work_dir: str, phase: str

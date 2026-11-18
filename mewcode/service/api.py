@@ -177,8 +177,9 @@ def create_app(
         payload = await read_json(request)
         state = payload.get("decision")
         reason = payload.get("reason", "")
+        scope_sha = payload.get("accept_test_scope_sha", "")
         if (not isinstance(state, str) or state not in {"merged", "changes_requested", "escalate"}
-                or not isinstance(reason, str)):
+                or not isinstance(reason, str) or not isinstance(scope_sha, str)):
             return web.json_response({"error": "invalid decision or reason"}, status=400)
         if state == "changes_requested" and not runtime.pool.running:
             return web.json_response({"error": "service is stopping"}, status=503)
@@ -186,6 +187,7 @@ def create_app(
             job = await runtime.store.transition(
                 request.match_info["job_id"], state, reason=reason[:6000],
                 last_error=reason[:6000], expected_state="human_review",
+                accept_test_scope_sha=scope_sha,
             )
         except JobNotFound:
             return web.json_response({"error": "job not found"}, status=404)

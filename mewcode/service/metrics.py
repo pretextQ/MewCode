@@ -22,6 +22,7 @@ from datetime import UTC, datetime
 
 from .failure_feedback import feedback_reports
 from .jobs import TERMINAL_STATES, Job, JobEvent, JobStore
+from .pytest_scope import scope_reports
 from .review_render import review_reports
 from .verification import revision_reports
 
@@ -304,6 +305,7 @@ def build_job_report(job: Job, events: list[JobEvent]) -> dict:
         "verification": {
             "feedback": feedback_reports(events),
             "revisions": revision_reports(events),
+            "pytest_scope": scope_reports(events),
             "tests": _events_by_kind(events, VERIFICATION_KINDS),
             "integration": _events_by_kind(events, INTEGRATION_KINDS),
             "ci": _events_by_kind(events, CI_KINDS),

@@ -377,6 +377,99 @@ class TestEndToEnd:
 # 2. 失败路径：不产生垃圾 PR
 # =========================================================================
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("change", "status", "finding"), [
+    ("config", "review_required", "removed"),
+    ("collect_only", "review_required", "unexecuted"),
+    ("delete", "review_required", "deleted_test_files"),
+    ("skip", "review_required", "newly_skipped"),
+    ("rewrite", "review_required", "edited_tests"),
+    ("add", "preserved", "added"),
+    ("wrapper", "unavailable", ""),
+])
+async def test_pytest_scope_is_reported_for_the_published_tree(tmp_path: Path, change: str, status: str, finding: str):
+    env = make_demo_environment(tmp_path, "config_error")
+    checkout = env["checkout"]
+    (checkout / "test_app.py").write_text("def test_smoke():\n    assert True\n", encoding="utf-8")
+    acceptance = "import app\n\ndef test_acceptance():\n    assert app.timeout() == 30\n"
+    (checkout / "test_acceptance.py").write_text(acceptance, encoding="utf-8")
+    assert _git(checkout, "add", ".").returncode == 0
+    assert _git(checkout, "commit", "-m", "configure acceptance tests").returncode == 0
+    assert _git(checkout, "push", "origin", "main").returncode == 0
+    service = build_service_config(tmp_path, env, webhook_token="scope-test-token")
+    command = f'"{sys.executable}" -m pytest -q'
+    service.repos["demo"].test_command = command if change != "wrapper" else command + f' && "{sys.executable}" -V'
+
+    class ScopeRunner:
+        async def run(self, job, work_dir, prompt, on_event):
+            root = Path(work_dir)
+            test = root / "test_acceptance.py"
+            if change in {"config", "collect_only"}:
+                option = 'testpaths = ["test_app.py"]' if change == "config" else 'addopts = "--collect-only"'
+                config = root / "pyproject.toml"
+                if config.exists():
+                    # A rework that touches only production code must still be
+                    # compared to the original collection, not the narrowed PR.
+                    (root / "app.py").write_text(DEMO_BUGS["config_error"][1], encoding="utf-8")
+                config.write_text(f"[tool.pytest.ini_options]\n{option}\n", encoding="utf-8")
+            elif change == "delete":
+                test.unlink()
+            elif change == "skip":
+                test.write_text("import pytest\n" + acceptance.replace(
+                    "def test_acceptance", "@pytest.mark.skip(reason='temporary')\ndef test_acceptance",
+                ), encoding="utf-8")
+            elif change == "rewrite":
+                test.write_text(acceptance.replace("== 30", ">= 0"), encoding="utf-8")
+            else:
+                (root / "app.py").write_text(DEMO_BUGS["config_error"][1], encoding="utf-8")
+                if change == "add":
+                    test.write_text(acceptance + "\ndef test_integer():\n    assert isinstance(app.timeout(), int)\n",
+                                    encoding="utf-8")
+            return AgentRunOutcome()
+
+    headers = {"X-MewCode-Token": service.webhook_token}
+    async with E2EStack(tmp_path, env, service=service, runner=ScopeRunner()) as stack:
+        response = await stack.client.post("/webhook/alert", json=stack.alert(), headers=headers)
+        job_id = (await response.json())["accepted"][0]["id"]
+        await stack.settle()
+        job = await stack.store.get_or_raise(job_id)
+        assert job.status == "human_review", job.last_error
+        async with stack.client.get(f"/jobs/{job_id}/report", headers=headers) as response:
+            report = (await response.json())["verification"]
+        [scope] = report["pytest_scope"]
+        revision = report["revisions"][-1]
+        assert scope["status"] == revision["scope_status"] == status
+        assert scope["tree"] == revision["tree"] and scope["execution_id"] == revision["execution_id"]
+        assert revision["unit"] == "passed" and "exit 1" in report["tests"][0]["detail"]
+        assert "pytest 范围" in stack.github.prs[0]["body"]
+        if finding:
+            assert scope["before_count"] == 2 and scope["changes"][finding]["count"] >= 1
+        else:
+            assert scope["reasons"] and "证据不可用" in stack.github.prs[0]["body"]
+        if change == "config":
+            assert scope["changes"]["config"]["count"] >= 1
+            assert scope["changes"]["removed"]["sample"] == ["test_acceptance.py::test_acceptance"]
+            decision = f"/jobs/{job_id}/decision"
+            payload = {"decision": "merged", "reason": "reviewed test migration"}
+            assert (await stack.client.post(decision, json=payload, headers=headers)).status == 409
+            payload["accept_test_scope_sha"] = "0" * 40
+            assert (await stack.client.post(decision, json=payload, headers=headers)).status == 409
+            assert (await stack.client.post(decision, json={"decision": "changes_requested",
+                                                           "reason": "fix the application"}, headers=headers)).status == 200
+            await stack.settle()
+            async with stack.client.get(f"/jobs/{job_id}/report", headers=headers) as response:
+                rework = (await response.json())["verification"]
+            latest = rework["revisions"][-1]
+            assert latest["head_sha"] != revision["head_sha"] and latest["scope_status"] == status
+            assert rework["pytest_scope"][-1]["baseline_tree"] == scope["baseline_tree"]
+            payload["accept_test_scope_sha"] = revision["head_sha"]
+            assert (await stack.client.post(decision, json=payload, headers=headers)).status == 409
+            payload["accept_test_scope_sha"] = latest["head_sha"]
+            assert (await stack.client.post(decision, json=payload, headers=headers)).status == 200
+            assert any(f"pytest scope accepted for {latest['head_sha']}" in event.detail
+                       for event in await stack.store.events(job_id))
+
+
 class TestFailurePaths:
     @pytest.mark.parametrize("stage", ["integration", "before_publish", "during_commit"])
     @pytest.mark.asyncio

@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | CLI/TUI 与 Agent | 共享内核、黑色 TUI、F2 详情、请求配对、队友控制、类型化记忆 | [TUI](../guides/tui.md)、[Agent 契约](../guides/agent-runtime.md)；GUI 终端人工矩阵未完成 |
 | 服务 M1–M3 | 告警受理、去重、worktree、隔离修复、PR、人审、策略与指标 | [架构](../guides/architecture.md)；交付 PR 不等于合并或生产恢复 |
-| 服务可靠性 | 通知 Outbox、策略快照与重验证、execution 记录、本地验证绑定发布提交 | [服务交接与恢复](../guides/service-reliability.md)；PR 发布队列持久化仍未实现 |
+| 服务可靠性 | 通知 Outbox、策略快照与重验证、execution 记录、本地验证绑定发布提交、pytest 范围审计 | [服务交接与恢复](../guides/service-reliability.md)；PR 发布队列持久化仍未实现 |
 | 独立审查 | 固定提交、覆盖记录、局部输入说明与语义评估 | [独立审查](../guides/independent-review.md)；默认关闭，小样本未证明质量提升 |
 | 监督 | 总线、循环预算预警、dead-end、self-verify、intent anchor | [监督指南](../guides/supervision.md)；默认关闭，尚无 token 预算预警或效果结论 |
 | U1–U5 | 写保护、目录链/AGENTS.md、诊断、拒绝反馈、编辑 diff | [权限](../guides/permission-semantics.md)、[项目指令](../guides/project-instructions.md)、[诊断](../guides/diagnostics.md) |
