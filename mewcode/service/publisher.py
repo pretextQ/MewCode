@@ -16,13 +16,14 @@ from typing import Any
 
 from mewcode.config import ServiceConfig
 
-from .execution import COMMIT_EXCLUDES, ExecutionContext, PublishResult
+from .execution import ExecutionContext, PublishResult
 from .jobs import Job, JobStore
 from .review import ReviewService
 from .review_models import ReviewResult
 from .review_render import render_review
 from .sop import extract_logs, render_alert_context
 from .vcs import CheckStatus, VCSError, VCSProvider
+from .verification import COMMIT_EXCLUDES, REVISION_EVENT, SourceRevision, VerificationSourceError
 
 log = logging.getLogger(__name__)
 
@@ -180,6 +181,10 @@ def build_pr_body(
 
     lines.append(_row("修复前", context.baseline_test))
     lines.append(_row("修复后", context.verify_test))
+    if context.source is not None and context.published_sha:
+        lines += ["", f"- 发布提交：`{context.published_sha}`，本地验证源码树：`{context.source.tree}`"]
+    else:
+        lines += ["", "- 本地测试结果尚未关联到发布提交。"]
     if verification:
         lines += ["", f"agent 自述的验证过程：{verification}"]
 
@@ -250,17 +255,26 @@ class PullRequestPublisher:
 
     async def publish(self, job: Job, context: ExecutionContext) -> PublishResult:
         branch = f"mewfix/{job.id}"
+        context.published_sha = ""
         await self.vcs.ensure_branch(context.work_dir, branch)
         message = (
             f"{build_pr_title(job)}\n\n"
             f"Alert-driven fix for {job.repo} (job {job.id}).\n"
             f"Attempts: {context.attempts}; diff: {context.diff_stat()}.\n"
         )
-        committed = await self.vcs.commit_all(context.work_dir, message, exclude=COMMIT_EXCLUDES)
-        if not committed:
-            raise VCSError("nothing to commit: worktree has no staged changes")
-        if self.config.review.enabled:
+        try:
+            if context.source is not None and await SourceRevision.capture(context.work_dir) != context.source:
+                raise VerificationSourceError("source changed after local verification")
+            committed = await self.vcs.commit_all(context.work_dir, message, exclude=COMMIT_EXCLUDES)
+            if not committed:
+                raise VCSError("nothing to commit: worktree has no staged changes")
             head = await self.vcs.head_sha(context.work_dir)
+            if context.source is not None:
+                await context.source.check_committed(context.work_dir, head)
+        except VerificationSourceError as exc:
+            await self.store.add_event(job.id, REVISION_EVENT, context.revision_detail("stale", reason=str(exc)))
+            raise
+        if self.config.review.enabled:
             if self.reviewer is None:
                 context.review = ReviewResult(review_id="unconfigured", head_sha=head, reason="reviewer_unconfigured")
                 await self.store.add_event(job.id, "review_finished", json.dumps(context.review.to_dict()))
@@ -274,9 +288,10 @@ class PullRequestPublisher:
                     await self.store.add_event(job.id, "review_finished", json.dumps(context.review.to_dict()))
             if await self.vcs.head_sha(context.work_dir) != head:
                 raise VCSError("head changed during independent review; refusing to publish stale evidence")
-            await self.vcs.push(context.work_dir, branch, expected_sha=head)
-        else:
-            await self.vcs.push(context.work_dir, branch)
+        await self.vcs.push(context.work_dir, branch, expected_sha=head)
+        context.published_sha = head
+        if context.source is not None:
+            await self.store.add_event(job.id, REVISION_EVENT, context.revision_detail("published"))
 
         slug = await self.vcs.resolve_repo_slug(context.work_dir)
         timeline = [(e.ts, e.kind, e.detail) for e in await self.store.events(job.id)]
@@ -311,5 +326,7 @@ class GitHubCIGate:
         self, job: Job, context: ExecutionContext, published: PublishResult
     ) -> CheckStatus:
         slug = await self.vcs.resolve_repo_slug(context.work_dir)
-        sha = context.review.head_sha if context.review is not None else await self.vcs.head_sha(context.work_dir)
+        sha = context.published_sha or (context.review.head_sha if context.review is not None else "")
+        if not sha:
+            sha = await self.vcs.head_sha(context.work_dir)
         return await self.vcs.poll_checks(slug, sha)

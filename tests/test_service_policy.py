@@ -584,7 +584,10 @@ class FakeVCS:
     async def commit_all(self, work_dir: str, message: str, exclude: tuple[str, ...] = ()) -> bool:
         return True
 
-    async def push(self, work_dir: str, branch: str) -> None:
+    async def head_sha(self, work_dir: str) -> str:
+        return "a" * 40
+
+    async def push(self, work_dir: str, branch: str, *, expected_sha: str = "") -> None:
         return None
 
     async def resolve_repo_slug(self, work_dir: str) -> str:

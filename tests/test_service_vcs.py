@@ -427,7 +427,7 @@ class TestPublisher:
         vcs = make_vcs(handler)
         vcs.resolve_repo_slug = lambda wd: _noop("acme/demo")  # type: ignore[method-assign]
 
-        async def fake_push(work_dir, branch):
+        async def fake_push(work_dir, branch, *, expected_sha):
             return None
 
         vcs.push = fake_push  # type: ignore[method-assign]
@@ -473,7 +473,7 @@ class TestPublisher:
         vcs = make_vcs(handler)
         vcs.resolve_repo_slug = lambda wd: _noop("acme/demo")  # type: ignore[method-assign]
 
-        async def fake_push(work_dir, branch):
+        async def fake_push(work_dir, branch, *, expected_sha):
             return None
 
         vcs.push = fake_push  # type: ignore[method-assign]

@@ -23,6 +23,7 @@ from datetime import UTC, datetime
 from .failure_feedback import feedback_reports
 from .jobs import TERMINAL_STATES, Job, JobEvent, JobStore
 from .review_render import review_reports
+from .verification import revision_reports
 
 #: /metrics 单次抓取扫描的 job 上限。告警量级的服务远达不到；
 #: 达到上限时指标只反映最近的 job（诚实降级好过无限内存）。
@@ -302,6 +303,7 @@ def build_job_report(job: Job, events: list[JobEvent]) -> dict:
         },
         "verification": {
             "feedback": feedback_reports(events),
+            "revisions": revision_reports(events),
             "tests": _events_by_kind(events, VERIFICATION_KINDS),
             "integration": _events_by_kind(events, INTEGRATION_KINDS),
             "ci": _events_by_kind(events, CI_KINDS),

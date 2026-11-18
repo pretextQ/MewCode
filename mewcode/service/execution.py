@@ -23,7 +23,6 @@ import asyncio
 import json
 import logging
 import os
-import subprocess
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -39,41 +38,15 @@ from .jobs import InvalidTransition, Job, JobStore
 from .policy import PolicyError, RepoPolicy, RepoPolicyLoader, effective_policy, stricter_budget
 from .review_models import ReviewResult
 from .sandbox import SandboxUnavailable
+from .verification import COMMIT_EXCLUDES as COMMIT_EXCLUDES
+from .verification import REVISION_EVENT, SourceRevision, VerificationSourceError, collect_diff, revision_detail
+from .verification import is_ignored_path as is_ignored_path
 
 log = logging.getLogger(__name__)
 
-MAX_DIFF_CHARS = 60_000
 MAX_EVIDENCE_CHARS = 4_000
 #: 传给 agent 的失败反馈上限（验证失败重试时）
 MAX_FEEDBACK_CHARS = 3_000
-
-#: 不算"修复产物"的路径：服务自身状态与 Python 缓存。
-#: diff 统计（本模块）与提交（publisher）必须用**同一份清单**，否则 PR body
-#: 里的改动规模会与真实提交对不上——真机踩到：容器内 agent 在 worktree 里写了
-#: .mewcode/debug.log，body 报"2 files, +32"而实际提交只有 app.py 的 +3。
-IGNORED_DIRS = (".mewcode", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache")
-
-
-def is_ignored_path(path: str) -> bool:
-    """路径里出现任一被忽略目录名即视为非产物（与提交排除的语义一致）。"""
-    return any(part in IGNORED_DIRS for part in path.replace("\\", "/").split("/"))
-
-
-def commit_excludes() -> list[str]:
-    """git 的 exclude pathspec：每个目录给出根目录与任意深度两种 glob。
-
-    git 的 exclude pathspec 不做递归匹配，漏掉任一种都会把服务状态提交进 PR。
-    """
-    return [
-        spec
-        for _dir in IGNORED_DIRS
-        for spec in (f":(exclude,glob){_dir}/**", f":(exclude,glob)**/{_dir}/**")
-    ]
-
-
-#: 提交时使用的固定排除清单（publisher 直接引用；语义与 :func:`commit_excludes` 一致）
-COMMIT_EXCLUDES: tuple[str, ...] = tuple(commit_excludes())
-
 
 def policy_event_detail(policy: RepoPolicy) -> str:
     """policy_applied 审计事件的摘要：覆盖了什么、来自哪个文件。"""
@@ -235,6 +208,15 @@ class ExecutionContext:
     #: 回落到服务配置 vcs.base_branch
     target_branch: str = ""
     review: ReviewResult | None = None
+    source: SourceRevision | None = None
+    published_sha: str = ""
+
+    def revision_detail(self, status: str, *, reason: str = "") -> str:
+        return revision_detail(
+            self.source, self.attempts, status,
+            unit=test_status(self.verify_test), integration=integration_status(self.integration),
+            head_sha=self.published_sha, reason=reason,
+        )
 
     def diff_stat(self) -> str:
         added = sum(
@@ -244,6 +226,24 @@ class ExecutionContext:
             1 for line in self.diff.splitlines() if line.startswith("-") and not line.startswith("---")
         )
         return f"{len(self.changed_files)} file(s), +{added}/-{removed}"
+
+
+def test_status(outcome: TestOutcome | None) -> str:
+    if outcome is None:
+        return "not_configured"
+    if outcome.timed_out:
+        return "timed_out"
+    return "passed" if outcome.passed else "failed"
+
+
+def integration_status(outcome: IntegrationOutcome | None) -> str:
+    if outcome is None:
+        return "not_applicable"
+    if not outcome.ran:
+        return "skipped"
+    if not outcome.up_ok or outcome.test is None:
+        return "failed"
+    return test_status(outcome.test)
 
 
 # ---------------------------------------------------------------------------
@@ -750,6 +750,8 @@ class ExecutionChain:
             await self._run_chain(job)
         except SandboxUnavailable as e:
             await self._escalate(job.id, f"sandbox unavailable: {e}")
+        except VerificationSourceError as e:
+            await self._escalate(job.id, f"verification source unavailable: {e}")
         finally:
             await self._drain_event_tasks(job.id)
 
@@ -927,7 +929,9 @@ class ExecutionChain:
 
             if await self._transition(job.id, "verifying", reason="re-running tests after fix") is None:
                 return None
+            source = await SourceRevision.capture(work_dir)
             verify = await self._run_tests(job, repo, work_dir, phase="verify")
+            await self._record_source(job, work_dir, source, attempt, verify, "not_run")
             await failure_feedback.observe(verify, attempt, changed_files)
             if verify is not None and baseline is not None:
                 await self._event(
@@ -950,6 +954,7 @@ class ExecutionChain:
                     )
                     return None
                 await self._record_integration(job.id, integration)
+                await self._record_source(job, work_dir, source, attempt, verify, integration_status(integration))
 
             if integration is not None and integration.ran and not integration.passed:
                 next_feedback = await self._verify_failed(
@@ -976,6 +981,7 @@ class ExecutionChain:
                     attempts=attempt,
                     integration=integration,
                     target_branch=target_branch,
+                    source=source,
                 )
 
             # 单测失败：记录后重试（是否允许重试由状态机的 attempts 上限决定）
@@ -985,6 +991,22 @@ class ExecutionChain:
             if next_feedback is None:
                 return None
             feedback = await failure_feedback.retry_feedback(next_feedback)
+
+    async def _record_source(
+        self, job: Job, work_dir: str, source: SourceRevision, attempt: int,
+        unit: TestOutcome | None, integration: str,
+    ) -> None:
+        try:
+            if await SourceRevision.capture(work_dir) != source:
+                raise VerificationSourceError("source changed during local verification")
+        except VerificationSourceError as exc:
+            await self._event(job.id, REVISION_EVENT, revision_detail(
+                source, attempt, "stale", unit=test_status(unit), integration=integration, reason=str(exc),
+            ))
+            raise
+        await self._event(job.id, REVISION_EVENT, revision_detail(
+            source, attempt, "candidate", unit=test_status(unit), integration=integration,
+        ))
 
     async def _verify_failed(
         self, job: Job, attempt: int, reason: str, output: str
@@ -1185,48 +1207,8 @@ class ExecutionChain:
 
     async def _collect_diff(self, job_id: str, worktree: Any) -> tuple[list[str], str]:
         """收集 worktree 相对 HEAD 的改动（含未跟踪文件内容）。"""
-        work_dir = worktree.path
-
-        def _git(args: list[str]) -> tuple[int, str]:
-            env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": ""}
-            try:
-                result = subprocess.run(
-                    ["git"] + args,
-                    cwd=work_dir,
-                    capture_output=True,
-                    text=True,
-                    timeout=60,
-                    stdin=subprocess.DEVNULL,
-                    env=env,
-                )
-            except (subprocess.SubprocessError, OSError) as e:
-                return 1, f"(git failed: {e})"
-            return result.returncode, result.stdout
-
-        code, status = await asyncio.to_thread(_git, ["status", "--porcelain"])
-        if code != 0:
-            await self._event(job_id, "diff_error", status)
+        try:
+            return await asyncio.to_thread(collect_diff, worktree.path)
+        except VerificationSourceError as exc:
+            await self._event(job_id, "diff_error", str(exc))
             return [], ""
-
-        changed: list[str] = []
-        for line in status.splitlines():
-            path = line[3:].strip()
-            if " -> " in path:  # rename: "old -> new"
-                path = path.split(" -> ")[-1]
-            if path and not is_ignored_path(path):
-                changed.append(path)
-        if not changed:
-            return [], ""
-
-        # 未跟踪文件先 add -N，否则 diff 里看不到它们的内容；服务自身状态与
-        # 缓存目录同样排除（与提交用同一份 exclude）
-        excludes = commit_excludes()
-        await asyncio.to_thread(_git, ["add", "-N", "--", ".", *excludes])
-        code, diff = await asyncio.to_thread(
-            _git, ["diff", "--no-color", "--", ".", *excludes]
-        )
-        if code != 0:
-            return changed, ""
-        if len(diff) > MAX_DIFF_CHARS:
-            diff = diff[:MAX_DIFF_CHARS] + "\n… (diff truncated)"
-        return changed, diff

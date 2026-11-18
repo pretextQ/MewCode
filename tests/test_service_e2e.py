@@ -32,8 +32,10 @@ from mewcode.service.api import create_app
 from mewcode.service.execution import (
     AgentRunOutcome,
     ExecutionChain,
+    IntegrationOutcome,
     TestRunner,
 )
+from mewcode.service.execution import TestOutcome as UnitTestOutcome
 from mewcode.service.jobs import JobStore
 from mewcode.service.notify import WebhookNotifier
 from mewcode.service.publisher import GitHubCIGate, PullRequestPublisher
@@ -302,6 +304,13 @@ class TestEndToEnd:
         """M1 验收标准 1：demo 三类 bug 全部走通（要求至少两类）。"""
         env = make_demo_environment(tmp_path, bug)
         async with E2EStack(tmp_path, env) as stack:
+            if bug == "unhandled_timeout":
+                class IntegrationCheck:
+                    async def verify(self, job, repo, work_dir):
+                        outcome = await TestRunner().run(work_dir, repo.test_command, 30)
+                        return IntegrationOutcome("compose.yml", up_ok=True, test=outcome)
+
+                stack.chain.integration_verifier = IntegrationCheck()
             response = await stack.client.post("/webhook/alert", json=stack.alert())
             assert response.status == 202
             body = await response.json()
@@ -329,6 +338,17 @@ class TestEndToEnd:
                 ["git", "ls-remote", str(env["bare"])], capture_output=True, text=True
             ).stdout
             assert f"refs/heads/mewfix/{job_id}" in refs
+            remote_sha = next(line.split()[0] for line in refs.splitlines() if line.endswith(f"mewfix/{job_id}"))
+            async with stack.client.get(f"/jobs/{job_id}/report") as response:
+                report = await response.json()
+            candidate, published = report["verification"]["revisions"][-2:]
+            assert candidate["status"] == "candidate" and candidate["unit"] == "passed"
+            assert published["status"] == "published" and published["head_sha"] == remote_sha
+            assert published["tree"] == candidate["tree"] and published["execution_id"] == candidate["execution_id"]
+            assert remote_sha in pr["body"] and published["tree"] in pr["body"]
+            if bug == "unhandled_timeout":
+                assert candidate["integration"] == published["integration"] == "passed"
+                assert "集成测试：" in pr["body"]
             assert _git(env["checkout"], "rev-parse", "origin/main").stdout == \
                 _git(env["checkout"], "rev-parse", "main").stdout
 
@@ -358,6 +378,55 @@ class TestEndToEnd:
 # =========================================================================
 
 class TestFailurePaths:
+    @pytest.mark.parametrize("stage", ["integration", "before_publish", "during_commit"])
+    @pytest.mark.asyncio
+    async def test_pass_evidence_is_stale_if_source_changes_before_commit(self, tmp_path: Path, stage: str):
+        env = make_demo_environment(tmp_path, "config_error")
+        async with E2EStack(tmp_path, env) as stack:
+            publisher = stack.chain.publisher
+            assert publisher is not None and stack.vcs is not None
+            publish, commit = publisher.publish, stack.vcs.commit_all
+
+            def edit(work_dir: str) -> None:
+                with (Path(work_dir) / "app.py").open("a", encoding="utf-8") as source:
+                    source.write("\nraise RuntimeError('untested edit')\n")
+
+            async def late_publish(job, context):
+                assert context.verify_test.passed
+                edit(context.work_dir)
+                return await publish(job, context)
+
+            async def late_commit(work_dir, *args, **kwargs):
+                edit(work_dir)
+                return await commit(work_dir, *args, **kwargs)
+
+            if stage == "before_publish":
+                publisher.publish = late_publish
+            elif stage == "during_commit":
+                stack.vcs.commit_all = late_commit
+            else:
+                class ChangingVerifier:
+                    async def verify(self, job, repo, work_dir):
+                        edit(work_dir)
+                        return IntegrationOutcome("compose.yml", up_ok=True, test=UnitTestOutcome("check", 0, "ok"))
+
+                stack.chain.integration_verifier = ChangingVerifier()
+
+            response = await stack.client.post("/webhook/alert", json=stack.alert())
+            job_id = (await response.json())["accepted"][0]["id"]
+            await stack.settle()
+            job = await stack.store.get_or_raise(job_id)
+            assert job.status == "escalate" and not stack.github.prs
+            refs = _git(env["bare"], "show-ref", "--heads").stdout
+            assert "refs/heads/mewfix/" not in refs
+            async with stack.client.get(f"/jobs/{job_id}/report") as response:
+                report = await response.json()
+            candidate, stale = report["verification"]["revisions"]
+            assert candidate["status"] == "candidate" and candidate["unit"] == "passed"
+            assert stale["status"] == "stale" and stale["tree"] == candidate["tree"]
+            assert stale["integration"] == ("passed" if stage == "integration" else "not_applicable")
+            assert not stale["head_sha"]
+
     @pytest.mark.asyncio
     async def test_empty_payload_escalates_without_pr(self, tmp_path: Path):
         env = make_demo_environment(tmp_path, "config_error")
