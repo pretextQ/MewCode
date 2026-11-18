@@ -33,3 +33,15 @@
 - `pytest -q --maxfail=10 --timeout=120` 运行服务执行、端到端、pytest 范围、恢复、失败反馈及监督套件，232 通过。`ruff check .`、Windows/Linux mypy、工程守卫、锁文件与 diff 检查通过。
 
 解析策略参考 [ZMAI 的失败解析](https://github.com/lip20041219/zmai/blob/d18d1ae/src/zmai/swe/failure.py)。输出是定位线索，模型采纳和生产效果仍待实测。
+
+## CI 依赖审计修复
+
+三次服务变更的 `security regression` 都在 `pip-audit --local` 检出锁定的 `opentelemetry-api 1.45.1` 受 CVE-2026-126360 影响。
+锁文件将该间接依赖更新到修复版本 `1.45.2`，wheel 和 sdist 散列已与 PyPI 发布记录核对。审计步骤与失败条件保持启用。
+[CI #197 审计日志](https://github.com/pretextQ/MewCode/actions/runs/44297379766/job/134777841323) · [上游修复公告](https://github.com/open-telemetry/opentelemetry-python/security/advisories/GHSA-mf5v-w3w3-f6cg)
+
+CI #195 的 Linux/Python 3.11 另有一次进程清理测试失败，断言打印时三个进程均已退出。CI #197 的两个 Linux 矩阵作业均通过，偶发失败的根因仍待确认。
+
+隔离的 Windows/Python 3.11.9 环境中，权限安全回归 296 通过、3 跳过，四项缺陷回植均得到预期的红绿结果。
+本地首次将 `--basetemp` 放进环境变量，影响嵌套 pytest；复跑仅给外层 pytest 传参。
+`uv lock --check` 和 `pip-audit --local` 均成功。审计未报告已知漏洞，并注明本地 MewCode 包在 PyPI 上无记录。
