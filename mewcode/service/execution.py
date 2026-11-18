@@ -30,7 +30,7 @@ from typing import Any, Protocol
 from mewcode.config import RepoConfig, ServiceConfig
 
 from . import sop
-from .failure_feedback import FailureFeedback
+from .failure_feedback import MAX_FEEDBACK_CHARS, FailureFeedback
 from .jobs import InvalidTransition, Job, JobStore
 from .policy import PolicyError, RepoPolicy, RepoPolicyLoader, effective_policy, stricter_budget
 from .pytest_scope import SCOPE_EVENT, PytestScope, ScopeBaseline, ScopeComparison
@@ -44,8 +44,6 @@ from .verification import is_ignored_path as is_ignored_path
 log = logging.getLogger(__name__)
 
 MAX_EVIDENCE_CHARS = 4_000
-#: 传给 agent 的失败反馈上限（验证失败重试时）
-MAX_FEEDBACK_CHARS = 3_000
 
 def policy_event_detail(policy: RepoPolicy) -> str:
     """policy_applied 审计事件的摘要：覆盖了什么、来自哪个文件。"""

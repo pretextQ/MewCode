@@ -23,9 +23,10 @@ from test_service_execution import (
 from mewcode.service.execution import ExecutionChain
 from mewcode.service.execution import TestOutcome as Outcome
 from mewcode.service.execution import TestRunner as CommandTestRunner
-from mewcode.service.failure_feedback import REMINDER, identify, normalize
+from mewcode.service.failure_feedback import MAX_FEEDBACK_CHARS, REMINDER, identify, normalize
 from mewcode.service.jobs import JobStore
 from mewcode.service.metrics import job_report
+from mewcode.service.pytest_diagnosis import diagnose
 from mewcode.service.worker import WorkerPool
 
 
@@ -160,6 +161,35 @@ def test_captured_application_heading_does_not_discard_semantic_output():
     assert first.fingerprint and first.fingerprint != second.fingerprint
 
 
+def test_diagnostics_match_same_named_cases_by_traceback_path(tmp_path):
+    node_ids = ("tests/test_b.py::TestMath::test_value[case]", "tests/test_a.py::TestMath::test_value[case]")
+    blocks = (
+        "TestMath.test_value[case]\n>   assert expected == observed\nE   assert 5 == 4\n"
+        "tests/test_a.py:7: AssertionError\n"
+        "--- Captured stdout call ---\nE   assert 50 == 30\napp.py:100: AssertionError\n",
+        "TestMath.test_value[case]\n>   assert output == 'ok'\nE   assert 'bad' == 'ok'\n"
+        "tests/test_b.py:14: AssertionError\n",
+    )
+    second, first = diagnose(node_ids, blocks, str(tmp_path))
+    assert second.node_id == node_ids[0] and first.node_id == node_ids[1]
+    assert (second.actual, second.expected) == ("'bad'", "'ok'")
+    assert (first.actual, first.expected) == ("4", "5")
+    assert [(loc.path, loc.line) for loc in first.locations] == [("tests/test_a.py", 7)]
+
+
+def test_diagnostics_keep_ambiguous_operands_and_frame_associations_unlabelled(tmp_path):
+    node_ids = ("tests/test_a.py::test_x", "tests/test_b.py::test_x", "tests/test_c.py::test_y")
+    blocks = (
+        "test_x\n>   assert actual == 1\nE   assert 2 == 1\n",
+        "test_x\n>   assert actual == 2\nE   assert 1 == 2\n",
+        'test_y\n>   assert left == right\nE   assert 10 == 12\nFile "src/compare.py", line 17, in compare\n',
+    )
+    first, second, third = diagnose(node_ids, blocks, str(tmp_path))
+    assert not any(case.actual or case.expected or case.locations for case in (first, second))
+    assert not third.actual and not third.expected and third.assertion == "assert 10 == 12"
+    assert third.locations[0].path == "src/compare.py" and third.locations[0].line == 17
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("outputs,relations,reminder", [
     ([failure(), failure(), PASSED], ["first", "same", "uncompared"], True),
@@ -192,6 +222,14 @@ async def test_execution_feedback_and_unchanged_attempt_budget(tmp_path, demo_re
         assert [e["relation"] for e in observed] == relations
         assert bool(prepared) == reminder
         assert (REMINDER in runner.calls[2]["prompt"]) == reminder
+        assert "Observed pytest failures:" not in runner.calls[1]["prompt"]
+        if reminder:
+            assert prepared[0]["fingerprint"] == observed[1]["fingerprint"]
+            assert prepared[0]["attempt"] == 2 and prepared[0]["next_attempt"] == 3
+            [case] = prepared[0]["diagnoses"]
+            assert case["node_id"] == "test_calc.py::test_calc"
+            assert case["locations"] == [{"path": "test_calc.py", "line": 5}]
+            assert (case["actual"], case["expected"]) == ("2", "1")
         assert len(runner.calls) == report["job"]["attempts"] == 3
         assert report["job"]["status"] == ("pr_opened" if outputs[-1].passed else "escalate")
         assert report["job"]["tokens"]["total"] == 600
@@ -307,7 +345,31 @@ async def test_real_pytest_output_through_service(tmp_path, demo_repo, monkeypat
         evidence = (await job_report(store, job.id))["verification"]["feedback"]
         observed = [e for e in evidence if e["kind"] == "verification_feedback"]
         assert [e["relation"] for e in observed] == ["first", "same", "same"]
-        assert REMINDER in runner.calls[2]["prompt"]
+        prompt = runner.calls[2]["prompt"]
+        assert REMINDER in prompt and "Actual: -1; expected: 5" in prompt
+        assert "Observed traceback: test_calc.py:3" in prompt
+        assert "Inferred candidate source (imports used in assertion): calc.py" in prompt
+        [prepared] = [e for e in evidence if e["kind"] == "dead_end_reminder"]
+        assert prepared["diagnoses"][0]["inferred_paths"] == ["calc.py"]
+
+
+@pytest.mark.asyncio
+async def test_repeated_diagnostics_fit_with_the_raw_tail(tmp_path, demo_repo):
+    raw = failure("2").output.replace(
+        "=========================== short test summary info",
+        "--- Captured stdout call ---\n" + "long output line\n" * 500
+        + "=========================== short test summary info",
+    )
+    async with chain_env(tmp_path, demo_repo, scripts=[CALC_BUGGY + "# edit\n"],
+                         test_command_override="pytest -q") as (store, chain, runner, cfg):
+        cfg.enable_supervision = True
+        chain.test_runner = SequenceTests([Outcome("pytest -q", 1, raw)])
+        job = await make_job(store)
+        await chain(job)
+        prompt = runner.calls[2]["prompt"]
+        feedback = prompt.split("Test output:\n```\n", 1)[1].split("\n```\n", 1)[0]
+        assert len(feedback) <= MAX_FEEDBACK_CHARS
+        assert "1 failed in 0.03s" in feedback and "Actual: 2; expected: 1" in feedback
 
 
 @pytest.mark.asyncio

@@ -126,6 +126,13 @@ worktree 相对 HEAD 的改动清单包含 `tests/`、`test_*.py`、`*_test.py`�
 
 只比较同一次 execution 中连续的修复后验证：首次为 first，指纹变化为 changed，相同为 same；基线测试不计入。两次连续相同证据后，若现有重试上限仍允许下一次修复，向原失败反馈尾部追加标明服务来源的重新诊断建议。默认三次完整修复 attempt 时，最早第三次携带建议。达到硬上限仍照常升级，不准备不存在的下一次提醒；不会新增 attempt、模型请求或预算，也不改变工具权限。上游三次文件 edit 循环与这里两次完整验证比较是不同信号，不能据默认次数声称节省成本。
 
+重新诊断建议最多列出三个已识别用例的节点 ID。能将节点与 traceback 块可靠对应时，附上 traceback 报告的文件和行号。
+等值断言在可读到两边的求值且能根据源码辨别方向时标注实际值和期望值，方向不清楚时可展示求值表达式。
+从断言中的名称和测试文件中对应的导入定位到工作区文件时，明确标为推断的候选源码。无法关联的块仅保留节点 ID，捕获输出不会提供结构化字段。
+诊断与原始输出尾部合计最多 3000 字符，指纹仍使用全部原始失败块。
+
 `/jobs/{id}/report` 的 `verification.feedback` 展示 `verification_feedback` 和 `dead_end_reminder`，携带 event_seq、execution_id、attempt、分类、指纹、关系、连续数、possible_tdd 与最多 400 字符的 normalized_excerpt（附截断标记）。`raw_event_seq` 指向原 `verify_tests`：仍遵循原有最多尾部 2000 字符、整条摘要最多 4000 字符约定，未新增原始输出全量落盘。哈希使用截取前完整输出；证据同时标注输出长度与原始保留是否截断。测试、集成和 CI 报告条目也展示原事件序号与 execution ID。
+
+`dead_end_reminder` 同时记录供下次修复参考的有界 `diagnoses`、完整失败数量与 `next_attempt`。`locations` 来自 pytest 输出，`inferred_paths` 来自源码导入推断。
 
 提醒事件的 `prepared` 仅表示已组装进下一次服务反馈，不表示真实 provider 已接收、模型已采纳或重新诊断成功。这里没有总线 expect 核销，也不借用内核 delivered 指标。取消后重派、重启恢复、人工返工各建新比较器，旧证据继续保留在旧 execution 下，不重放旧提醒或连续数；原 attempts 和预算累计语义保留。验收见[本轮报告](../docs/acceptance/stage-2026-11-01-dead-end.md)，目前只有行为验证，没有生产收益或模型质量提升结论。

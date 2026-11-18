@@ -5,19 +5,23 @@ breaks the streak; baseline runs and different executions never seed it.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import re
 import shlex
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
+
+from .pytest_diagnosis import diagnose, render_diagnoses
 
 if TYPE_CHECKING:
     from .execution import TestOutcome
     from .jobs import JobEvent, JobStore
 
 CONTRACT = "pytest-long-v1"
+MAX_FEEDBACK_CHARS = 3_000
 REMINDER = (
     "Re-diagnosis suggestion: consecutive service verification attempts produced "
     "the same recognized pytest failure evidence. This is a signal, not proof of "
@@ -78,6 +82,8 @@ class FailureEvidence:
     fingerprint: str = ""
     normalized: str = ""
     failures: int = 0
+    node_ids: tuple[str, ...] = ()
+    blocks: tuple[str, ...] = ()
 
 
 def identify(outcome: TestOutcome | None, work_dir: str) -> FailureEvidence:
@@ -130,7 +136,8 @@ def identify(outcome: TestOutcome | None, work_dir: str) -> FailureEvidence:
         "blocks": sorted(normalize(block, work_dir) for block in blocks),
     }, ensure_ascii=False, sort_keys=True)
     return FailureEvidence("pytest_failure", "complete supported pytest output",
-                           hashlib.sha256(canonical.encode()).hexdigest(), canonical, count)
+                           hashlib.sha256(canonical.encode()).hexdigest(), canonical, count,
+                           tuple(node for node, _ in nodes), tuple(blocks))
 
 
 def test_files_changed(paths: list[str]) -> bool:
@@ -148,7 +155,7 @@ class FailureFeedback:
         self.store, self.job_id, self.enabled, self.work_dir = store, job_id, enabled, work_dir
         self.previous = ""
         self.streak = 0
-        self.repeated = False
+        self.repeated: FailureEvidence | None = None
         self.attempt = 0
 
     async def observe(self, outcome: TestOutcome | None, attempt: int, paths: list[str]) -> None:
@@ -163,7 +170,7 @@ class FailureFeedback:
             relation = "same" if fingerprint == self.previous else "changed" if self.previous else "first"
         self.streak = self.streak + 1 if relation == "same" else int(comparable)
         self.previous = fingerprint if comparable else ""
-        self.repeated = relation == "same"
+        self.repeated = evidence if relation == "same" else None
         self.attempt = attempt
         raw = await self.store.transact(lambda conn: conn.execute(
             "SELECT seq,detail FROM job_events WHERE job_id=? AND kind='verify_tests' ORDER BY seq DESC LIMIT 1",
@@ -184,14 +191,19 @@ class FailureFeedback:
         }, ensure_ascii=False))
 
     async def retry_feedback(self, output: str) -> str:
-        if not self.enabled or not self.repeated:
+        evidence = self.repeated
+        if not self.enabled or evidence is None:
             return output
+        cases = await asyncio.to_thread(diagnose, evidence.node_ids, evidence.blocks, self.work_dir)
+        diagnostics = render_diagnoses(cases, evidence.failures)
+        advisory = f"\n\n[Service supervision advisory]\n{REMINDER}\n\n{diagnostics}"
         await self.store.add_event(self.job_id, "dead_end_reminder", json.dumps({
             "attempt": self.attempt, "next_attempt": self.attempt + 1,
             "fingerprint": self.previous, "consecutive": self.streak,
             "status": "prepared", "text": REMINDER,
+            "diagnoses": [asdict(case) for case in cases], "failure_count": evidence.failures,
         }))
-        return output + "\n\n[Service supervision advisory]\n" + REMINDER
+        return output[-(MAX_FEEDBACK_CHARS - len(advisory)):] + advisory
 
 
 def feedback_reports(events: list[JobEvent]) -> list[dict]:

@@ -24,3 +24,12 @@
 
 取证点参考 [ZMAI pytest 验收守卫](https://github.com/lip20041219/zmai/blob/d18d1ae/src/zmai/swe/acceptance_guard.py)。
 这轮覆盖原 pytest 进程的收集结果与运行报告；Docker 沙箱传输使用替身，分布式和集成测试范围未做前后对照。
+
+## pytest dead-end 重试反馈
+
+- 让真实 pytest 连续报出相同失败，将节点 ID、断言的实际与期望值、traceback 行号和标明推断的候选文件传给下一次修复替身。
+- 回归覆盖同名参数化用例块的关联、歧义的回退、长捕获输出下的反馈上限，以及 TDD、环境、未知输出和重试/预算兼容。
+- 复用原 execution、attempt 与完整失败指纹。任务报告只对已准备的下一次提醒保存简明诊断。
+- `pytest -q --maxfail=10 --timeout=120` 运行服务执行、端到端、pytest 范围、恢复、失败反馈及监督套件，232 通过。`ruff check .`、Windows/Linux mypy、工程守卫、锁文件与 diff 检查通过。
+
+解析策略参考 [ZMAI 的失败解析](https://github.com/lip20041219/zmai/blob/d18d1ae/src/zmai/swe/failure.py)。输出是定位线索，模型采纳和生产效果仍待实测。
