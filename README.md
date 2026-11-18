@@ -46,19 +46,12 @@ MewCode 提供 Textual 终端界面（TUI）、单次 CLI 命令和无头告警�
 
 ```mermaid
 flowchart TB
-    TUI["交互式 TUI"] --> Agent["共享 Agent 内核"]
-    CLI["单次 CLI 命令"] --> Agent
-    Alert["Alertmanager / 手动 webhook"] --> Queue["服务接入 / SQLite 去重与队列"]
-    Queue --> Repair["独立 Git worktree / 默认 Docker 隔离"]
-    Repair --> Agent
-    Agent --> Tools["工具调度 / 权限检查"]
-    Agent --> LLM["模型接口"]
-    Repair --> Verify["本地验证"]
-    Verify --> PR["发布 GitHub PR / 观察 CI"]
-    PR --> Review["人工审查"]
+    Terminal["终端开发（TUI / CLI）"] --> Agent["共享 Agent 内核"]
+    Service["告警服务（Alertmanager / webhook）"] --> Agent
+    Agent -->|告警任务| Delivery["验证 → GitHub PR → 人工审查"]
 ```
 
-服务负责告警接入、沙箱编排和 PR 交付。Agent 在分配的工作区内读取代码、调用模型和执行工具。详见 [架构与生命周期](guides/architecture.md)。
+共享内核负责模型调用、权限检查和工具调度。告警服务为每个修复任务创建独立 Git worktree，默认在 Docker 中执行，并在发布 PR 后跟踪 CI。详见 [架构与生命周期](guides/architecture.md)。
 
 ## 5. Bug-fixing Workflow
 
