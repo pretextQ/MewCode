@@ -2,6 +2,8 @@
 
 起点 `e4ebb2b5e947cef9a089e93180dfefa9e60a90af`，master，开工工作区干净且 origin/master SHA 一致。检查工作区与父目录未发现适用 AGENTS.md。用户明确授权本阶段实现、验证、更新文档、提交并推送；不调用付费模型、不创建远端修复 PR、不部署生产。
 
+11 月 18 日在本阶段的指纹与重试流程上补充了 pytest 结构化诊断。下文记录首期行为和验收结果，现行反馈字段及新增验证见 [监督指南](../../guides/supervision.md#服务-dead-end-反馈2026-11-01) · [11 月 18 日专项验收](stage-2026-11-18-service-verification.md#pytest-dead-end-重试反馈)。
+
 ## 交付行为
 
 新增纯 Python `service/failure_feedback.py`，在现有 `execution.py` 修复后验证与重试反馈之间接线；不更改状态机重试、Outbox、策略重验证或人工合并边界。服务监督默认关闭，关闭时不增加反馈事件、提示或模型请求。
@@ -35,6 +37,6 @@
 
 ## 交付与边界
 
-本报告随功能提交发布，所属提交 SHA 以 Git 历史为准。本表记录本地验收；推送后另行核对 origin/master SHA 和该提交 Windows/Linux × Python 3.11/3.13 及 security 五项 CI，并在交付答复报告最终状态。本地通过不等于远端通过。
+本报告随功能提交 `cc98162` 发布。该提交的 Windows 和 Ubuntu × Python 3.11/3.13 测试矩阵及独立安全回归通过。[对应 CI](https://github.com/pretextQ/MewCode/actions/runs/41273481659)
 
 此次只实现服务验证反馈，不监听模型内部编辑/测试循环，不实现 self-verify、token 预算预警、intent anchor、GitHub 评论/评审接入、observe、PR 发布持久化队列或自动合并。容器配置协议和 Agent 总线未修改，真实 Docker 回归用于核对既有接线保持。只有行为验证，没有付费模型效果评测或生产收益证据。

@@ -5,7 +5,8 @@
 ## 受版本控制的入口
 
 - [2026-11-02 能力比较](review-2026-11-02-current-borrowing.md)：实施前静态差异与离线探针；对应[11 号方案](../evolution/11-upstream-borrowing-plan.md)和[U1–U7 最终台账](../acceptance/stage-2026-11-02-borrowing.md)。
-- [A1–A5 方案](../evolution/10-review-a1-a5-fix-plan.md)和[最终修复验收](../acceptance/stage-2026-11-02-a1-a5.md)：请求配对、通知、pane、TaskStop、自动记忆，均已完成。
+- 2026-11-02 对照审查的离线探针和原始观测随仓库分发。这组观测记录 U1–U7 实施前的差异。现有交付按最终台账核对。[探针脚本](evidence-2026-11-02-borrowing/compare_probes.py) · [观测 JSON](evidence-2026-11-02-borrowing/observations.json)
+- 请求配对、通知、pane、TaskStop 和自动记忆的修复方案及结果见 [A1–A5 方案](../evolution/10-review-a1-a5-fix-plan.md)和[最终修复验收](../acceptance/stage-2026-11-02-a1-a5.md)。
 
 ## 原审查 ID 与交付映射
 
@@ -30,6 +31,5 @@
 - [2026-11-01 完整对照](review-2026-11-01-upstream-parity-full.md)与[findings JSON](review-2026-11-01-upstream-parity-findings.json)：A 五条、B 十条、C 七项及 V 两条；JSON 是当时快照，不是当前看板。
 - [2026-11-02 独立复核](verification-2026-11-02.md)：A1–A5 在 `0d2e213` 的离线复现；A3 含真实约 60 秒等待，A5 只验证三 SDK 的请求配对缺口，没有实测远端 HTTP 400。
 - `evidence-2026-11-02/`：脚本、初始及最终 observations、日志、修复台账；旧脚本断言缺陷存在，不在当前源码上自动复跑。
-- `evidence-2026-11-02-borrowing/compare_probes.py` 与 `observations.json`：已受版本控制的能力比较探针与观测，保留原始记录，不作为当前产品验收脚本。
 
 参考对象为当时本地 `D:/Downloads/mewcode-python` 的上游 0.2.0 快照。两库已明显分叉，比较用于借鉴能力与设计，不能整文件替换或用静态端点推断取代真实兼容验证。

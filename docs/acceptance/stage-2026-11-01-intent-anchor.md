@@ -39,6 +39,6 @@ steer 替换明确目标、刷新静默计时，旧 pending/waiting 标 supersed
 
 ## Git 与边界
 
-基线 [CI run 41293686354](https://github.com/pretextQ/MewCode/actions/runs/41293686354) 在本轮再次只读核实为 completed/success；它仅是已交付起点，不是新代码验收。本报告随新功能提交，所属 SHA 以 Git 历史为准；推送后另核对 origin/master 与该提交五项跨平台 CI，在交付答复报告实际状态，不将本地结果当作远端通过。
+开工基线 `4dd185d` 和本轮交付提交 `297ac34` 各有对应的 Windows 和 Ubuntu × Python 3.11/3.13 测试矩阵及独立安全回归，两个工作流均通过。[基线 CI](https://github.com/pretextQ/MewCode/actions/runs/41293686354) · [intent anchor 交付 CI](https://github.com/pretextQ/MewCode/actions/runs/41298788828)
 
 本期不扩展 token 预算预警、GitHub 评论/评审接入、observe、PR 发布持久化队列、多 Agent/TypeScript 迁移或自动合并。容器内实时 token 预算仍未接入，宿主结束后的汇总不能冒称实时能力。既有 self-verify 的“尝试/工具成功/覆盖 unknown”、dead-end 的 prepared 语义、权限/人工审查与人工合并边界保留。剩余路线须按后续新任务选定单项，不重复实施本期或历史已完成项。

@@ -1,8 +1,8 @@
 # 2026-11-02 真实终端驱动集成与人工验收边界
 
-日期：2026-11-02（Asia/Shanghai）。起点 `e467524`，master 与实时远端一致；开工已有 `docs/README.md` 的参考库审查入口，原样保留。用户随后授权提交推送本轮终端验收；原有审查入口不夹带，提交 SHA、远端和 CI 以实际 Git/Actions 核验为准。
+验收于 2026-11-02（Asia/Shanghai）从 `e467524` 开始，交付提交为 `0d2e213`。Windows 和 Ubuntu × Python 3.11/3.13 测试矩阵及独立安全回归通过。开工前已有的 `docs/README.md` 参考库审查入口保留在工作区。[终端验收交付 CI](https://github.com/pretextQ/MewCode/actions/runs/41399387642)
 
-用户要求先完成“真实 Windows/Linux 终端的完整滚动、缩放、重绘和退出恢复验收”。**本轮完成真实 OS 驱动的 PTY 集成，实窗人工项仍未完成，待办 1 不能全部关闭。**没有修改产品逻辑、调用付费模型、启动真实 Agent/MCP/告警服务或创建远端 PR。
+用户当时要求验收真实 Windows/Linux 终端的滚动、缩放、重绘与退出恢复。**本轮完成真实 OS 驱动的 PTY 集成，图形终端的人工检查仍待完成。**没有修改产品逻辑、调用付费模型、启动真实 Agent/MCP/告警服务或创建远端 PR。[维护待办](../backlog.md#未解决问题与人工验收)
 
 ## 本轮已验收
 
@@ -39,6 +39,8 @@ uv run --locked --with pyte==0.8.2 python scripts/verify_terminal_smoke.py --pla
 
 pyte 仅解析和保留 VT 文字屏幕，不参与产品绘制，不是终端字体或截图证据。Windows runner 自动生成本地 uv 替身，使**原样的** `scripts/run_tui.ps1` 启动离线 fixture；没有修改正式入口。重复运行保留旧尝试的完整文件，不把旧恢复标记当作新结果。
 
+11 月 3 日新增 Windows 短入口 `mew.cmd`，调用同一个父启动器。日常使用的目标目录和配置参数见 [Windows 启动与恢复](../../guides/tui.md#windows-终端启动和恢复)。
+
 ## 仍需实窗人工确认
 
 在真实 Windows Terminal 或独立 Linux 桌面终端中执行下面的离线入口即可检查，不需要 API key 或模型预算：
@@ -57,7 +59,7 @@ Windows 若需同时检查正式父启动器，先运行上述 Windows runner，
 | 终端自身 scrollback 回看启动前哨兵 | 待验 | 待验 |
 | stream 中 Ctrl+C 停止、空闲 Ctrl+C 退出；随后移动鼠标、输入中文，确认无协议碎片 | 待验 | 待验 |
 
-实窗限制来自已读取的 [computer-use SKILL.md](C:/Users/32519/.codex/plugins/cache/openai-bundled/computer-use/26.1027.30824/skills/computer-use/SKILL.md) 及其要求阅读的 [guidance.md](C:/Users/32519/.codex/plugins/cache/openai-bundled/computer-use/26.1027.30824/docs/guidance.md)：后者明确规定 “Do not automate terminal applications such as Windows Terminal, Command Prompt, or Windows PowerShell.” 窗口工具也未暴露目标终端控制面。没有通过其他 GUI 自动化手段绕过，也没有用协议结果代替人工结果。
+当时所用的 computer-use 插件（`26.1027.30824`）在 `docs/guidance.md` 中限制自动化操作 Windows Terminal、命令提示符和 PowerShell，窗口工具也未提供相应控制入口。因此本轮只记录 PTY 结果，实窗结果仍待人工填写。
 
 ## 原始证据与失败记录
 

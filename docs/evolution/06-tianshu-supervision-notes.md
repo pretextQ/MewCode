@@ -1,12 +1,10 @@
 # 借鉴 Tianshu Harness 的监督设计
 
-实施状态（2026-11-03）：最小监督总线、执行循环预算预警、服务 dead-end、self-verify 和 intent anchor 首期均已实现且默认关闭；token 预算预警未实施。当前触发、阈值、请求送达/expect 与生命周期契约统一见[监督指南](../../guides/supervision.md)，逐轮实现及失败证据见[验收索引](../acceptance/README.md)。这些离线接线与送达证据不证明生产收益。
+最小监督总线、执行循环预算预警、服务 dead-end、self-verify 和 intent anchor 已实现。交互及单次 CLI 使用全局监督开关，服务使用独立开关，均默认关闭。2026-11-18，服务为下一次获准的 pytest 重试增加了结构化失败诊断。token 预算预警仍在待办中，模型采纳与生产效果待实测。[监督指南](../../guides/supervision.md) · [11 月 18 日验收](../acceptance/stage-2026-11-18-service-verification.md) · [维护待办](../backlog.md)
 
 以下是 2026-10-27 原始调研与扩展提案。正文“待立项”“未实施”描述原基线，不覆盖上述状态；未交付扩展统一见[维护待办](../backlog.md)。上游阈值不直接等同本仓实现，也不构成新的实施授权。
 
-记录日期：2026-10-27。
-状态：2026-10-27 已对照 GitHub 源码完成静态审阅并修订，待立项。本文件是调研记录，不代表功能已实现，
-也不构成实施授权；维护者审阅后再决定是否立项与排期。
+2026-10-27 完成原始静态审阅时，这些设计尚待立项。
 
 来源与方法：初稿基于 `D:\projects\Tianshu-harness` 的静态文件阅读
 （v3.37.0，Apache-2.0，Node.js/TypeScript）。本次审阅从 GitHub 下载并逐文件
@@ -15,11 +13,9 @@
 未运行上游代码或安装依赖。下文分别说明上游行为与 MewCode 拟议适配；
 静态核对不能证明运行效果，实施前仍须验证实际接线与启用条件。
 
-## 1. 结论摘要
+## 1. 原始调研结论
 
-- MewCode 当前缺的不是功能，而是**内核内的行为监督闭环**：
-  现有 `mewcode/hooks/` 是给用户配置的 event→action 钩子；
-  缺少内核自带的"持续观测模型行为 → 注入引导 → 核销是否采纳"的机制。
+- 当时的 `mewcode/hooks/` 已提供用户配置的 event→action 钩子。原提案希望在内核中加入观察模型行为、注入提醒并核销采纳情况的机制。
 - 拟议实现维持 **纯 Python**，复用 uv、ruff、mypy、pytest 工具链。
   §3 的约 1,600 行仅是所选上游模块的初步规模记录，不包含完整依赖与接线成本，
   不能据此承诺一周交付。嵌入 TS 运行时会增加 Node 工具链与跨进程维护成本，首期不采用。
@@ -52,7 +48,7 @@ Tianshu 实现：`src/agent/advisory-bus.ts`（约 760 行实际代码）+
   行为符合谓词不等于验证通过，也不能单凭采纳率证明提醒带来了效果；
 - system-reminder 出队不等于模型已收到，需在实际注入后确认送达，再进入核销账本。
 
-MewCode 现状与差距：`mewcode/hooks/engine.py` 的 `_prompt_messages`
+MewCode 调研时的差距：`mewcode/hooks/engine.py` 的 `_prompt_messages`
 （按 owner 分桶的 prompt 队列）可充当 bus 投递通道，但无 tier/TTL/去重
 过滤层，更无核销（adopted/ignored 统计）。
 
@@ -74,7 +70,7 @@ Tianshu 实现：`src/agent/hooks/self-verify-hook.ts`（约 128 行实际代码
 以及部分浏览器/可访问性快照取证；文档读取本身不抵消测试或类型检查义务。
 实际触发还受首轮抑制、活跃修复、已有高风险义务及只读建议模式等条件影响。
 
-MewCode 现状与差距：服务模式有 `execution.py` 的末端验证，交互模式尚无
+MewCode 调研时的差距：服务模式有 `execution.py` 的末端验证，交互模式尚无
 同类内置监督检测。该检测只能提供行为线索，不能作为完成声明真实性的判定器。
 
 拟议适配：工具分类与环形缓冲窗口须结合任务性质、改动及未完成的验证义务。
@@ -103,7 +99,7 @@ Tianshu 实现：`src/agent/hooks/dead-end-detector.ts`（约 115 行实际代�
 - 触发后提交诊断提醒和可选义务/信息素记录；文案建议 read/grep/git diff 等动作，
   expect 实际按指定诊断工具集合观察行为，不据此直接终止 run。
 
-MewCode 现状与差距：服务模式只按 `max_fix_attempts` 次数熔断，
+MewCode 调研时的差距：服务模式只按 `max_fix_attempts` 次数熔断，
 区分不了"在逼近"与"在原地打转"。
 
 拟议适配：先向 `execution.py` 的修复反馈加入重新诊断提醒和结构化证据，
@@ -124,7 +120,7 @@ Tianshu 实现：`src/agent/hooks/turn-budget-hook.ts`（约 39 行实际代码�
 （剩余 ≤ max(3, ceil(上限×10%))）时注入一次预警，引导"先验证并交付
 已完成部分、未竟工作落盘，不开新支线"；每 run 一次，新 run 重新武装。
 
-MewCode 现状与差距：Agent 已有 max_iterations 限制；服务的 token 预算是另一种资源约束。
+MewCode 调研时的预算边界：Agent 已有 max_iterations 限制；服务的 token 预算是另一种资源约束。
 直跑模式可中途抛出 `TokenBudgetExceeded` 并 escalate，沙箱模式目前在容器结束后
 读取汇总用量，再做预算门禁；不能在宿主直接实现容器内的实时预警。
 中断意味着未完成验证/发布，不等于已写入 worktree 的工作必然丢失。
@@ -145,7 +141,7 @@ Tianshu 实现：`src/agent/hooks/intent-anchor-hook.ts`（约 42 行实际代�
 超过 M 轮（上游默认 10）时，把"本次 run 的启动意图"（截 500 字）
 重新注入一次提醒，带冷却（上游 10 轮）。
 
-MewCode 现状与差距：服务模式 job 正是"几十轮无用户输入的长自治 run"，
+MewCode 调研时的场景：服务模式 job 正是"几十轮无用户输入的长自治 run"，
 目标应为"告警 + SOP 目标"（execution.py 组装的上下文），漂移风险最高。
 
 拟议适配：当前 JobStore 审计回调仅筛选工具调用、用量与部分生命周期事件，
@@ -196,7 +192,7 @@ MewCode 现状与差距：服务模式 job 正是"几十轮无用户输入的长
 - prefix-cache 工程（冻结前缀 / appendixDelta 字节稳定）：为 TUI 长会话
   高频对话设计；服务模式单 job 7.7k–10.8k token 收益小，暂缓。
 
-## 5. 建议的后续顺序（供审阅，非授权）
+## 5. 原始实施建议（2026-10-27）
 
 1. 维护者审阅本文，确认立项与首期范围；
 2. 若立项：先落 §2.1 总线（含核销与关闭开关），再挂 §2.2–2.5 各 detector；

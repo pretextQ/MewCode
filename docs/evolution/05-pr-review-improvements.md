@@ -1,15 +1,10 @@
 # 借鉴 PR-Agent 的后续改进计划
 
+2026-10-28 交付了固定提交的 diff 覆盖记录、独立审查上下文和 PR、任务报告展示。独立审查默认关闭，启用时为人工审查提供意见。11 月 18 日新增的发布源码树核对和 pytest 范围审计留下各自的验证证据，独立审查仍在提交固定后、推送前运行。[独立修复审查](../../guides/independent-review.md) · [服务验证验收](../acceptance/stage-2026-11-18-service-verification.md)
 
-2026-10-30 下一阶段更新：A 审查范围及语义评估已实现，真实候选对比未证明效果提升；B 最小监督内核已实施。见[新增验收](../acceptance/next-stage-2026-10-30.md)。历史验收数字保留。
-> 2026-10-30 验收更新：首期工程检查与真实模型接线已验证；五例中部分覆盖产生错误推断，效果仅有限通过。详见[本次验收](../acceptance/acceptance-2026-10-30.md)。下文 2026-10-25 路线保留为设计背景，动态上下文、分块、返工和持续问题跟踪仍未实施。
+2026-10-30 的五例探索性验收记录了部分覆盖导致的错误推断。随后实现局部输入说明、语义评估和最小监督内核，同契约的小样本基线/候选对比未证明效果提升。[首期验收](../acceptance/acceptance-2026-10-30.md) · [后续验收](../acceptance/next-stage-2026-10-30.md)
 
-记录日期：2026-10-25。
-状态：首期范围已于 2026-10-28 实现，后续扩展仍待实施；原路线与验收提案保留如下。
-
-2026-10-28 更新：第二阶段已按首期范围实现固定提交上的 diff 覆盖记录、独立上下文审查与 PR/job 报告展示，
-默认关闭且仅提供意见。使用与覆盖边界见 [独立修复审查](../../guides/independent-review.md)。
-以下保留原路线提案；动态上下文、多轮分块、GitHub 返工与问题状态跟踪尚未实施。真实模型已于 2026-10-30 完成五例探索性验收，同契约小样本基线/候选对比已完成但未证明提升；正式效果基准仍待开展，结果见文首新增验收。
+下文保留 2026-10-25 的设计路线。动态上下文、多轮分块、GitHub 评审事件触发返工和持续问题跟踪仍在候选清单。当前人工返工通过服务的决定接口记录。[服务交接与恢复](../../guides/service-reliability.md) · [维护待办](../backlog.md)
 
 ## 1. 目标与边界
 
@@ -25,7 +20,7 @@ PR-Agent 作为设计参考，不在本计划中直接引入运行时依赖。
 
 本表保留首期开发前的观察，不作为现有缺陷清单；当前交付和限制以文首更新、独立审查指南及最新验收为准。
 
-| 当前能力 | 对应实现 | 待改进点 |
+| 当时的能力 | 对应实现 | 当时的改进建议 |
 | --- | --- | --- |
 | 修复与测试验证循环 | `mewcode/service/execution.py` | 增加独立于修复上下文的审查；测试通过不等于根因已解决 |
 | PR 证据及 Agent 自查 | `mewcode/service/publisher.py` | 区分执行事实、修复者自述和独立审查判断 |
@@ -129,12 +124,12 @@ PR-Agent 作为设计参考，不在本计划中直接引入运行时依赖。
 
 ## 6. 参考资料
 
-以下资料于 2026-10-25 查阅；上游功能和配置可能继续变化，实施前需重新核对。
+原始资料查阅于 2026-10-25。PR-Agent 的 `review` 和 `improve` 命令文档已迁至当前入口。
 
 - [PR-Agent 项目](https://github.com/The-PR-Agent/pr-agent)
-- [Review：结构化审查、覆盖记录、分块和持续问题状态](https://docs.pr-agent.ai/tools/review/)
+- [Review：结构化审查、覆盖记录、分块和持续问题状态](https://docs.pr-agent.ai/commands/review/)
 - [Dynamic Context：函数/类周围的动态上下文](https://docs.pr-agent.ai/core-abilities/dynamic_context/)
 - [Compression Strategy：按 token 预算组织 diff](https://docs.pr-agent.ai/core-abilities/compression_strategy/)
-- [Improve：代码建议、评论去重与已解决状态](https://docs.pr-agent.ai/tools/improve/)
+- [Improve 命令](https://docs.pr-agent.ai/commands/improve/)
 
 GitHub 评审驱动返工和上述实施顺序是针对 MewCode 的方案建议，不代表上游已经提供相同执行链。

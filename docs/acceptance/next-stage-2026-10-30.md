@@ -27,6 +27,8 @@
 
 原始请求、响应、full.diff、固定 SHA、用量、耗时、哈希与执行脚本在本地 `docs/evidence/next-stage-2026-10-30/`，保持忽略；未归档实际配置或凭据。摘要版本化；历史工件不修改。
 
+摘要里的 `dataset_sha256` 对应当时 Windows 工作区使用 CRLF 换行的 v2 fixture。Git 提交中的同一 fixture 使用 LF，按原始字节计算会得到不同哈希。[模型比较摘要](next-stage-2026-10-30-model.json) · [v2 fixture](../../tests/fixtures/independent_review_cases_v2.json)
+
 ## A 工程验证
 
 - `uv run --locked pytest tests/test_independent_review.py -q --timeout=120`：54 passed。
@@ -55,7 +57,7 @@ A 评分器另补一条边界回归：显式 unreviewed 即使已填满裁定列
 - 全量首跑 2 failed / 1472 passed / 19 skipped（250.44 秒）：TUI 接线对旧 duck-typed Agent 替身直接访问 supervision；改为仅在总线存在且启用时调用后，36 例定向通过，最终全量重跑通过。
 - Ruff、Windows/Linux 目标全包 mypy（各 167 文件）、工程守卫、锁文件、四项回植通过。新增三份纯 Python 源文件，无依赖变更，无规模 ceiling 提升。
 
-最终全量 `uv run --locked pytest -q -ra --timeout=120`：**1475 passed / 19 skipped，232.62 秒**。跳过为 16 Docker opt-in、2 符号链接权限、1 parent checker 缺省；Docker 另跑通过，不将两轮相加冒充单次套件。子代理 86/86；`uv build --no-sources` 的 sdist/wheel 成功，wheel 确认包含三份监督源码。12 份当前文档本地链接、40 个新模型工件哈希及候选源码哈希核对通过。原始日志见本地忽略的 `docs/evidence/next-stage-2026-10-30/`；首跑失败不覆盖。首期没有四类 detector，监督基础接线验收不代表监督效果改善。
+最终全量 `uv run --locked pytest -q -ra --timeout=120`：**1475 passed / 19 skipped，232.62 秒**。跳过为 16 Docker opt-in、2 符号链接权限、1 parent checker 缺省；Docker 另跑通过，不将两轮相加冒充单次套件。子代理 86/86；`uv build --no-sources` 的 sdist/wheel 成功，wheel 确认包含三份监督源码。12 份当前文档本地链接、40 个新模型工件哈希及候选源码哈希核对通过。原始日志见本地忽略的 `docs/evidence/next-stage-2026-10-30/`；首跑失败不覆盖。本轮只验收监督基础接线。后续实现和运行契约见 [监督指南](../../guides/supervision.md)。
 
 ## 提交与远端
 

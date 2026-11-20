@@ -1,4 +1,4 @@
-# 2026-10-30 当前版本验收
+# 2026-10-30 工程与模型基线验收
 
 基线：`4cef69f8dadda8595446fc871417bed558050286`，master，与验收时 GitHub master 一致；版本 0.3.0 / MIT。
 环境：Windows、Python 3.14.4、uv 0.11.7、Docker Engine 29.8.2（Docker Desktop Linux engine）。
@@ -92,7 +92,7 @@ uv run --locked pytest tests/test_sandbox_live.py -q -ra --timeout=1200
 
 本轮只修改文档及两条忽略例外，没有改业务逻辑；提交与推送状态以 Git 记录为准。归档目录保留在本地，不会随普通克隆取得。
 
-## 后续
+## 当时的后续计划
 
 1. 优先改进局部输入说明与意见语义复核，不能把有效行号当作结论正确，也不能从遗漏输入推断函数缺失。
 2. 正式化样例契约与标签，增加真实案例、重复运行及基线/候选比较，再决定启用策略。

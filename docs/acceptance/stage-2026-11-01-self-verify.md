@@ -43,6 +43,8 @@ Windows 11，Python 3.14.4；mypy 仍按 Python 3.11 类型目标分别检查 wi
 
 ## Git 与效果边界
 
-开工基线 `cc98162` 的远端 [CI run 41273481659](https://github.com/pretextQ/MewCode/actions/runs/41273481659) 已于本轮另行核实，Windows/Linux × Python 3.11/3.13 和 security 五项全部 success。它不是本次功能验收。本报告随功能提交交付；所属 SHA 以 Git 历史为准。推送后另行核对 origin/master 与本提交五项 CI，在交付答复报告实际状态；本地通过不混作远端通过。
+开工基线 `cc98162` 和本轮交付提交 `4dd185d` 各有对应的 Windows 和 Ubuntu × Python 3.11/3.13 测试矩阵及独立安全回归，两个工作流均通过。[基线 CI](https://github.com/pretextQ/MewCode/actions/runs/41273481659) · [self-verify 交付 CI](https://github.com/pretextQ/MewCode/actions/runs/41293686354)
 
 本轮只验证行为接线，无模型质量、效率或生产收益结论。不实现 token 预警、intent anchor、GitHub 评论/评审接入、observe、PR 发布持久化队列、多 Agent/TypeScript 迁移或自动合并；现有权限、人审 PR 与人工合并边界继续有效。
+
+Intent anchor 的实现和实测记录见 [同日后续验收](stage-2026-11-01-intent-anchor.md)。

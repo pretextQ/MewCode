@@ -1,6 +1,8 @@
-# 当前 MewCode 对照参考库：值得吸收的设计
+# 2026-11-02 MewCode 参考库对照与借鉴建议
 
-审查日期：2026-11-02。当前仓库 `D:\projects\MewCode`，收尾时 HEAD 为 `dd9b8b7`；参考目录 `D:\Downloads\mewcode-python`，包版本 0.2.0，无 `.git`。本报告比较本机目录，不核实其与公开上游的最新程度。当前仓库版本为 0.3.0，两者版本号不用于判断具体实现好坏。
+审查日期：2026-11-02。当前仓库 `D:\projects\MewCode`，收尾时 HEAD 为 `dd9b8b7`；参考目录 `D:\Downloads\mewcode-python`，包版本 0.2.0，无 `.git`。本报告比较当时的本机目录，本仓版本为 0.3.0。
+
+本文记录 U1–U7 实施前的比较结论。后续各项实现、提交与验证见 [U1–U7 交付台账](../acceptance/stage-2026-11-02-borrowing.md)，仍待验证的协议与候选能力见 [维护待办](../backlog.md)。
 
 审查阶段只新增这份报告、对照脚本和观察结果，没有修改产品代码或已有改动，也没有调用模型。随后按用户要求，将本报告及两份证据单独放行进入版本管理，并添加公开文档索引；其余历史本地审查资料继续忽略。
 
@@ -93,11 +95,9 @@
 - **后台记忆整理**：参考有时间/会话门槛和独立任务，可作为未来方向；当前 A4 刚形成扁平事实与派生视图契约，整理必须经同一写入契约，避免两套写法冲突；另外有模型调用和删除/改写记忆的成本。
 - **浏览器 UI**：参考 remote.py 有事件到 WebSocket 的桥接。当前应复用已有 Agent 与 service 能力再评估；参考默认监听 0.0.0.0，浏览器连接入口未见认证校验，不适合直接成为当前项目的部署入口。
 
-## 本轮证据与复跑
+## 历史探针与观测
 
-- 脚本：`docs/review/evidence-2026-11-02-borrowing/compare_probes.py`。
-- 观察：同目录 `observations.json`。
-- Windows 项目根目录复跑：`.venv/Scripts/python.exe -B docs/review/evidence-2026-11-02-borrowing/compare_probes.py`。
+- 审查时从 Windows 项目根目录使用仓库虚拟环境运行探针。探针使用写死的两处审查目录，运行会覆盖同目录的 `observations.json`。核对当前实现使用交付台账中的正式回归。[探针脚本](evidence-2026-11-02-borrowing/compare_probes.py) · [当时的观测](evidence-2026-11-02-borrowing/observations.json)
 - 探针使用当前虚拟环境，共运行两个隔离子进程；仅创建临时项目与临时 home，未读写真实配置/记忆，未连接 MCP 服务器或网络端点。
 - 首轮因上述参考库 MCP 导入差异中断；脚本已改为如实记录 runtime 不可用，并仅独立验证纯策略分支，随后完整执行成功。不是参考库在其自身依赖环境下必然无法运行的证明。
 

@@ -1,7 +1,15 @@
 # 服务验证与修复反馈验收
 
-环境为 Windows、Python 3.14.4。pytest 在临时项目和隔离 HOME/USERPROFILE 中运行，修复者使用脚本替身。
+2026-11-18 的本地验收环境为 Windows、Python 3.14.4。pytest 在临时项目和隔离 HOME/USERPROFILE 中运行，修复者使用脚本替身。
 端到端用例使用本地 bare Git 远端、GitHub API 替身和集成验证替身。工程检查使用主仓库的锁定依赖。
+
+现行报告字段、测试命令识别与重试配置见 [服务验证契约](../../guides/service-reliability.md#本地验证与发布版本) · [服务监督配置](../../guides/supervision.md#服务-dead-end-反馈2026-11-01)。
+
+| 交付内容 | 实现提交 |
+| --- | --- |
+| 发布提交与本地验证源码树 | `b494bdd` |
+| pytest 验证范围 | `72db6ab` |
+| pytest dead-end 重试反馈 | `e9ceb2e` |
 
 ## 发布提交与本地验证源码树
 
@@ -40,8 +48,10 @@
 锁文件将该间接依赖更新到修复版本 `1.45.2`，wheel 和 sdist 散列已与 PyPI 发布记录核对。审计步骤与失败条件保持启用。
 [CI #197 审计日志](https://github.com/pretextQ/MewCode/actions/runs/44297379766/job/134777841323) · [上游修复公告](https://github.com/open-telemetry/opentelemetry-python/security/advisories/GHSA-mf5v-w3w3-f6cg)
 
-CI #195 的 Linux/Python 3.11 另有一次进程清理测试失败，断言打印时三个进程均已退出。CI #197 的两个 Linux 矩阵作业均通过，偶发失败的根因仍待确认。
+CI #195 的 Linux/Python 3.11 另有一次进程清理测试失败，断言打印时三个进程均已退出。CI #197 的两个 Linux 矩阵作业均通过，偶发失败的根因仍待确认。[CI #195](https://github.com/pretextQ/MewCode/actions/runs/44293175312) · [CI #197](https://github.com/pretextQ/MewCode/actions/runs/44297379766)
 
 隔离的 Windows/Python 3.11.9 环境中，权限安全回归 296 通过、3 跳过，四项缺陷回植均得到预期的红绿结果。
 本地首次将 `--basetemp` 放进环境变量，影响嵌套 pytest；复跑仅给外层 pytest 传参。
 `uv lock --check` 和 `pip-audit --local` 均成功。审计未报告已知漏洞，并注明本地 MewCode 包在 PyPI 上无记录。
+
+2026-11-20 核对 GitHub Actions 时，依赖修复提交 `2738fa1` 的 CI #198 已通过。随后主分支 `a1a0c91` 对应的 CI #205 也已通过，覆盖 Windows 和 Ubuntu 的 Python 3.11、3.13 测试矩阵及独立安全回归。[CI #198](https://github.com/pretextQ/MewCode/actions/runs/44298841393) · [CI #205](https://github.com/pretextQ/MewCode/actions/runs/44307297888)
