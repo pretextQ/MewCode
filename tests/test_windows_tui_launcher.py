@@ -19,13 +19,23 @@ def test_failed_child_still_emits_terminal_cleanup(tmp_path):
     fake_uv = tmp_path / "uv.cmd"
     fake_uv.write_text("@echo off\necho OFFLINE_CHILD_FAILED\nexit /b 7\n", encoding="ascii")
     launcher = Path(__file__).resolve().parents[1] / "scripts" / "run_tui.ps1"
-    result = subprocess.run(
-        [powershell, "-NoLogo", "-NoProfile", "-File", str(launcher)],
-        env={**os.environ, "PATH": str(tmp_path) + os.pathsep + os.environ["PATH"]},
-        capture_output=True, timeout=30,
-    )
-    assert b"OFFLINE_CHILD_FAILED" in result.stdout, result.stderr
-    after_child = result.stdout.split(b"OFFLINE_CHILD_FAILED", 1)[1]
+    stdout_path, stderr_path = tmp_path / "stdout.log", tmp_path / "stderr.log"
+    system32 = Path(os.environ["SYSTEMROOT"]) / "System32"
+    env = {**os.environ, "PATH": os.pathsep.join((str(tmp_path), str(system32))), "PATHEXT": ".EXE;.CMD"}
+    # A descendant can hold a Windows pipe open after the launcher exits.
+    with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
+        subprocess.run(
+            [powershell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(launcher)],
+            cwd=tmp_path,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=stdout,
+            stderr=stderr,
+            timeout=30,
+        )
+    output = stdout_path.read_bytes()
+    assert b"OFFLINE_CHILD_FAILED" in output, stderr_path.read_bytes()
+    after_child = output.split(b"OFFLINE_CHILD_FAILED", 1)[1]
     for mode in (1000, 1003, 1015, 1006, 1004, 2004):
         assert f"\x1b[?{mode}l".encode() in after_child
     assert b"\x1b[<u" in after_child and b"\x1b[?25h" in after_child

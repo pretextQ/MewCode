@@ -2,6 +2,7 @@
 """五层权限系统的测试。"""
 from __future__ import annotations
 
+import subprocess
 import tempfile
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -499,10 +500,10 @@ async def test_e2e_sandbox_blocks_outside_path():
     assert "沙箱" in c["tool_result"][0].output
 
 @pytest.mark.asyncio
-async def test_e2e_rule_allows_git():
+async def test_e2e_rule_allows_git(tmp_path):
     """放行 git 命令的规则可以让其无需人工介入（HITL）直接通过。"""
-    tmpdir = Path(tempfile.mkdtemp())
-    rules_file = tmpdir / ".mewcode" / "permissions.yaml"
+    subprocess.run(["git", "init", "--quiet"], cwd=tmp_path, capture_output=True, check=True, timeout=15)
+    rules_file = tmp_path / ".mewcode" / "permissions.yaml"
     rules_file.parent.mkdir(parents=True)
     rules_file.write_text(yaml.dump([{"rule": "Bash(git *)", "effect": "allow"}]))
 
@@ -516,14 +517,14 @@ async def test_e2e_rule_allows_git():
             StreamEnd("end_turn", input_tokens=30, output_tokens=15),
         ],
     ])
-    registry = create_default_registry()
+    registry = create_default_registry().bind_work_dir(str(tmp_path))
     checker = PermissionChecker(
         detector=DangerousCommandDetector(),
-        sandbox=PathSandbox(str(tmpdir)),
+        sandbox=PathSandbox(str(tmp_path)),
         rule_engine=RuleEngine(project_rules_path=rules_file),
         mode=PermissionMode.DEFAULT,
     )
-    agent = Agent(client, registry, "anthropic", work_dir=str(tmpdir), permission_checker=checker)
+    agent = Agent(client, registry, "anthropic", work_dir=str(tmp_path), permission_checker=checker)
     conv = ConversationManager()
     conv.add_user_message("Show git status")
 
