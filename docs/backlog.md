@@ -1,13 +1,12 @@
 # 维护待办与候选方向
 
-更新于 2026-11-20。先核对[当前交付](README.md)及源码；本页记录当前未解决边界，不自动授权实施产品功能、真实模型调用或推送。
+更新于 2026-11-27。先核对[当前交付](README.md)及源码；本页记录当前未解决边界，不自动授权实施产品功能、真实模型调用或推送。
 
 ## 未解决问题与人工验收
 
 | 事项 | 当前事实 | 后续处理与证据 |
 | --- | --- | --- |
 | U1 真实配置覆盖事故 | 测试未绑定临时注册表，覆盖真实 `.mewcode/config.yaml`；没有可靠备份，未原样恢复 | 不读取、猜补或用示例配置冒充恢复。只有获得可核实原件才讨论恢复；见[U1 事故记录](acceptance/stage-2026-11-02-borrowing.md#u1-实施记录) |
-| Linux tree-service 偶发回收失败 | timeout/cancel 曾检测到存活的后代进程。11 月 18 日 CI #195 另有一次 Linux/Python 3.11 进程清理失败，打印断言详情时三个进程均已退出。CI #205 通过，根因仍待确认 | 保留现有断言和诊断，在实际 Linux/Python 环境复核。[U6](acceptance/stage-2026-11-02-borrowing.md#u6-实施记录2026-11-03) · [U7](acceptance/stage-2026-11-02-borrowing.md#u7-实施记录2026-11-03) · [11 月 18 日 CI 记录](acceptance/stage-2026-11-18-service-verification.md#ci-依赖审计修复) |
 | Windows/Linux GUI 终端人工验收 | 真实 ConPTY/POSIX PTY 自动检查已做；字体/全角字形、鼠标拖选、GUI resize/zoom 重绘与 scrollback 仍待人工 | 按[终端验收清单](acceptance/stage-2026-11-02-terminal.md#仍需实窗人工确认)在两平台记录；自动 PTY、Textual headless 和既有黑色外观认可不替代完整矩阵 |
 | 服务验证覆盖范围 | pytest 范围审计适用于可识别的单测命令。分布式收集和集成验证的前后范围在检查范围之外 | 11 月 18 日验收使用 GitHub API、集成验证和 Docker 传输替身。真实 Docker 集成依赖与真实 GitHub PR 仍待专项验收。[范围契约](../guides/service-reliability.md#pytest-验证范围) · [专项验收](acceptance/stage-2026-11-18-service-verification.md) |
 | 临时测试目录和缓存卷 | U4 清理曾被自动审批拒绝，U6/U7 台账也记录了保留的临时快照和卷 | 核对台账所列资源的归属和现存状态后再处理。[交付台账](acceptance/stage-2026-11-02-borrowing.md) |
@@ -31,3 +30,5 @@
 早期 42 项、R1–R5、R01–R09、N01–N41、最小架构/规模守卫和四项回植、独立审查首期与局部输入修正、监督总线/循环预算预警/dead-end/self-verify/intent anchor、服务可靠性、TUI A/B、A1–A5、U1–U7 均已有实现与交付证据。提交映射见[维护记录](../guides/maintenance.md)，各轮验证见[验收索引](acceptance/README.md)。原始审查中的“待处理”和旧交接中的“下一项”只属于原基线。
 
 11 月 18 日已交付本地验证绑定 PR 发布提交、pytest 范围审计及重复失败的结构化诊断。覆盖范围与仍待验收的场景见上表。[服务验证验收](acceptance/stage-2026-11-18-service-verification.md)
+
+11 月 27 日复现并修复了 Linux 进程回收测试的存活误判。早期 U6/U7 的 tree-service 失败缺少当时的进程状态，仍无法逐次归因。本次专项复跑通过，后续失败会保留断言所用的同一次状态采样。[进程回收专项验收](acceptance/stage-2026-11-27-process-cleanup.md)

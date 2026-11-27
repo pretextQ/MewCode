@@ -21,7 +21,18 @@ from mewcode.tools.bash import Bash, Params
 HELPER = Path(__file__).parent / "helpers" / "process_tree.py"
 
 
-def is_running(pid):
+def process_state(pid):
+    """Sample liveness and its diagnostic fields together, without argv or env."""
+    if sys.platform == "linux":
+        try:
+            fields = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
+        except (FileNotFoundError, ProcessLookupError):
+            return {"running": False, "state": "gone"}
+        state, parent, group, session = fields[:4]
+        # /proc can report a dead task as X before removing its entry.
+        return {"running": state not in {"Z", "X"}, "state": state,
+                "parent": parent, "group": group, "session": session}
+
     if os.name == "nt":
         import ctypes
         from ctypes import wintypes
@@ -33,21 +44,20 @@ def is_running(pid):
         kernel.CloseHandle.argtypes = [wintypes.HANDLE]
         handle = kernel.OpenProcess(0x100000, False, pid)
         if not handle:
-            return False
+            return {"running": False}
         try:
-            return kernel.WaitForSingleObject(handle, 0) == 258
+            return {"running": kernel.WaitForSingleObject(handle, 0) == 258}
         finally:
             kernel.CloseHandle(handle)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
-        return False
-    stat = Path(f"/proc/{pid}/stat")
-    try:
-        return not (stat.exists() and stat.read_text().rsplit(")", 1)[1].split()[0] == "Z")
-    except (FileNotFoundError, ProcessLookupError):
-        # The process can exit after the existence check or while reading /proc.
-        return False
+        return {"running": False}
+    return {"running": True}
+
+
+def is_running(pid):
+    return process_state(pid)["running"]
 
 
 async def wait_for_descendants(root):
@@ -58,11 +68,15 @@ async def wait_for_descendants(root):
         await asyncio.sleep(0.01)
 
 
-@pytest.mark.parametrize("error", [FileNotFoundError, ProcessLookupError])
-def test_process_exit_while_reading_stat(monkeypatch, error):
-    # Exercise both Linux /proc disappearance errors, including on Windows.
+@pytest.mark.parametrize(
+    ("exists", "error"),
+    [(True, FileNotFoundError), (True, ProcessLookupError), (False, FileNotFoundError)],
+)
+def test_process_exit_while_probing_stat(monkeypatch, exists, error):
+    # Exercise Linux's /proc exit races on both CI platforms.
     monkeypatch.setattr(sys.modules[__name__], "os", SimpleNamespace(name="posix", kill=lambda pid, sig: None))
-    monkeypatch.setattr(Path, "exists", lambda self: True)
+    monkeypatch.setattr(sys.modules[__name__], "sys", SimpleNamespace(platform="linux"))
+    monkeypatch.setattr(Path, "exists", lambda self: exists)
 
     def vanished(self):
         raise error("process exited during read")
@@ -71,29 +85,28 @@ def test_process_exit_while_reading_stat(monkeypatch, error):
     assert not is_running(12345)
 
 
+@pytest.mark.parametrize(("state", "running"), [("S", True), ("T", True), ("Z", False), ("X", False)])
+def test_linux_process_state(monkeypatch, state, running):
+    monkeypatch.setattr(sys.modules[__name__], "os", SimpleNamespace(name="posix", kill=lambda pid, sig: None))
+    monkeypatch.setattr(sys.modules[__name__], "sys", SimpleNamespace(platform="linux"))
+    monkeypatch.setattr(Path, "exists", lambda self: True)
+    monkeypatch.setattr(Path, "read_text", lambda self: f"12345 (test (child)) {state} 1 12345 12345")
+
+    assert is_running(12345) is running
+
+
 async def assert_reaped(root):
     pids = [int(p.read_text()) for p in root.glob("*.pid")]
     assert len(pids) == 3
     deadline = time.monotonic() + 2
-    while any(is_running(pid) for pid in pids) and time.monotonic() < deadline:
+    while True:
+        states = {pid: process_state(pid) for pid in pids}
+        running = any(state["running"] for state in states.values())
+        if not running or time.monotonic() >= deadline:
+            break
         await asyncio.sleep(0.02)
-    assert not any(is_running(pid) for pid in pids), process_states(pids)
+    assert not running, states
     assert not (root / "late-marker").exists()
-
-
-def process_states(pids):
-    """Failure-only evidence: PID/state/parent/group/session, never argv or env."""
-    states = {}
-    for pid in pids:
-        if os.name == 'nt':
-            states[pid] = {'running': is_running(pid)}
-        else:
-            try:
-                fields = Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()
-                states[pid] = dict(zip(('state', 'parent', 'group', 'session'), fields[:4], strict=True))
-            except (FileNotFoundError, ProcessLookupError):
-                states[pid] = {'state': 'gone'}
-    return states
 
 
 async def cleanup(root, task):

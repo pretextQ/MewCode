@@ -1,6 +1,6 @@
 # MewCode 文档
 
-更新于 2026-11-20。使用和配置见 [项目 README](../README.md)，运行契约见 [指南索引](../guides/README.md)。
+更新于 2026-11-27。使用和配置见 [项目 README](../README.md)，运行契约见 [指南索引](../guides/README.md)。
 
 ## 当前交付
 
@@ -36,7 +36,7 @@ U1–U7、A1–A5 与 TUI A/B 均已交付。U7 最终验收提交为 `51c38c78a
 
 ## 接手前必须知道
 
-U1 测试事故曾覆盖真实 `.mewcode/config.yaml`，仍未恢复且没有可靠备份；不能猜补或声称恢复。Linux tree-service 回收 timeout/cancel 曾偶发失败，根因未确认，后续 CI 通过不等于已修复。Windows/Linux GUI 终端人工验收尚未完成。部分临时测试目录和卷仍保留，未经核验不清理。完整边界及证据入口见[维护待办](backlog.md)。
+U1 测试事故曾覆盖真实 `.mewcode/config.yaml`，仍未恢复且没有可靠备份；不能猜补或声称恢复。Linux 进程回收测试已修正存活误判，两次早期 tree-service 失败仍缺少当时的进程状态，详见[专项验收](acceptance/stage-2026-11-27-process-cleanup.md)。Windows/Linux GUI 终端人工验收尚未完成。部分临时测试目录和卷仍保留，未经核验不清理。完整边界及证据入口见[维护待办](backlog.md)。
 
 没有新的真实模型预算；不读取真实配置或记忆，不自动启动用户 TUI。Windows/Linux 是目标平台，已确认黑色 TUI；macOS/iTerm2 不作为交付缺口。新任务先核对 Git、暂存区、远端和适用指令，保留并行修改；历史开发授权不自动授权下一项产品能力或本次远端推送。
 
