@@ -14,6 +14,8 @@
 
 U1–U7、A1–A5 与 TUI A/B 均已交付。U7 最终验收提交为 `51c38c78aa3c565a8ff1bee45242772356aea08a`，各项提交、CI 和平台结果见 [U1–U7 交付台账](acceptance/stage-2026-11-02-borrowing.md)。
 
+11 月 27 日使用脚本模型替身，完成真实 Docker Compose、Redis、GitHub PR 和 CI 的服务验收。验收过程中修正了 Git 忽略目录导致的差异收集失败。[服务真机验收](acceptance/stage-2026-11-27-service-live.md)
+
 | 工作线 | 已交付 | 使用与边界 |
 | --- | --- | --- |
 | CLI/TUI 与 Agent | 共享内核、黑色 TUI、F2 详情、请求配对、队友控制、类型化记忆、Windows 短启动器 | [TUI](../guides/tui.md) · [Agent 契约](../guides/agent-runtime.md) · [Windows 启动与恢复](../guides/tui.md#windows-终端启动和恢复) |
@@ -36,7 +38,7 @@ U1–U7、A1–A5 与 TUI A/B 均已交付。U7 最终验收提交为 `51c38c78a
 
 ## 接手前必须知道
 
-U1 测试事故曾覆盖真实 `.mewcode/config.yaml`，仍未恢复且没有可靠备份；不能猜补或声称恢复。Linux 进程回收测试已修正存活误判，两次早期 tree-service 失败仍缺少当时的进程状态，详见[专项验收](acceptance/stage-2026-11-27-process-cleanup.md)。Windows/Linux GUI 终端人工验收尚未完成。部分临时测试目录和卷仍保留，未经核验不清理。完整边界及证据入口见[维护待办](backlog.md)。
+U1 测试事故曾覆盖真实 `.mewcode/config.yaml`，仍未恢复且没有可靠备份；不能猜补或声称恢复。Linux 进程回收测试已修正存活误判，两次早期 tree-service 失败仍缺少当时的进程状态，详见[专项验收](acceptance/stage-2026-11-27-process-cleanup.md)。Linux XTerm 实窗检查已通过，Windows Terminal 仍有待人工确认的项目。部分临时测试目录和卷仍保留，未经核验不清理。[实窗验收记录](acceptance/stage-2026-11-27-terminal-gui.md) · [维护待办](backlog.md)
 
 没有新的真实模型预算；不读取真实配置或记忆，不自动启动用户 TUI。Windows/Linux 是目标平台，已确认黑色 TUI；macOS/iTerm2 不作为交付缺口。新任务先核对 Git、暂存区、远端和适用指令，保留并行修改；历史开发授权不自动授权下一项产品能力或本次远端推送。
 

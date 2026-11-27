@@ -322,7 +322,11 @@ class TestIgnoredPathsInDiff:
 
     @pytest.mark.asyncio
     async def test_diff_excludes_service_state(self, tmp_path: Path, demo_repo: Path):
-        from mewcode.service.execution import COMMIT_EXCLUDES
+        from mewcode.service.verification import SourceRevision, git_bytes
+
+        (demo_repo / ".gitignore").write_text(".mewcode/\n.pytest_cache/\n", encoding="utf-8")
+        _git(demo_repo, "add", ".gitignore")
+        _git(demo_repo, "commit", "-m", "ignore runtime directories")
 
         async with chain_env(tmp_path, demo_repo) as (store, chain, _runner, _):
             job = await make_job(store)
@@ -330,16 +334,19 @@ class TestIgnoredPathsInDiff:
             worktree = await manager.create(job.id, base_branch="HEAD")
 
             (Path(worktree.path) / "calc.py").write_text(CALC_FIXED, encoding="utf-8")
-            log_dir = Path(worktree.path) / ".mewcode"
-            log_dir.mkdir(exist_ok=True)
-            (log_dir / "debug.log").write_text("noise from the agent run\n", encoding="utf-8")
+            for relative in (".mewcode/debug.log", "package/.pytest_cache/receipt"):
+                artifact = Path(worktree.path) / relative
+                artifact.parent.mkdir(parents=True, exist_ok=True)
+                artifact.write_text("noise from the agent run\n", encoding="utf-8")
 
             changed, diff = await chain._collect_diff(job.id, worktree)
+            assert changed == ["calc.py"]
+            assert "noise from the agent run" not in diff
 
-        assert changed == ["calc.py"]
-        assert "debug.log" not in diff and "noise from the agent run" not in diff
-        # 提交侧用的是同一份路径清单（否则 body 与真实提交会对不上）
-        assert any(".mewcode" in spec for spec in COMMIT_EXCLUDES)
+            source = await SourceRevision.capture(worktree.path)
+            files = git_bytes(worktree.path, "ls-tree", "-r", "--name-only", source.tree).splitlines()
+            assert b"calc.py" in files
+            assert not any(b".mewcode" in path or b".pytest_cache" in path for path in files)
 
 
 # =========================================================================

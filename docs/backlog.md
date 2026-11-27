@@ -7,8 +7,8 @@
 | 事项 | 当前事实 | 后续处理与证据 |
 | --- | --- | --- |
 | U1 真实配置覆盖事故 | 测试未绑定临时注册表，覆盖真实 `.mewcode/config.yaml`；没有可靠备份，未原样恢复 | 不读取、猜补或用示例配置冒充恢复。只有获得可核实原件才讨论恢复；见[U1 事故记录](acceptance/stage-2026-11-02-borrowing.md#u1-实施记录) |
-| Windows/Linux GUI 终端人工验收 | 真实 ConPTY/POSIX PTY 自动检查已做；字体/全角字形、鼠标拖选、GUI resize/zoom 重绘与 scrollback 仍待人工 | 按[终端验收清单](acceptance/stage-2026-11-02-terminal.md#仍需实窗人工确认)在两平台记录；自动 PTY、Textual headless 和既有黑色外观认可不替代完整矩阵 |
-| 服务验证覆盖范围 | pytest 范围审计适用于可识别的单测命令。分布式收集和集成验证的前后范围在检查范围之外 | 11 月 18 日验收使用 GitHub API、集成验证和 Docker 传输替身。真实 Docker 集成依赖与真实 GitHub PR 仍待专项验收。[范围契约](../guides/service-reliability.md#pytest-验证范围) · [专项验收](acceptance/stage-2026-11-18-service-verification.md) |
+| Windows Terminal 实窗验收 | Linux XTerm 的五项实窗检查已通过。Windows 已记录实窗尺寸变化、停止与退出后控制台模式恢复 | Windows 的外观、鼠标拖选、重绘、历史滚动区和退出后中文恢复仍待实窗操作者确认。[实窗验收记录](acceptance/stage-2026-11-27-terminal-gui.md) |
+| 服务验证覆盖范围 | pytest 范围审计适用于可识别的单测命令。分布式收集和集成验证的前后范围在检查范围之外 | 真实 Docker、Redis、GitHub PR 和 CI 链路已验收一条样本。分布式收集和集成范围对照仍是各自的覆盖边界。[范围契约](../guides/service-reliability.md#pytest-验证范围) · [真机验收](acceptance/stage-2026-11-27-service-live.md) |
 | 临时测试目录和缓存卷 | U4 清理曾被自动审批拒绝，U6/U7 台账也记录了保留的临时快照和卷 | 核对台账所列资源的归属和现存状态后再处理。[交付台账](acceptance/stage-2026-11-02-borrowing.md) |
 | 独立审查效果 | 局部覆盖说明、语义评判及候选对比已实施；小样本未证明候选质量提升，大 diff 未完成 | 保留固定源码、原始响应、覆盖与逐条语义复核；正式效果基准及当前版本真实修复→远端 PR 演示需要另定范围与预算，见[比较验收](acceptance/next-stage-2026-10-30.md) |
 | 外部协议兼容性 | 当前 MCP 加载提供 `legacy`、`eager`、`dispatch` 和 `auto`。`native/tool_reference` 以及外部端点的 beta header、`reasoning_content` 行为还缺少独立的运行时验证 | 有实际端点需求时，按其协议与现有 thinking 行为验证。[MCP 加载指南](../guides/mcp-loading.md) · [原审查边界](review/README.md) |

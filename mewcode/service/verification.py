@@ -16,8 +16,9 @@ if TYPE_CHECKING:
 
 IGNORED_DIRS = (".mewcode", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache")
 COMMIT_EXCLUDES = tuple(
+    # Excluding only contents lets git add still match and reject the ignored directory itself.
     spec for name in IGNORED_DIRS
-    for spec in (f":(exclude,glob){name}/**", f":(exclude,glob)**/{name}/**")
+    for spec in (f":(exclude,glob)**/{name}", f":(exclude,glob)**/{name}/**")
 )
 REVISION_EVENT = "verification_revision"
 MAX_DIFF_CHARS = 60_000

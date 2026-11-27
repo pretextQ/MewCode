@@ -6,6 +6,8 @@
 
 | 阶段 | 报告 | 用途 |
 | --- | --- | --- |
+| 2026-11-27 服务真机 | [Docker、Redis 与 GitHub PR](stage-2026-11-27-service-live.md) | 告警到人审、验证源码树与发布 SHA、Git 忽略目录回归 |
+| 2026-11-27 终端实窗 | [Linux XTerm 与 Windows Terminal](stage-2026-11-27-terminal-gui.md) | 图形终端渲染、选择、缩放、scrollback 与退出恢复 |
 | 2026-11-27 进程回收 | [Linux 存活判定竞态](stage-2026-11-27-process-cleanup.md) | 复现测试误报、核对历史 CI、Linux 与 Windows 进程树专项 |
 | 2026-11-18 服务验证 | [本地验证与修复反馈](stage-2026-11-18-service-verification.md) | 发布版本绑定、pytest 范围、结构化重试反馈及主分支 CI 结果 |
 | 2026-11-02～03 U1–U7 | [逐项交付台账](stage-2026-11-02-borrowing.md) | 最终产品/验收 SHA、五作业 CI、U1 配置事故、Linux 回收及临时资源记录 |
